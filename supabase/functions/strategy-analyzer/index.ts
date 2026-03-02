@@ -9247,8 +9247,9 @@ serve(async (req) => {
           // Replaces binary 1.10% cliff with graduated soft penalty zones
           // Hard block only below structural floor (0.70%), soft penalties 0.70-1.10%
            const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
-          // HOISTED: atrPercent24h must be accessible in fallback strategy sections (lines 16600+)
-          let atrPercent24h = 0;
+           // HOISTED: atrPercent24h must be accessible in fallback strategy sections (lines 16600+)
+           // Using var instead of let to ensure function-scope accessibility across nested blocks
+           var atrPercent24h = 0;
           if (atrFilter?.ENABLED) {
             const currentPrice = trendData?.currentPrice || 0;
             const currentATR = trendData?.volatility?.atr ?? 0;
