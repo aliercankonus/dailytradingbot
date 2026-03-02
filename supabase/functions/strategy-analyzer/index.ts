@@ -5846,29 +5846,61 @@ serve(async (req) => {
           }
         }
 
-        // ============= FIX #2b: MOMENTUM STATE CONFIRMATION GATE =============
-        // Root cause: Multiple losses entered with momentum_state='none' — no trend backing
-        // Block entries when momentum has no confirmed state unless ADX shows extreme strength
+        // ============= FIX #2b: MOMENTUM STATE CONFIRMATION GATE (GRADUATED) =============
+        // Graduated from binary block to tiered sizing to capture transition-phase entries
+        // Key insight: ADX 18-23 + mixed momentum + rising ADX slope = transition zone, NOT dead zone
         // RALLY OVERRIDE: Skip this gate if rally conditions are met
         if (!rallyOverrideActive || !RALLY_OVERRIDE.BYPASSES_NO_MOMENTUM_STATE) {
           const momState = trendData?.momentum?.state || smartMomentum?.state || 'none';
-          // RELAXED: Was 35 → 25 — ADX 25-35 is common in early rallies and was blocking LONGs
-          const MIN_ADX_FOR_NO_MOMENTUM = 25;
+          const adxSlope = trendData?.volatility?.adxSlope ?? 0;
+          const adxRising = adxSlope > 0;
+          const emaSpreadRoC = smartMomentum?.emaSpreadRoC ?? 0;
+          
+          // Thresholds for graduated tiers
+          const HARD_BLOCK_ADX = 18;       // True dead zone — no trend energy at all
+          const TRANSITION_ADX = 20;        // Mixed + rising ADX = transition, allow reduced
+          const FULL_ALLOW_ADX = 25;        // Original threshold — full participation
           
           if (momState === 'none' || momState === 'mixed') {
-            if (adx < MIN_ADX_FOR_NO_MOMENTUM) {
-              const blockReason = `NO_MOMENTUM_STATE: ${derivedDirection.toUpperCase()} blocked — momentum_state='${momState}' (no trend backing), ADX=${adx.toFixed(1)} < ${MIN_ADX_FOR_NO_MOMENTUM}`;
+            // TIER 1: HARD BLOCK — genuine dead zone (none + ADX < 18)
+            if (momState === 'none' && adx < HARD_BLOCK_ADX) {
+              const blockReason = `NO_MOMENTUM_STATE: ${derivedDirection.toUpperCase()} blocked — momentum_state='none' (dead zone), ADX=${adx.toFixed(1)} < ${HARD_BLOCK_ADX}`;
               rejectedByHardGates++;
               perSymbolGateAttribution.set(symbol, { gate: 'NO_MOMENTUM_STATE', details: blockReason });
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
-                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, htfTrend4h },
+                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h },
                 trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
+            }
+            
+            // TIER 2: TRANSITION PROBE — mixed/none + ADX 18-25 + rising slope
+            if (adx < FULL_ALLOW_ADX) {
+              // Check for transition-aware exception: rising ADX + positive impulse signals = true transition
+              const hasTransitionSignals = adxRising && (smartMomentum.score > 0 || emaSpreadRoC > -0.02);
+              const hasStrongTransition = adxRising && adx >= TRANSITION_ADX && momState === 'mixed';
+              
+              if (hasStrongTransition || (hasTransitionSignals && adx >= HARD_BLOCK_ADX)) {
+                // Allow with reduced sizing — this is the transition capture zone
+                const multiplier = hasStrongTransition ? 0.40 : 0.30;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_STATE_GRADUATED: ${derivedDirection.toUpperCase()} allowed at ${(multiplier * 100).toFixed(0)}% — state='${momState}', ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, transition=${hasStrongTransition ? 'STRONG' : 'WEAK'}`);
+                (trendData as any).noMomentumStateMultiplier = multiplier;
+              } else {
+                // No transition signals — still block but log graduated reasoning
+                const blockReason = `NO_MOMENTUM_STATE: ${derivedDirection.toUpperCase()} blocked — momentum_state='${momState}', ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} (no transition signals)`;
+                rejectedByHardGates++;
+                perSymbolGateAttribution.set(symbol, { gate: 'NO_MOMENTUM_STATE', details: blockReason });
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
+                
+                await logRejectionWithAI(supabase, userId, symbol, blockReason,
+                  { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h },
+                  trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                continue;
+              }
             } else {
-              // High ADX exception: allow with 0.50x position (was 0.40x, relaxed to allow more participation)
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_STATE bypassed: ADX=${adx.toFixed(1)}>=${MIN_ADX_FOR_NO_MOMENTUM} — position at 50%`);
+              // TIER 3: ADX >= 25 — allow with moderate position
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_STATE bypassed: ADX=${adx.toFixed(1)}>=${FULL_ALLOW_ADX} — position at 50%`);
               (trendData as any).noMomentumStateMultiplier = 0.50;
             }
           }
