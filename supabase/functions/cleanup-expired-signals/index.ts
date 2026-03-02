@@ -105,22 +105,22 @@ Deno.serve(async (req) => {
       console.log(`Deleted ${heartbeatDeleted || 0} bot heartbeat records older than 7 days`);
     }
 
-    // Clean up signal_rejection_log - prune entries older than 48 hours
-    // Extended from 6h to 48h to enable forensic analysis of expansion episodes
-    console.log('Cleaning up signal_rejection_log table (keeping last 48h)...');
-    const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    // Clean up signal_rejection_log - prune entries older than 7 days
+    // Extended to 7 days to enable forensic analysis of expansion episodes and regime transitions
+    console.log('Cleaning up signal_rejection_log table (keeping last 7 days)...');
+    const sevenDaysAgoRejections = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     
     const { error: rejectionDeleteError, count: rejectionDeletedCount } = await supabase
       .from('signal_rejection_log')
       .delete({ count: 'exact' })
-      .lt('checked_at', fortyEightHoursAgo);
+      .lt('checked_at', sevenDaysAgoRejections);
 
     let rejectionLogsDeleted = 0;
     if (rejectionDeleteError) {
       console.error('Error deleting old rejection logs:', rejectionDeleteError);
     } else {
       rejectionLogsDeleted = rejectionDeletedCount || 0;
-      console.log(`Deleted ${rejectionLogsDeleted} rejection logs older than 48h`);
+      console.log(`Deleted ${rejectionLogsDeleted} rejection logs older than 7 days`);
     }
 
     // ============================================================
