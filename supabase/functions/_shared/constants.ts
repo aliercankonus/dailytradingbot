@@ -8011,8 +8011,8 @@ export const MOMENTUM_SCORE_COMPONENTS = {
   TRANSITION_REQUIRE_NARROWING: true, // Only bonus when spread < 0 AND RoC > 0 (or vice versa)
   // v2.0: PRICE IMPULSE FACTOR — fast price moves that precede EMA crossover
   PRICE_IMPULSE_MAX: 12,              // Max impulse bonus points
-  PRICE_IMPULSE_LOOKBACK: 6,          // Look back N bars for price change
-  PRICE_IMPULSE_ATR_THRESHOLD: 1.5,   // Min impulse ratio (priceChange/ATR) to qualify
+  PRICE_IMPULSE_LOOKBACK: 8,          // Look back N bars for price change (increased from 6 for 4H coverage)
+  PRICE_IMPULSE_ATR_THRESHOLD: 1.0,   // Min impulse ratio (priceChange/ATR) to qualify (reduced from 1.5 for earlier trigger)
   PRICE_IMPULSE_SCALE: 5,             // Points per ATR of impulse
   // Direction determination
   BULLISH_THRESHOLD: 15,   // Reduced from 20 — transition zone should reach bullish easier
