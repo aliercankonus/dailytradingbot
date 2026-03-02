@@ -5780,37 +5780,68 @@ serve(async (req) => {
           }
         }
 
-        // ============= FIX #1: OPPOSING SMART MOMENTUM HARD BLOCK =============
-        // Root cause: System entered shorts when smartMomentum.score was actively bullish (+38, +48)
-        // This is a stronger check than MOMENTUM_DIRECTION_HARD_GATE — it uses the raw polarity
-        // of smartMomentum to ensure we never trade AGAINST active momentum energy
+        // ============= FIX #1: OPPOSING SMART MOMENTUM — GRADUATED GATE =============
+        // v2.0: Transition-aware graduated sizing instead of binary hard block
+        // Root cause: Momentum engine lags direction engine during fast reversals (EMA structural lag)
+        // Solution: Only hard-block STRONG opposing momentum; use reduced sizing for moderate/transition zones
         // RALLY OVERRIDE: Skip this gate if rally conditions are met (unless explicitly not bypassed)
         if (!rallyOverrideActive || !RALLY_OVERRIDE.BYPASSES_OPPOSING_SMART_MOMENTUM) {
           const momScore = smartMomentum.score;
-          const OPPOSING_THRESHOLD = 15; // Block if momentum > +15 for SHORT, < -15 for LONG
-          const isOpposingShort = derivedDirection === 'short' && momScore > OPPOSING_THRESHOLD;
-          const isOpposingLong = derivedDirection === 'long' && momScore < -OPPOSING_THRESHOLD;
+          const momPhase = smartMomentum.phase || 'neutral';
+          const isTransitioning = smartMomentum.isTransitioning || false;
+          
+          // Graduated thresholds (replaces binary -15 threshold)
+          const HARD_BLOCK_THRESHOLD = 50;     // |score| >= 50: strong opposing = hard block
+          const REDUCED_SIZE_THRESHOLD = 25;   // |score| 25-50: moderate opposing = 0.35x sizing
+          const PROBE_SIZE_THRESHOLD = 15;     // |score| 15-25: mild opposing = 0.50x sizing
+          
+          const isOpposingShort = derivedDirection === 'short' && momScore > PROBE_SIZE_THRESHOLD;
+          const isOpposingLong = derivedDirection === 'long' && momScore < -PROBE_SIZE_THRESHOLD;
           
           if (isOpposingShort || isOpposingLong) {
+            const absMomScore = Math.abs(momScore);
+            
             // Exception: Very high ADX (>= 40) with HTF alignment allows reduced position
             const htfAligned = (derivedDirection === 'short' && htfTrend4h === 'bearish') ||
                                (derivedDirection === 'long' && htfTrend4h === 'bullish');
             const adxException = adx >= 40 && htfAligned;
             
-            if (!adxException) {
-              const blockReason = `OPPOSING_SMART_MOMENTUM: ${derivedDirection.toUpperCase()} blocked — smartMomentum=${momScore.toFixed(0)} (${momScore > 0 ? 'bullish' : 'bearish'} energy opposes ${derivedDirection}), ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`;
+            // Transition exception: if momentum is transitioning toward trade direction, soften further
+            const transitionException = isTransitioning && (
+              (derivedDirection === 'long' && (momPhase === 'transition_up' || momPhase === 'neutral')) ||
+              (derivedDirection === 'short' && (momPhase === 'transition_down' || momPhase === 'neutral'))
+            );
+            
+            if (absMomScore >= HARD_BLOCK_THRESHOLD && !adxException && !transitionException) {
+              // TIER 1: HARD BLOCK — strong opposing momentum (|score| >= 50)
+              const blockReason = `OPPOSING_SMART_MOMENTUM: ${derivedDirection.toUpperCase()} blocked — smartMomentum=${momScore.toFixed(0)} (strong ${momScore > 0 ? 'bullish' : 'bearish'} energy opposes ${derivedDirection}), ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}, phase=${momPhase}`;
               rejectedByHardGates++;
               perSymbolGateAttribution.set(symbol, { gate: 'OPPOSING_SMART_MOMENTUM', details: blockReason });
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
-                { gate: 'OPPOSING_SMART_MOMENTUM', derivedDirection, smartMomentumScore: momScore, adx, htfTrend4h, htfTrend1h, threshold: OPPOSING_THRESHOLD },
+                { gate: 'OPPOSING_SMART_MOMENTUM', derivedDirection, smartMomentumScore: momScore, absMomScore, adx, htfTrend4h, htfTrend1h, threshold: HARD_BLOCK_THRESHOLD, phase: momPhase, isTransitioning },
                 trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
-            } else {
+            } else if (adxException) {
               // ADX exception: allow with 0.30x position
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ OPPOSING_SMART_MOMENTUM bypassed: ADX=${adx.toFixed(1)}>=40 + 4h=${htfTrend4h} — position at 30%`);
               (trendData as any).opposingMomentumMultiplier = 0.30;
+            } else if (transitionException) {
+              // TRANSITION EXCEPTION: momentum transitioning toward trade direction
+              const transMultiplier = absMomScore >= REDUCED_SIZE_THRESHOLD ? 0.35 : 0.50;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔄 OPPOSING_MOMENTUM_TRANSITION: phase=${momPhase} isTransitioning=true, score=${momScore.toFixed(0)} — allowing ${(transMultiplier * 100).toFixed(0)}% position`);
+              (trendData as any).opposingMomentumMultiplier = transMultiplier;
+            } else if (absMomScore >= REDUCED_SIZE_THRESHOLD) {
+              // TIER 2: REDUCED SIZE — moderate opposing (|score| 25-50)
+              const multiplier = 0.35;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ OPPOSING_MOMENTUM_REDUCED: score=${momScore.toFixed(0)} (25-50 zone), phase=${momPhase} — allowing ${(multiplier * 100).toFixed(0)}% position`);
+              (trendData as any).opposingMomentumMultiplier = multiplier;
+            } else {
+              // TIER 3: PROBE SIZE — mild opposing (|score| 15-25)
+              const multiplier = 0.50;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ℹ️ OPPOSING_MOMENTUM_PROBE: score=${momScore.toFixed(0)} (15-25 zone), phase=${momPhase} — allowing ${(multiplier * 100).toFixed(0)}% position`);
+              (trendData as any).opposingMomentumMultiplier = multiplier;
             }
           }
         }
