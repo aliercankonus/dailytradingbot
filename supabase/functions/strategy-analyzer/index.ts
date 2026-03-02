@@ -936,8 +936,9 @@ const validateSignalTypeRequirements = (
   const adx = trendData?.volatility?.adx || 0;
   const adxSlope = trendData?.volatility?.adxSlope || 0;
   const momentum = trendData?.momentum || {};
-  const momentumScore = momentum?.momentumScore || 0;
-  const macdSlope = momentum?.macdSlope || 0;
+  // FIX: Smart Momentum is stored at trendData.smartMomentum.score, NOT trendData.momentum.momentumScore
+  const momentumScore = trendData?.smartMomentum?.score ?? momentum?.momentumScore ?? 0;
+  const macdSlope = trendData?.smartMomentum?.components?.macdSlope ?? momentum?.macdSlope ?? 0;
   const regime = trendData?.regime?.regime || 'RANGING';
   const bbSqueeze = trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
   
@@ -1080,8 +1081,9 @@ const checkHardContradictions = (
   
   const config = SIGNAL_TYPE_VALIDITY_PARAMS.HARD_CONTRADICTIONS;
   const momentum = trendData?.momentum || {};
-  const momentumScore = momentum?.momentumScore || 0;
-  const macdSlope = momentum?.macdSlope || 0;
+  // FIX: Same path fix as validateSignalTypeRequirements — read from smartMomentum first
+  const momentumScore = trendData?.smartMomentum?.score ?? momentum?.momentumScore ?? 0;
+  const macdSlope = trendData?.smartMomentum?.components?.macdSlope ?? momentum?.macdSlope ?? 0;
   const adx = trendData?.volatility?.adx || 0;
   
   // CHECK 1: Momentum Direction Contradiction
