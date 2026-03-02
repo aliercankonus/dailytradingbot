@@ -986,7 +986,9 @@ const validateSignalTypeRequirements = (
   if (isMeanReversion) {
     const config = SIGNAL_TYPE_VALIDITY_PARAMS.MEAN_REVERSION;
     const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
-    const stochRsi = momentum?.stochRsi || momentum?.stochRsiK || 50;
+    // FIX: StochRSI was reading from trendData.momentum (always 50 fallback)
+    // Correct path: trendData.stochasticRsi['4h'].k (consistent with gate layer)
+    const stochRsi = trendData?.stochasticRsi?.['4h']?.k ?? trendData?.stochasticRsi?.['1h']?.k ?? momentum?.stochRsiK ?? 50;
     
     // Requirement 1: ADX must NOT be too high (strong trends crush reversals)
     if (adx > config.MAX_ADX) {
