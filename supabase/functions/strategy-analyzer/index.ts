@@ -4802,6 +4802,42 @@ serve(async (req) => {
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (effective): ${fourStateRegime.regime}, confidence=${fourStateRegime.regimeConfidence}${fourStateRegime.isTransitionZone ? ' [TRANSITION]' : ''}`);
         logger.forSymbol(symbol).info(`   → allowContinuation=${fourStateRegime.allowContinuation}, allowMR=${fourStateRegime.allowMeanReversion}, posMultiplier=${fourStateRegime.positionMultiplier.toFixed(2)}`);
         
+        // ============= EXPANSION DIAGNOSTIC LOGGING =============
+        // Log detailed diagnostics when TREND_EXPANSION or BREAKOUT_SETUP detected
+        // This enables forensic analysis of why entries are blocked during expansion episodes
+        if (fourStateRegime.regime === 'TREND_EXPANSION' || fourStateRegime.regime === 'BREAKOUT_SETUP') {
+          const diagMomState = earlySmartMomentum?.state || 'unknown';
+          const diagMomScore = earlySmartMomentum?.score ?? 0;
+          const diagDirConf = directionResult?.confidence ?? 0;
+          const diagStochK1h = stochRsiK1h?.toFixed(1) ?? '?';
+          const diagStochK4h = stochK4hForRegime?.toFixed(1) ?? '?';
+          const diagRegimeAge = regimeAgeBySymbol.get(symbol) || 0;
+          const diagPersisted = persistenceResult.reason.includes('PERSISTED') ? 'YES' : 'NO';
+          
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.GATE} 🔬 EXPANSION_DIAGNOSTIC: regime=${fourStateRegime.regime} | ` +
+            `dir=${derivedDirection} dirConf=${diagDirConf}% | ` +
+            `momState=${diagMomState} momScore=${diagMomScore} | ` +
+            `ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | ` +
+            `K1h=${diagStochK1h} K4h=${diagStochK4h} | ` +
+            `regimeAge=${diagRegimeAge} persisted=${diagPersisted} | ` +
+            `posMult=${fourStateRegime.positionMultiplier.toFixed(2)}`
+          );
+          
+          // Log which gates are likely to block this expansion entry
+          const potentialBlocks: string[] = [];
+          if (diagMomState === 'none' || diagMomState === 'mixed') potentialBlocks.push(`NO_MOMENTUM_STATE(${diagMomState})`);
+          if (adx < 25 && diagMomState !== 'confirmed') potentialBlocks.push(`ADX_LOW(${adx.toFixed(1)}<25)`);
+          if (derivedDirection === 'neutral') potentialBlocks.push('NEUTRAL_DIRECTION');
+          if (fourStateRegime.positionMultiplier <= 0) potentialBlocks.push('ZERO_SIZING');
+          
+          if (potentialBlocks.length > 0) {
+            logger.forSymbol(symbol).warn(
+              `${LOG_CATEGORIES.GATE} 🔬 EXPANSION_RISK: Likely blocks → ${potentialBlocks.join(', ')}`
+            );
+          }
+        }
+        
         // Collect effective regime for batch trend_snapshots update after loop
         symbolRegimeMap.set(symbol, fourStateRegime.regime);
         
@@ -17899,6 +17935,34 @@ serve(async (req) => {
         .map(([sym, { gate, details }]) => `${sym}:${gate}(${details || '-'})`)
         .join(' | ');
       logger.info(`🚧 GATE_SUMMARY: ${compactAttribution || 'NO_REJECTIONS'}`);
+      
+      // ===== EXPANSION EPISODE SUMMARY =====
+      // Track how many symbols are in expansion/breakout regimes and what's blocking them
+      const expansionSymbols: string[] = [];
+      const breakoutSymbols: string[] = [];
+      symbolRegimeMap.forEach((regime, sym) => {
+        if (regime === 'TREND_EXPANSION') expansionSymbols.push(sym);
+        if (regime === 'BREAKOUT_SETUP') breakoutSymbols.push(sym);
+      });
+      
+      if (expansionSymbols.length > 0 || breakoutSymbols.length > 0) {
+        const blockedExpansions = expansionSymbols.filter(s => perSymbolGateAttribution.has(s));
+        const blockedBreakouts = breakoutSymbols.filter(s => perSymbolGateAttribution.has(s));
+        
+        logger.info(`🔬 EXPANSION_SUMMARY: expansion=${expansionSymbols.length}(blocked=${blockedExpansions.length}) breakout=${breakoutSymbols.length}(blocked=${blockedBreakouts.length})`);
+        
+        // Detail which gates block expansion entries
+        for (const sym of [...blockedExpansions, ...blockedBreakouts]) {
+          const gate = perSymbolGateAttribution.get(sym);
+          if (gate) {
+            logger.warn(`🔬 EXPANSION_BLOCKED: ${sym} regime=${symbolRegimeMap.get(sym)} blocked_by=${gate.gate} details=${gate.details || '-'}`);
+          }
+        }
+        
+        if (blockedExpansions.length === expansionSymbols.length && expansionSymbols.length > 0) {
+          logger.warn(`🔬 ⚠️ ZERO_CAPTURE_ALERT: ALL ${expansionSymbols.length} expansion symbols blocked — 0% capture rate this cycle`);
+        }
+      }
     }
 
     // ===== HEARTBEAT & REGIME SUMMARY =====
@@ -18077,6 +18141,27 @@ serve(async (req) => {
               dominantGate: perSymbolGateAttribution.size > 0 
                 ? Array.from(perSymbolGateAttribution.values())[0]?.gate 
                 : null,
+              // Expansion capture diagnostics
+              expansionDiagnostics: (() => {
+                const expSyms: string[] = [];
+                const brkSyms: string[] = [];
+                const blockedDetails: Record<string, string> = {};
+                symbolRegimeMap.forEach((regime, sym) => {
+                  if (regime === 'TREND_EXPANSION') expSyms.push(sym);
+                  if (regime === 'BREAKOUT_SETUP') brkSyms.push(sym);
+                });
+                [...expSyms, ...brkSyms].forEach(sym => {
+                  const gate = perSymbolGateAttribution.get(sym);
+                  if (gate) blockedDetails[sym] = `${gate.gate}: ${gate.details || '-'}`;
+                });
+                return {
+                  expansionCount: expSyms.length,
+                  breakoutCount: brkSyms.length,
+                  blockedCount: Object.keys(blockedDetails).length,
+                  capturedCount: (expSyms.length + brkSyms.length) - Object.keys(blockedDetails).length,
+                  blockedDetails,
+                };
+              })(),
             },
           });
         

@@ -20,7 +20,7 @@ interface SignalRejection {
 }
 
 export const fetchSignalRejections = async (): Promise<SignalRejection[]> => {
-  const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const threeHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   
   const { data, error } = await supabase
     .from('signal_rejection_log')
