@@ -16,60 +16,31 @@ The **ADX Too Low** gate enforces a market energy floor, ensuring trades only oc
 
 ---
 
-## Gate Logic (Decision Tree)
+## Gate Logic (Decision Tree) — v1.3 Graduated Model
 
 ```
 START
   │
-  ├─ ADX < 18? ────────────────────────────── YES → HARD BLOCK (Tier 0)
+  ├─ ADX < 16? ────────────────────────────── YES → HARD BLOCK (Tier 0)
   │                                                  No exceptions. Structural no-trend.
   │
-  ├─ ADX 18–22 (Transitional Zone)?
-  │   │
-  │   ├─ Squeeze Expansion Exception?
-  │   │   ├─ BB Width < 20th percentile (compressed)
-  │   │   ├─ %B at band edge (≤20% or ≥80%)
-  │   │   ├─ Momentum state = 'building' or 'confirmed'
-  │   │   ├─ ADX Slope ≥ +0.05 (expanding)
-  │   │   └─ No MACD divergence ──────────── YES → PASS (0.65x size)
-  │   │
-  │   ├─ Early Ignition Exception?
-  │   │   ├─ Regime == EARLY_TREND
-  │   │   ├─ ADX Slope > 0 (rising)
-  │   │   ├─ 4H Confidence ≥ 55%
-  │   │   └─ 1H aligned with 4H ─────────── YES → PASS (0.70x size)
-  │   │
-  │   ├─ Mean Reversion Exception?
-  │   │   ├─ earlyMeanReversionSignal.detected
-  │   │   └─ earlyMeanReversionSignal.allowed ── YES → PASS (0.25x size)
-  │   │   NOTE: Tier 0.25 direction derivation passes ADX 18-22 via
-  │   │         ADX_TRANSITIONAL_BYPASS (regime gate deferred to ADX gate)
-  │   │
-  │   └─ No exception met? ───────────────── BLOCK
+  ├─ ADX 16–22 AND slope > 0? ─────────────── YES → GRADUATED PASS
+  │   │                                              (slope-dependent position sizing)
+  │   ├─ ADX 16–20 → 0.35x (Early Transition Probe)
+  │   └─ ADX 20–22 → 0.50x (Forming Trend)
   │
-  ├─ TRANSITION_EXPANSION Shadow Check (ADX 16-25)?
-  │   │   NOTE: This runs BEFORE the transitional zone but is SHADOW MODE ONLY
-  │   │   It logs what WOULD pass but does NOT allow trades yet.
+  ├─ ADX 16–22 AND slope ≤ 0?
+  │   │   (No graduated tier — fall through to exception checks)
   │   │
-  │   ├─ Regime == BREAKOUT_SETUP
-  │   ├─ ADX BETWEEN 16 AND 25
-  │   ├─ ADX Slope ≥ +0.5 (strongly rising)
-  │   ├─ |priceMove4h| ≥ 1.5%
-  │   ├─ Momentum direction aligned with derived direction
-  │   └─ Direction matches price move ─────── YES → SHADOW LOG (0.30x size)
-  │                                            Does NOT allow trade until shadow mode disabled
+  │   ├─ Squeeze Expansion Exception? ──────── YES → PASS (0.65x size)
+  │   ├─ Early Ignition Exception? ─────────── YES → PASS (0.70x size)
+  │   ├─ Mean Reversion Exception? ─────────── YES → PASS (0.25x size)
+  │   ├─ Early Trend Ignition? ─────────────── YES → PASS (0.35x size)
+  │   └─ No exception met? ─────────────────── BLOCK
   │
-  ├─ ADX ≥ Adaptive Threshold?
-  │   │
-  │   │   Threshold by Regime:
-  │   │   ├─ RANGE: 22
-  │   │   ├─ EARLY_TREND: 20
-  │   │   ├─ STRONG_TREND: 18
-  │   │   └─ EXHAUSTION: 20
-  │   │
-  │   └─ ADX ≥ threshold ────────────────── YES → PASS (1.0x size)
+  ├─ ADX ≥ 22 (Adaptive Threshold)? ────────── YES → PASS (1.0x size)
   │
-  └─ DEFAULT ────────────────────────────── BLOCK
+  └─ DEFAULT ────────────────────────────────── BLOCK
 ```
 
 ---

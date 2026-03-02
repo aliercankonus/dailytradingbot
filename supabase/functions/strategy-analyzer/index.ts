@@ -12862,8 +12862,9 @@ serve(async (req) => {
         }
         
         // ===== TIER 0: HARD FLOOR (NO EXCEPTIONS) =====
+        // v1.3: Lowered from 18 → 16 (graduated model)
         if (adx < ADX_GATE_V1_1.HARD_FLOOR) {
-          // Absolute block - no exceptions allowed below ADX 18
+          // Absolute block - no exceptions allowed below ADX 16
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { 
             gate: 'ADX_TOO_LOW', 
@@ -12871,7 +12872,7 @@ serve(async (req) => {
           });
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE (v1.1): ADX ${adx.toFixed(1)} below absolute floor ${ADX_GATE_V1_1.HARD_FLOOR} - structural no-trend`,
+            `HARD GATE (v1.3): ADX ${adx.toFixed(1)} below absolute floor ${ADX_GATE_V1_1.HARD_FLOOR} - structural no-trend`,
             { 
               gate: "ADX_TOO_LOW",
               tier: "TIER_0_HARD_FLOOR",
@@ -12880,20 +12881,17 @@ serve(async (req) => {
               regime: regime.regime,
               adxSlope: adxSlopeV11.toFixed(3),
               derivedDirection,
-              // NEW: Momentum context for ADX gate cognitive completeness
               momentumScore: smartMomentum?.score ?? 0,
               momentumDirection: smartMomentum?.direction ?? 'neutral',
               momentumState: momentum?.state ?? 'none',
-              // NEW: Mean reversion context - was it checked? Did it qualify?
               meanReversionChecked: true,
               meanReversionDetected: earlyMeanReversionSignal?.detected ?? false,
               meanReversionDirection: earlyMeanReversionSignal?.direction ?? null,
               meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
               meanReversionAllowed: earlyMeanReversionSignal?.allowed ?? false,
-              // v1.1 bypass hints
               bypassHints: {
                 needsADX: ADX_GATE_V1_1.HARD_FLOOR,
-                message: "No exceptions below ADX 18. Wait for market energy to build."
+                message: `No exceptions below ADX ${ADX_GATE_V1_1.HARD_FLOOR}. Wait for market energy to build.`
               }
             },
             trendData,
@@ -12901,6 +12899,39 @@ serve(async (req) => {
             earlyOrderFlowAnalysis
           );
           continue;
+        }
+        
+        // ===== GRADUATED ADX TIERS (v1.3) =====
+        // Slope-dependent position sizing replaces binary hard block for ADX 16-22
+        let graduatedAdxActive = false;
+        let graduatedAdxMultiplier = 1.0;
+        let graduatedAdxTier = '';
+        
+        if (ADX_GATE_V1_1.GRADUATED_TIERS?.ENABLED && adx < v11AdaptiveThreshold && adxSlopeV11 > 0) {
+          const gradTiers = ADX_GATE_V1_1.GRADUATED_TIERS;
+          
+          if (adx >= gradTiers.EARLY_TRANSITION.MIN_ADX && adx < gradTiers.EARLY_TRANSITION.MAX_ADX) {
+            // Tier 2: Early Transition Probe — ADX 16-20 with rising slope → 0.35x
+            graduatedAdxActive = true;
+            graduatedAdxMultiplier = gradTiers.EARLY_TRANSITION.POSITION_MULTIPLIER;
+            graduatedAdxTier = 'EARLY_TRANSITION';
+          } else if (adx >= gradTiers.FORMING_TREND.MIN_ADX && adx < gradTiers.FORMING_TREND.MAX_ADX) {
+            // Tier 3: Forming Trend — ADX 20-22 with rising slope → 0.50x
+            graduatedAdxActive = true;
+            graduatedAdxMultiplier = gradTiers.FORMING_TREND.POSITION_MULTIPLIER;
+            graduatedAdxTier = 'FORMING_TREND';
+          }
+          
+          if (graduatedAdxActive) {
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.SUCCESS} 📈 GRADUATED_ADX (v1.3): ADX=${adx.toFixed(1)} tier=${graduatedAdxTier} ` +
+              `slope=${adxSlopeV11.toFixed(3)} → ${(graduatedAdxMultiplier * 100).toFixed(0)}% position`
+            );
+            perSymbolGateAttribution.set(symbol, {
+              gate: `GRADUATED_ADX_${graduatedAdxTier}`,
+              details: `ADX=${adx.toFixed(1)} slope=${adxSlopeV11.toFixed(3)} → ${(graduatedAdxMultiplier * 100).toFixed(0)}% (graduated v1.3)`
+            });
+          }
         }
         
         // ===== FIX #1: TRANSITION_EXPANSION SHADOW CHECK =====
@@ -12990,8 +13021,8 @@ serve(async (req) => {
         // NOTE: transitionExpansionShadowTriggered is NOT used in gate logic while SHADOW_MODE=true
         // When SHADOW_MODE is set to false, add it to the bypass chain below
         
-        // ===== TRANSITIONAL ZONE (18-22): Only Squeeze or Early Ignition allowed =====
-        if (adx < v11AdaptiveThreshold) {
+        // ===== TRANSITIONAL ZONE (16-22): Exception checks when graduated tier didn't fire =====
+        if (adx < v11AdaptiveThreshold && !graduatedAdxActive) {
           // ADX below adaptive threshold - check for v1.1 exceptions
           const isInTransitionalZone = adx >= ADX_GATE_V1_1.TRANSITIONAL_MIN && adx < ADX_GATE_V1_1.TRANSITIONAL_MAX;
           
@@ -13214,10 +13245,19 @@ serve(async (req) => {
             );
             continue;
           }
-        } else {
+        } else if (!graduatedAdxActive) {
           // ADX >= adaptive threshold - normal pass (1.0x size)
           logger.forSymbol(symbol).debug(
-            `${LOG_CATEGORIES.SUCCESS} ADX_GATE_v1.1 PASS: ADX=${adx.toFixed(1)} >= ${v11AdaptiveThreshold} (regime=${regime.regime})`
+            `${LOG_CATEGORIES.SUCCESS} ADX_GATE_v1.3 PASS: ADX=${adx.toFixed(1)} >= ${v11AdaptiveThreshold} (regime=${regime.regime})`
+          );
+        }
+        // else: graduatedAdxActive=true — already logged and attributed above
+        
+        // ============= v1.3 GRADUATED ADX POSITION SIZE APPLICATION =============
+        if (graduatedAdxActive && graduatedAdxMultiplier < 1.0) {
+          reversalPositionMultiplier = Math.min(reversalPositionMultiplier, graduatedAdxMultiplier);
+          logger.forSymbol(symbol).info(
+            `${LOG_CATEGORIES.RISK} 📈 Graduated ADX (v1.3) ${graduatedAdxTier} - position size capped at ${(graduatedAdxMultiplier * 100).toFixed(0)}%`
           );
         }
         
