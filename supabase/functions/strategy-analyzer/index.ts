@@ -9163,7 +9163,19 @@ serve(async (req) => {
            {
              const primaryTrend = trendData?.primaryTrend || 'neutral';
              const momentumConfirms = trendData?.momentum?.confirms === true;
-             const qualityScore = 0; // Computed later in pipeline
+             // PRE-COMPUTE early quality estimate for bypass check (full quality computed later at strategy eval)
+             const earlyQualityFactors: QualityFactors = {
+               adxScore: getAdxScore(adx),
+               momentumScore: getMomentumScore(momentum, adx, smartAdxRising),
+               alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
+               technicalScore: getTechnicalScore(trendData, trend, symbol),
+               entryTimingScore: 10, // Conservative default before pullback analysis
+               volumeScore: sharedGetVolumeScore(trendData, trend),
+               orderFlowScore: 0,
+               confidencePenalty: getConfidencePenalty(confidence),
+               directionBonus: trend === "bearish" ? 3 : 0,
+             };
+             const { score: qualityScore } = calculateQualityScore(earlyQualityFactors);
              const isNeutralTrend = primaryTrend === 'neutral' || primaryTrend === 'ranging';
              const momentumState = trendData?.momentum?.state || 'none';
              const momScore = Math.abs(smartMomentum?.score ?? 0);
@@ -9235,10 +9247,12 @@ serve(async (req) => {
           // Replaces binary 1.10% cliff with graduated soft penalty zones
           // Hard block only below structural floor (0.70%), soft penalties 0.70-1.10%
            const atrFilter = RANGING_MARKET_PROTECTION.MIN_ATR_FILTER;
+          // HOISTED: atrPercent24h must be accessible in fallback strategy sections (lines 16600+)
+          let atrPercent24h = 0;
           if (atrFilter?.ENABLED) {
             const currentPrice = trendData?.currentPrice || 0;
             const currentATR = trendData?.volatility?.atr ?? 0;
-            const atrPercent24h = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
+            atrPercent24h = currentPrice > 0 ? (currentATR / currentPrice) * 100 : 0;
             const relativeATR = trendData?.volatility?.relativeATR ?? 0;
             
             // Calculate dynamic high threshold using 30-bar rolling average ATR%
