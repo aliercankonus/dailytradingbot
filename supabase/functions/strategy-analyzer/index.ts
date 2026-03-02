@@ -9157,23 +9157,20 @@ serve(async (req) => {
             }
           }
            
-           // ===== MOMENTUM CONFIRMATION GATE =====
-           // Two layers:
-           // 1. Neutral trend: requires momentum_confirms=true (48% win rate without it)
-           // 2. ANY trend: if mom_score=0 AND momentum_state=mixed, requires momentum_confirms=true
-           //    (directional label without actual momentum = false edge, caused ETHUSDT disasters)
+           // ===== MOMENTUM CONFIRMATION GATE (GRADUATED v2) =====
+           // Graduated from binary block to tiered sizing for transition-phase capture
+           // Key insight: neutral primaryTrend + rising ADX = transition phase, not dead zone
            {
              const primaryTrend = trendData?.primaryTrend || 'neutral';
              const momentumConfirms = trendData?.momentum?.confirms === true;
-              // Note: Entry quality is computed later in the pipeline (line ~14290),
-              // so at this gate stage we default to 0. The quality bypass (>=80) 
-              // will only apply if we move this gate after quality computation.
-              const qualityScore = 0;
+             const qualityScore = 0; // Computed later in pipeline
              const isNeutralTrend = primaryTrend === 'neutral' || primaryTrend === 'ranging';
              const momentumState = trendData?.momentum?.state || 'none';
              const momScore = Math.abs(smartMomentum?.score ?? 0);
+             const adxSlope = trendData?.volatility?.adxSlope ?? 0;
+             const adxRising = adxSlope > 0;
              
-             // Layer 2: Zero-momentum mixed-state check (applies to ALL trends including bearish/bullish)
+             // Layer 2: Zero-momentum mixed-state check (applies to ALL trends)
              const isZeroMomentumMixed = momScore === 0 && momentumState === 'mixed';
              
              const shouldBlock = (isNeutralTrend && !momentumConfirms) || (isZeroMomentumMixed && !momentumConfirms);
@@ -9183,15 +9180,35 @@ serve(async (req) => {
                  ? `ZERO_MOMENTUM_MIXED` 
                  : `NEUTRAL_REGIME`;
                
-               // Allow if quality >= 80 (strong structural setup can overcome)
+               // === GRADUATION TIERS ===
+               
+               // TIER 0: Quality bypass (quality >= 80)
                if (qualityScore >= 80) {
                  logger.forSymbol(symbol).info(
                    `${LOG_CATEGORIES.GATE} 🔓 MOMENTUM_GATE_BYPASS: ${gateReason} trend=${primaryTrend}, mom_state=${momentumState}, mom_score=${momScore}, momentum_confirms=false BUT quality=${qualityScore} >= 80 → allowing with reduced size`
                  );
                  rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, 0.50);
-               } else {
+               }
+               // TIER 1: Transition probe — neutral trend + ADX rising + score > 0 = expansion forming
+               else if (isNeutralTrend && adxRising && momScore > 0 && adx >= 20) {
+                 const multiplier = 0.40;
+                 logger.forSymbol(symbol).info(
+                   `${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_EDGE_GRADUATED: ${gateReason} — primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, mom_score=${momScore} > 0 → transition probe at ${(multiplier * 100).toFixed(0)}%`
+                 );
+                 (trendData as any).noMomentumEdgeMultiplier = multiplier;
+               }
+               // TIER 2: Weak transition — neutral + ADX rising but score=0 or ADX < 20
+               else if (isNeutralTrend && adxRising && adx >= 18) {
+                 const multiplier = 0.30;
+                 logger.forSymbol(symbol).info(
+                   `${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_EDGE_GRADUATED: ${gateReason} — primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, mom_score=${momScore} → weak transition at ${(multiplier * 100).toFixed(0)}%`
+                 );
+                 (trendData as any).noMomentumEdgeMultiplier = multiplier;
+               }
+               // TIER 3: Hard block — no transition signals, genuine dead zone
+               else {
                  rejectedByHardGates++;
-                 const blockReason = `NO_MOMENTUM_EDGE: ${gateReason} — primaryTrend=${primaryTrend}, momentum_confirms=false, mom_score=${momScore}, mom_state=${momentumState}, quality=${qualityScore} < 80 → directional label without momentum backing`;
+                 const blockReason = `NO_MOMENTUM_EDGE: ${gateReason} — primaryTrend=${primaryTrend}, momentum_confirms=false, mom_score=${momScore}, mom_state=${momentumState}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} → no transition signals`;
                  perSymbolGateAttribution.set(symbol, { gate: 'NO_MOMENTUM_EDGE', details: blockReason });
                  
                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
@@ -9206,7 +9223,8 @@ serve(async (req) => {
                    momentumScore: momScore,
                    qualityScore,
                    adx: adx.toFixed(1),
-                   wouldPassWith: 'momentum_confirms=true OR quality_score >= 80 OR momentum_score > 0',
+                   adxSlope: adxSlope.toFixed(2),
+                   wouldPassWith: 'momentum_confirms=true OR quality_score >= 80 OR (ADX_rising + ADX >= 18)',
                  }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                  continue;
                }
@@ -17497,18 +17515,21 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ LOW CONFIDENCE STANDARD (${entryConfidence} < ${LOW_CONFIDENCE_STANDARD_EXIT.MAX_CONFIDENCE}) - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}% (${(lowConfMultiplier * 100).toFixed(0)}% multiplier, gray zone de-risk)`);
         }
         
-        // Step 24b: Apply opposing smart momentum bypass reduction (30%)
+        // Step 24b-c: Apply momentum gate multipliers using Math.min (NOT multiply)
+        // Prevents double-scaling: e.g., opposing 0.35 × noMomState 0.30 = 0.105 is too small
+        // Instead, take the most restrictive single gate multiplier
         const opposingMomMultiplier = (trendData as any).opposingMomentumMultiplier ?? 1.0;
-        if (opposingMomMultiplier < 1.0) {
-          positionSizeMultiplier *= opposingMomMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ OPPOSING SMART MOMENTUM bypass - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
-        }
-        
-        // Step 24c: Apply no-momentum-state bypass reduction (40%)
         const noMomStateMultiplier = (trendData as any).noMomentumStateMultiplier ?? 1.0;
-        if (noMomStateMultiplier < 1.0) {
-          positionSizeMultiplier *= noMomStateMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NO MOMENTUM STATE bypass - position size reduced to ${(positionSizeMultiplier * 100).toFixed(0)}%`);
+        const noMomEdgeMultiplier = (trendData as any).noMomentumEdgeMultiplier ?? 1.0;
+        const mostRestrictiveMomMultiplier = Math.min(opposingMomMultiplier, noMomStateMultiplier, noMomEdgeMultiplier);
+        
+        if (mostRestrictiveMomMultiplier < 1.0) {
+          positionSizeMultiplier *= mostRestrictiveMomMultiplier;
+          const sources: string[] = [];
+          if (opposingMomMultiplier < 1.0) sources.push(`opposing=${(opposingMomMultiplier * 100).toFixed(0)}%`);
+          if (noMomStateMultiplier < 1.0) sources.push(`noMomState=${(noMomStateMultiplier * 100).toFixed(0)}%`);
+          if (noMomEdgeMultiplier < 1.0) sources.push(`noMomEdge=${(noMomEdgeMultiplier * 100).toFixed(0)}%`);
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ MOMENTUM GATES (Math.min): ${sources.join(', ')} → applied ${(mostRestrictiveMomMultiplier * 100).toFixed(0)}% (most restrictive)`);
         }
         
         // Step 24d: Apply rally override position multiplier (65-80%)
