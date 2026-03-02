@@ -4806,7 +4806,7 @@ serve(async (req) => {
         // Log detailed diagnostics when TREND_EXPANSION or BREAKOUT_SETUP detected
         // This enables forensic analysis of why entries are blocked during expansion episodes
         if (fourStateRegime.regime === 'TREND_EXPANSION' || fourStateRegime.regime === 'BREAKOUT_SETUP') {
-          const diagMomState = earlySmartMomentum?.state || 'unknown';
+          const diagMomState = earlySmartMomentum?.direction || 'unknown';
           const diagMomScore = earlySmartMomentum?.score ?? 0;
           const diagDirConf = directionResult?.confidence ?? 0;
           const diagStochK1h = extractStochRsiK(trendData, '1h')?.toFixed(1) ?? '?';
