@@ -90,13 +90,35 @@ export const ADX_GATE_V1_1 = {
   ENABLED: true,
   
   // ===== TIER 0: ABSOLUTE FLOOR (NO EXCEPTIONS) =====
-  // ADX < 18 = structural no-trend, hard block
-  HARD_FLOOR: 18,
+  // ADX < 16 = structural no-trend, hard block
+  // v1.3: Lowered from 18 → 16 as part of graduated ADX model
+  HARD_FLOOR: 16,
   
-  // ===== TRANSITIONAL ZONE (18-22) =====
-  // Only 2 exception paths allowed: Squeeze Expansion + Early Ignition
-  // CRITICAL FIX v1.2: Only ONE bypass allowed per signal (prevents over-admission)
-  TRANSITIONAL_MIN: 18,
+  // ===== GRADUATED ADX TIERS (v1.3) =====
+  // Replaces binary hard block with slope-dependent position sizing
+  // Philosophy: ADX 16-22 is "forming energy" not "dead market"
+  GRADUATED_TIERS: {
+    ENABLED: true,
+    // Tier 2: Early Transition Probe (ADX 16-20 with rising slope)
+    EARLY_TRANSITION: {
+      MIN_ADX: 16,
+      MAX_ADX: 20,
+      MIN_SLOPE: 0,       // strictly > 0 (rising)
+      POSITION_MULTIPLIER: 0.35,
+    },
+    // Tier 3: Forming Trend (ADX 20-22 with rising slope)
+    FORMING_TREND: {
+      MIN_ADX: 20,
+      MAX_ADX: 22,
+      MIN_SLOPE: 0,       // strictly > 0 (rising)
+      POSITION_MULTIPLIER: 0.50,
+    },
+  },
+  
+  // ===== TRANSITIONAL ZONE (16-22) =====
+  // Exception paths: Squeeze Expansion, Early Ignition, MR, ETI
+  // These fire when graduated slope condition is NOT met (slope <= 0)
+  TRANSITIONAL_MIN: 16,
   TRANSITIONAL_MAX: 22,
   
   // BYPASS PRIORITY ORDER (only highest-priority applicable bypass fires)
