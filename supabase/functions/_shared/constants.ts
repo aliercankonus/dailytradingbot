@@ -14,7 +14,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // [1] INDICATOR THRESHOLDS — Raw numeric boundaries for technical indicators
 // ═══════════════════════════════════════════════════════════════════════════════
-//   ADX_THRESHOLDS ..................... L319   ADX level classifications (WEAK→EXTREME)
+//   ADX_THRESHOLDS ..................... L319   ADX level classifications (WEAK→PARABOLIC)
 //   ADX_PHASES ........................ L630   ADX phase classification (RANGE/TRANSITION/TRENDING)
 //   ADX_EXHAUSTION_PARAMS ............. L642   ADX exhaustion detection (slope decay)
 //   STOCHRSI_THRESHOLDS ............... L681   StochRSI level classifications
