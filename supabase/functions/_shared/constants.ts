@@ -1427,6 +1427,42 @@ export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   DEFER_TO_TRAILING_AT: 2.75,
 } as const;
 
+// ============= PROGRESSIVE LOCK PERCENT PARAMETERS =============
+// Dynamic profit lock percentage based on peak P&L and aggressiveness setting
+// Used by getProgressiveLockPercent() in exit-strategies.ts
+export const PROGRESSIVE_LOCK_PERCENT_PARAMS = {
+  BASE_LOCK: 0.30,           // Base lock percentage
+  AGGR_MULTIPLIER: 0.05,     // Per-aggressiveness-level increment
+  MAX_CAP: 0.85,             // Maximum lock percentage cap
+  // Tier bonuses: when peakPnl >= threshold, add bonus to lock
+  TIERS: [
+    { peakThreshold: 5, bonus: 0.30 },
+    { peakThreshold: 3, bonus: 0.20 },
+    { peakThreshold: 2, bonus: 0.15 },
+    { peakThreshold: 1, bonus: 0.10 },
+  ],
+} as const;
+
+// ============= STALE PEAK BONUS PARAMETERS =============
+// Extra lock tightening when peak hasn't been refreshed for a while
+// Used by getStalePeakBonus() in exit-strategies.ts
+export const STALE_PEAK_BONUS_PARAMS = {
+  // Sorted descending: first match wins
+  TIERS: [
+    { minutesSincePeak: 120, bonus: 0.25 },
+    { minutesSincePeak: 60, bonus: 0.20 },
+    { minutesSincePeak: 30, bonus: 0.10 },
+    { minutesSincePeak: 15, bonus: 0.05 },
+  ],
+} as const;
+
+// ============= MODERATE EXHAUSTION EXIT PARAMS =============
+// PnL threshold for moderate exhaustion invalidation exit
+export const MODERATE_EXHAUSTION_EXIT_PARAMS = {
+  // Max PnL to allow invalidation exit (prevents closing profitable trades)
+  MAX_PNL_FOR_INVALIDATION: 0.5,
+} as const;
+
 // Slippage buffer constants for stop loss calculations
 export const SLIPPAGE_PARAMS = {
   // Buffer added to break-even stop to ensure small profit after execution slippage
