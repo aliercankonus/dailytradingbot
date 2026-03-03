@@ -4160,8 +4160,14 @@ export const FOUR_STATE_REGIME = {
     POSITION_MULTIPLIER: 0.35,
     // Require neutral trend (otherwise normal breakout logic handles it)
     REQUIRE_NEUTRAL_TREND: true,
-    // ADX slope must be strictly rising
+    // ADX slope must be strictly rising for production
     MIN_ADX_SLOPE: 0,
+    // Shadow-only flat tolerance: micro-flat slopes (abs < threshold) are logged
+    // as shadow signals for A/B comparison. NOT used in production path.
+    SHADOW_FLAT_TOLERANCE: {
+      ENABLED: true,
+      MAX_ABS_SLOPE: 0.1,  // abs(slope) < 0.1 counts as "flat"
+    },
   },
   
   // ===== BREAKOUT SETUP =====

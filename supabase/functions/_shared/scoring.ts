@@ -5358,7 +5358,9 @@ export const classify4StateRegime = (
   
   // ===== IGNITION BYPASS: Centralized from FOUR_STATE_REGIME.IGNITION_BYPASS =====
   // Prevents textbook ignition-phase setups from being killed by RANGE_COMPRESSION.
-  const IB = R.IGNITION_BYPASS || { ENABLED: false, MIN_ADX: 20, MIN_MOMENTUM: 15, POSITION_MULTIPLIER: 0.35, MIN_ADX_SLOPE: 0 };
+  const IB = R.IGNITION_BYPASS || { ENABLED: false, MIN_ADX: 20, MIN_MOMENTUM: 15, POSITION_MULTIPLIER: 0.35, MIN_ADX_SLOPE: 0, SHADOW_FLAT_TOLERANCE: { ENABLED: false, MAX_ABS_SLOPE: 0.1 } };
+  
+  // Production ignition: strict slope > 0
   const allowIgnitionBypass = (
     IB.ENABLED &&
     trendIsNeutral &&
@@ -5367,6 +5369,33 @@ export const classify4StateRegime = (
     adxSlope > IB.MIN_ADX_SLOPE &&
     absMomentumScore >= IB.MIN_MOMENTUM
   );
+  
+  // Shadow-only flat tolerance: abs(slope) < 0.1 but slope <= 0
+  // This does NOT trigger production entry — only flagged in diagnostics for shadow logging
+  const SFT = IB.SHADOW_FLAT_TOLERANCE || { ENABLED: false, MAX_ABS_SLOPE: 0.1 };
+  const shadowIgnitionEligible = (
+    !allowIgnitionBypass &&  // Only when production bypass FAILS
+    SFT.ENABLED &&
+    IB.ENABLED &&
+    trendIsNeutral &&
+    adx >= IB.MIN_ADX &&
+    adx < R.RANGE_COMPRESSION.MAX_ADX &&
+    Math.abs(adxSlope) < SFT.MAX_ABS_SLOPE &&  // Micro-flat slope
+    adxSlope <= 0 &&  // Only negative-side flat (positive already passes production)
+    absMomentumScore >= IB.MIN_MOMENTUM
+  );
+  
+  // Add shadow ignition flag to diagnostics
+  diag.shadowIgnitionEligible = shadowIgnitionEligible;
+  if (shadowIgnitionEligible) {
+    diag.shadowIgnitionDetails = {
+      adx,
+      adxSlope,
+      absMomentumScore,
+      flatToleranceThreshold: SFT.MAX_ABS_SLOPE,
+      wouldHaveMultiplier: IB.POSITION_MULTIPLIER,
+    };
+  }
   
   if (allowIgnitionBypass) {
     return {
