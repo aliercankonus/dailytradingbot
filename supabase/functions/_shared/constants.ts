@@ -337,6 +337,8 @@ export const ADX_THRESHOLDS = {
   EXTREME: 40,
   // PHASE 1: ADX Phase State Machine thresholds
   EXHAUSTION: 45,  // ADX > 45 = exhaustion risk, increase reversal sensitivity
+  // Ultra-strong ADX: parabolic trend territory
+  PARABOLIC: 50,   // ADX >= 50 = parabolic trend, maximum gate relaxation
   // PHASE 1 FIX: Reversal override block threshold
   REVERSAL_BLOCK: 30,  // No reversals allowed when ADX >= 30 (strong trend)
   // V1.1: Absolute floor for ADX gate - no exceptions below this

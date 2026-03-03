@@ -2641,11 +2641,11 @@ serve(async (req) => {
       } else if (confidence1h && confidence1h >= 65) {
         // RELAXED: If 1h shows strong direction (≥65% confidence), allow lower threshold
         baseThreshold = QUALITY_THRESHOLDS.STRONG_1H_MIN;
-      } else if (adx >= 50) {
+      } else if (adx >= ADX_THRESHOLDS.PARABOLIC) {
         // NEW PHASE 2: Ultra-strong ADX (≥50) = ADX IS the quality confirmation
         // Very high trend strength proves the trade, lower threshold to 55
         baseThreshold = QUALITY_THRESHOLDS.ULTRA_STRONG_ADX_MIN;
-      } else if (adx >= 45) {
+      } else if (adx >= ADX_THRESHOLDS.EXHAUSTION) {
         // NEW PHASE 2: Very high ADX (≥45) = strong trend, lower threshold to 58
         baseThreshold = QUALITY_THRESHOLDS.VERY_HIGH_ADX_MIN;
       } else if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
@@ -2668,7 +2668,7 @@ serve(async (req) => {
       // 3. ADX is rising OR already >= 18 (trend is building/present)
       const hasGenuineMomentum = momentumScore >= 12;
       const hasExpandingMacd = macdExpanding;
-      const hasTrendEvidence = adxRising || adx >= 18;
+      const hasTrendEvidence = adxRising || adx >= ADX_THRESHOLDS.ABSOLUTE_FLOOR;
       
       const qualifiesForEarlyTrendException = hasGenuineMomentum && hasExpandingMacd && hasTrendEvidence;
       
@@ -3753,7 +3753,7 @@ serve(async (req) => {
               }
               return count;
             })();
-            const earlyRallyConditions = earlyRallyAlignedCount >= 3 && adx >= 20;
+            const earlyRallyConditions = earlyRallyAlignedCount >= 3 && adx >= ADX_THRESHOLDS.MINIMUM;
             const effectiveOverboughtThreshold = earlyRallyConditions ? 98 : DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
             
             if (earlyDirection === 'long' && earlyStochRsiK4h > effectiveOverboughtThreshold) {
@@ -3824,7 +3824,7 @@ serve(async (req) => {
                 // When Strong Trend Override fails but rally conditions are confirmed,
                 // allow a tiny micro-probe entry (0.15x) to participate in parabolic moves.
                 // Requirements: 3+ TF aligned, ADX >= 25, rally conditions met
-                const parabolicProbeEligible = earlyRallyConditions && adx >= 25 && earlySmartMomentum.score > 0;
+                const parabolicProbeEligible = earlyRallyConditions && adx >= ADX_THRESHOLDS.STRONG && earlySmartMomentum.score > 0;
                 
                 if (parabolicProbeEligible) {
                   // PARABOLIC RALLY MICRO-PROBE: Allow with very small size
@@ -4513,7 +4513,7 @@ serve(async (req) => {
         
         const hasAnyDirectionSource = hasDirectionOverride || earlyIgnitionEntryApplied;
         if (!directionResult.direction && !lateGrindAccepted && !hasAnyDirectionSource) {
-          const isAdxTransitional = adx >= 18 && adx <= 22;
+          const isAdxTransitional = adx >= ADX_THRESHOLDS.ABSOLUTE_FLOOR && adx <= ADX_THRESHOLDS.MODERATE;
           const htfConf4h = timeframes?.['4h']?.confidence ?? 0;
           const HTF_STRONG_TREND_THRESHOLD = 65;
           const htfNotStrong = htfConf4h < HTF_STRONG_TREND_THRESHOLD;
@@ -4564,7 +4564,7 @@ serve(async (req) => {
           
           // Score >= 0.15 = weak bias, allow probe entry
           // Score < 0.15 = true noise, hard block
-          if (absScore >= 0.15 && adx >= 15) {
+          if (absScore >= 0.15 && adx >= ADX_THRESHOLDS.WEAK) {
             weakDirectionProbeDirection = weightedScore > 0 ? 'long' : 'short';
             weakDirectionProbeApplied = true;
             
@@ -4833,7 +4833,7 @@ serve(async (req) => {
           // Log which gates are likely to block this expansion entry
           const potentialBlocks: string[] = [];
           if (diagMomState === 'none' || diagMomState === 'mixed') potentialBlocks.push(`NO_MOMENTUM_STATE(${diagMomState})`);
-          if (adx < 25 && diagMomState !== 'confirmed') potentialBlocks.push(`ADX_LOW(${adx.toFixed(1)}<25)`);
+          if (adx < ADX_THRESHOLDS.STRONG && diagMomState !== 'confirmed') potentialBlocks.push(`ADX_LOW(${adx.toFixed(1)}<${ADX_THRESHOLDS.STRONG})`);
           if (derivedDirection === 'neutral') potentialBlocks.push('NEUTRAL_DIRECTION');
           if (fourStateRegime.positionMultiplier <= 0) potentialBlocks.push('ZERO_SIZING');
           
@@ -4891,9 +4891,9 @@ serve(async (req) => {
           
           // FIX: ADX-graduated slope threshold — when ADX shows trend energy, allow more slope decay
           // ADX>=50: allow slope down to -0.50, ADX>=40: -0.35, ADX>=25: use HIGH_ENERGY_MAX_SLOPE
-          const effectiveHardBlockSlope = adx >= 50 ? -0.50 
-            : adx >= 40 ? -0.35 
-            : adx >= (AGE_DECAY.DYING_TREND_BLOCK?.HIGH_ENERGY_ADX_THRESHOLD ?? 25) ? (AGE_DECAY.DYING_TREND_BLOCK?.HIGH_ENERGY_MAX_SLOPE ?? -0.50)
+          const effectiveHardBlockSlope = adx >= ADX_THRESHOLDS.PARABOLIC ? -0.50 
+            : adx >= ADX_THRESHOLDS.EXTREME ? -0.35 
+            : adx >= (AGE_DECAY.DYING_TREND_BLOCK?.HIGH_ENERGY_ADX_THRESHOLD ?? ADX_THRESHOLDS.STRONG) ? (AGE_DECAY.DYING_TREND_BLOCK?.HIGH_ENERGY_MAX_SLOPE ?? -0.50)
             : AGE_DECAY.HARD_BLOCK_MAX_ADX_SLOPE; // default -0.30
           
           if (AGE_DECAY.HARD_BLOCK_ENABLED && 
@@ -5859,7 +5859,7 @@ serve(async (req) => {
             // Exception: Very high ADX (>= 40) with HTF alignment allows reduced position
             const htfAligned = (derivedDirection === 'short' && htfTrend4h === 'bearish') ||
                                (derivedDirection === 'long' && htfTrend4h === 'bullish');
-            const adxException = adx >= 40 && htfAligned;
+            const adxException = adx >= ADX_THRESHOLDS.EXTREME && htfAligned;
             
             // Transition exception: if momentum is transitioning toward trade direction, soften further
             const transitionException = isTransitioning && (
@@ -6143,7 +6143,7 @@ serve(async (req) => {
         );
         
         // Log ADX exhaustion analysis
-        if (fullAdxResult.adx >= 35) {
+        if (fullAdxResult.adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
           logger.forSymbol(symbol).info(`📊 ADX BEHAVIORAL: adx=${fullAdxResult.adx.toFixed(1)} slope=${fullAdxResult.adxSlope.toFixed(2)} peaked=${fullAdxResult.adxPeaked} diGap=${fullAdxResult.diGap.toFixed(1)}`);
           logger.forSymbol(symbol).info(`📊 EXHAUSTION CHECK: isExhausted=${adxExhaustion.isExhausted} isContinuation=${adxExhaustion.isContinuation} type=${adxExhaustion.exhaustionType} score=${adxExhaustion.exhaustionScore}`);
           if (adxExhaustion.reasons.length > 0) {
@@ -6356,7 +6356,7 @@ serve(async (req) => {
           
           // Only apply fallback if: enabled, regime is trending (not low-ADX), and fallback aligns with regime
           // Note: MasterMarketRegime doesn't include "RANGING" - use ADX < 20 as proxy for non-trending
-          const isRangingMarket = adx < 20 && (masterRegime.regime === "NORMAL" || masterRegime.regime === "STEALTH_DRIFT");
+          const isRangingMarket = adx < ADX_THRESHOLDS.MINIMUM && (masterRegime.regime === "NORMAL" || masterRegime.regime === "STEALTH_DRIFT");
           const canApplyFallback = COUNTER_TREND_PROTECTION.FALLBACK_TO_TREND_ALIGNED && 
                                    fallbackAligns && 
                                    (!COUNTER_TREND_PROTECTION.REQUIRE_TRENDING_REGIME || !isRangingMarket);
@@ -9257,7 +9257,7 @@ serve(async (req) => {
                  rangingMarketPositionMultiplier = Math.min(rangingMarketPositionMultiplier, 0.50);
                }
                // TIER 1: Transition probe — neutral trend + ADX rising + score > 0 = expansion forming
-               else if (isNeutralTrend && adxRising && momScore > 0 && adx >= 20) {
+               else if (isNeutralTrend && adxRising && momScore > 0 && adx >= ADX_THRESHOLDS.MINIMUM) {
                  const multiplier = 0.40;
                  logger.forSymbol(symbol).info(
                    `${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_EDGE_GRADUATED: ${gateReason} — primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, mom_score=${momScore} > 0 → transition probe at ${(multiplier * 100).toFixed(0)}%`
@@ -9265,7 +9265,7 @@ serve(async (req) => {
                  (trendData as any).noMomentumEdgeMultiplier = multiplier;
                }
                // TIER 2: Weak transition — neutral + ADX rising but score=0 or ADX < 20
-               else if (isNeutralTrend && adxRising && adx >= 18) {
+               else if (isNeutralTrend && adxRising && adx >= ADX_THRESHOLDS.ABSOLUTE_FLOOR) {
                  const multiplier = 0.30;
                  logger.forSymbol(symbol).info(
                    `${LOG_CATEGORIES.GATE} ⚠️ NO_MOMENTUM_EDGE_GRADUATED: ${gateReason} — primaryTrend=${primaryTrend}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, mom_score=${momScore} → weak transition at ${(multiplier * 100).toFixed(0)}%`
@@ -11437,7 +11437,7 @@ serve(async (req) => {
             const effectiveRegimeOS = fourStateRegime?.regime || currentRegime || 'UNKNOWN';
             const isStrongTrendRegimeOS = effectiveRegimeOS === 'STRONG_TREND' || effectiveRegimeOS === 'EARLY_TREND';
             const stochTurningUp = stochRsiK4h > stochRsiD4h;
-            const adxAllowsMRLong = adx < 40;
+            const adxAllowsMRLong = adx < ADX_THRESHOLDS.EXTREME;
             
             const canFlipToLong = stochTurningUp && !isStrongTrendRegimeOS && adxAllowsMRLong;
             
@@ -11501,7 +11501,7 @@ serve(async (req) => {
             const effectiveRegime = fourStateRegime?.regime || currentRegime || 'UNKNOWN';
             const isStrongTrendRegime = effectiveRegime === 'STRONG_TREND' || effectiveRegime === 'EARLY_TREND';
             const stochTurningDown = stochRsiK4h < stochRsiD4h;
-            const adxAllowsMRShort = adx < 40;
+            const adxAllowsMRShort = adx < ADX_THRESHOLDS.EXTREME;
             
             const canFlipToShort = stochTurningDown && !isStrongTrendRegime && adxAllowsMRShort;
             
@@ -12369,7 +12369,7 @@ serve(async (req) => {
           // FIX: Lowered from ADX>=50 to ADX>=45 to match parabolic mode activation
           // Parabolic mode activates at 45, so bypass should too — prevents contradiction
           const veryHighAdxBypassAllowed = (
-            adx >= 45 &&
+            adx >= ADX_THRESHOLDS.EXHAUSTION &&
             stochFilterTrend4h === "bullish" &&
             stochFilterConf4h >= 60 &&
             stochRsiK4h >= 80 &&
@@ -12409,7 +12409,7 @@ serve(async (req) => {
                 },
                 veryHighAdxBypassCheck: {
                   adx: adx.toFixed(1),
-                  adxSufficient: adx >= 50,
+                  adxSufficient: adx >= ADX_THRESHOLDS.PARABOLIC,
                   kInRange: stochRsiK4h >= 80 && stochRsiK4h < 93,
                   htfAligned: stochFilterTrend4h === "bullish" && stochFilterConf4h >= 60,
                   noDivergence: !hasBearishDivergence,
@@ -12646,7 +12646,7 @@ serve(async (req) => {
           // (not falling) condition for K values in the 8-20 range. Only hard block if K <= 7 AND K >= D
           // This fixes false rejections in very strong downtrends during consolidation
           const veryHighAdxBypassAllowedShort = (
-            adx >= 50 &&
+            adx >= ADX_THRESHOLDS.PARABOLIC &&
             stochFilterTrend4h === "bearish" &&
             stochFilterConf4h >= 60 &&
             stochRsiK4h > 7 &&    // Only relax for K 8-20, not at true extremes
@@ -12685,7 +12685,7 @@ serve(async (req) => {
                 },
                 veryHighAdxBypassCheck: {
                   adx: adx.toFixed(1),
-                  adxSufficient: adx >= 50,
+                  adxSufficient: adx >= ADX_THRESHOLDS.PARABOLIC,
                   kInRange: stochRsiK4h > 7 && stochRsiK4h <= 20,
                   htfAligned: stochFilterTrend4h === "bearish" && stochFilterConf4h >= 60,
                   noDivergence: !hasBullishDivergence,
@@ -13937,7 +13937,7 @@ serve(async (req) => {
         // If ADX is strong AND rising, allow reduced-size entry even with low momentum
         // In accelerating trends, price leads momentum - this prevents blocking valid entries
         const acceleratingTrendException = (
-          adx >= 30 &&
+          adx >= ADX_THRESHOLDS.VERY_STRONG &&
           adxSlopeForOverride > 0 &&
           !adxExhaustion.isExhausted &&
           !isReversalEntry
@@ -13984,7 +13984,7 @@ serve(async (req) => {
                 acceleratingTrendExceptionAttempted: acceleratingTrendException,
                 acceleratingTrendExceptionApplied: false,
                 acceleratingTrendExceptionReason: !acceleratingTrendException ? 
-                  (adx < 30 ? `ADX=${adx.toFixed(1)} < 30` : 
+                  (adx < ADX_THRESHOLDS.VERY_STRONG ? `ADX=${adx.toFixed(1)} < ${ADX_THRESHOLDS.VERY_STRONG}` : 
                    adxSlopeForOverride <= 0 ? `slope=${adxSlopeForOverride.toFixed(2)} <= 0` :
                    adxExhaustion.isExhausted ? 'exhausted' :
                    isReversalEntry ? 'reversal entry' : 'unknown') : null,
@@ -14212,7 +14212,7 @@ serve(async (req) => {
           const strongMomentumBypassPath = 
             momentumQualifiesForSqueeze &&
             !isValidSqueeze && // Squeeze not detected by percentile method
-            adx >= 18 && adx < 25 && // Low-ADX transitional zone
+            adx >= ADX_THRESHOLDS.ABSOLUTE_FLOOR && adx < ADX_THRESHOLDS.STRONG && // Low-ADX transitional zone
             isStochRsiExtremeFor4h && // 4h StochRSI extreme
             isStochRsiExtremeFor1h && // 1h StochRSI also loaded
             Math.abs(momentum?.macdHistogram || 0) >= 5.0; // Strong MACD signal
@@ -14264,7 +14264,7 @@ serve(async (req) => {
             const momentumConfirmedBypass = (
               momentum?.state === "confirmed" &&
               momentum?.genuineMomentum === true &&
-              adx >= 25 &&  // ADX must be in trending range
+              adx >= ADX_THRESHOLDS.STRONG &&  // ADX must be in trending range
               (momentum?.macdExpanding === true || momentum?.adxRising === true)
             );
             
@@ -15289,7 +15289,7 @@ serve(async (req) => {
         // When ADX >= 25, MACD expanding, and 4h trend confidence >= 60%
         // This catches strong momentum moves that might miss due to "mixed" state
         const conf4hForBonus = timeframes?.['4h']?.confidence || 50;
-        if (adx >= 25 && localMacdExpanding && conf4hForBonus >= 60 && !fakeBreakoutRisk) {
+        if (adx >= ADX_THRESHOLDS.STRONG && localMacdExpanding && conf4hForBonus >= 60 && !fakeBreakoutRisk) {
           // Active momentum continuation - add +3 quality bonus
           momentumContinuationBonus = 3;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} MOMENTUM CONTINUATION: ADX=${adx.toFixed(1)} ≥25, MACD expanding, 4h conf=${conf4hForBonus}% ≥60% → +${momentumContinuationBonus} quality`);
@@ -16876,7 +16876,7 @@ serve(async (req) => {
             momentum?.state === 'confirmed' || 
             momentum?.state === 'building' ||
             smartMomentum.score >= 10 ||
-            (momentum?.macdExpanding === true && adx >= 18);
+            (momentum?.macdExpanding === true && adx >= ADX_THRESHOLDS.ABSOLUTE_FLOOR);
           
           const canUseAdaptive = 
             adaptiveDirection !== null &&
@@ -17192,7 +17192,7 @@ serve(async (req) => {
         const htfBypassConfidenceRelaxation = strongTrendHTFBypassApplied ? 5 : 0;
         
         // NEW: ADX-based confidence relaxation - very strong trends confirm direction
-        const adxBasedConfidenceRelaxation = adx >= 50 ? 10 : adx >= 40 ? 5 : 0;
+        const adxBasedConfidenceRelaxation = adx >= ADX_THRESHOLDS.PARABOLIC ? 10 : adx >= ADX_THRESHOLDS.EXTREME ? 5 : 0;
         const effectiveConfidenceRelaxation = Math.max(htfBypassConfidenceRelaxation, adxBasedConfidenceRelaxation);
         
         const minConfidenceThreshold = baseConfidenceThreshold - effectiveConfidenceRelaxation;
