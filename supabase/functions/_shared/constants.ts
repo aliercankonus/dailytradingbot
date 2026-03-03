@@ -5701,9 +5701,9 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   // Allow entry despite exhaustion ONLY if ADX is VERY strong (>=40) and clearly rising
   // Renamed from ALLOW_STRONG_TREND_EXCEPTION for consistency with ADX_THRESHOLDS naming
   ALLOW_STRONG_TREND_CONTINUATION: true,
-  EXCEPTION_MIN_ADX: 40,              // Very strong trend required
-  EXCEPTION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
-  EXCEPTION_POSITION_SIZE: 0.40,      // 40% position for exception entries
+  CONTINUATION_MIN_ADX: 40,              // Very strong trend required
+  CONTINUATION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
+  CONTINUATION_POSITION_SIZE: 0.40,      // 40% position for continuation entries
   
   // ===== EXCEPTION: MEAN REVERSION BOUNCE/FADE =====
   // Allow counter-trend probes when move is exhausted AND trend energy is decaying

@@ -7375,8 +7375,8 @@ serve(async (req) => {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
               // Check for strong trend continuation override
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
-                adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
-                adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
+                adx >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX &&
+                adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX_SLOPE;
               
               // NEW: Check for mean reversion exception (counter-trend bounce)
               // For SHORT exhaustion → allows LONG bounce entry
@@ -7393,7 +7393,7 @@ serve(async (req) => {
               
               if (strongTrendException) {
                 moveZone = 'EXCEPTION';
-                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_POSITION_SIZE;
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_POSITION_SIZE;
                 moveZoneDetails = {
                   zone: 'EXCEPTION',
                   distancePercent: distanceFromHigh,
@@ -7403,7 +7403,7 @@ serve(async (req) => {
                   adxSlope,
                   outcome: 'EXCEPTION_ALLOWED',
                   positionMultiplier: moveExhaustionPositionMultiplier,
-                  overrideReason: `Strong trend: ADX=${adx.toFixed(1)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX}, slope=${adxSlope.toFixed(2)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE}`,
+                  overrideReason: `Strong trend: ADX=${adx.toFixed(1)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX}, slope=${adxSlope.toFixed(2)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX_SLOPE}`,
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
@@ -7690,8 +7690,8 @@ serve(async (req) => {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
               // Check for strong trend continuation override
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
-                adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
-                adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
+                adx >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX &&
+                adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX_SLOPE;
               
               // NEW: Check for mean reversion exception (counter-trend fade)
               // For LONG exhaustion → allows SHORT fade entry
@@ -7708,7 +7708,7 @@ serve(async (req) => {
               
               if (strongTrendException) {
                 moveZone = 'EXCEPTION';
-                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_POSITION_SIZE;
+                moveExhaustionPositionMultiplier = MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_POSITION_SIZE;
                 moveZoneDetails = {
                   zone: 'EXCEPTION',
                   distancePercent: distanceFromLow,
@@ -7718,7 +7718,7 @@ serve(async (req) => {
                   adxSlope,
                   outcome: 'EXCEPTION_ALLOWED',
                   positionMultiplier: moveExhaustionPositionMultiplier,
-                  overrideReason: `Strong trend: ADX=${adx.toFixed(1)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX}, slope=${adxSlope.toFixed(2)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE}`,
+                  overrideReason: `Strong trend: ADX=${adx.toFixed(1)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX}, slope=${adxSlope.toFixed(2)} >= ${MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX_SLOPE}`,
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition
                 };
@@ -8117,7 +8117,7 @@ serve(async (req) => {
                   softThresholdPercent: effectiveSoftThreshold,
                   stochRsiNotOversoldForShort: MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERSOLD_FOR_SHORT,
                   stochRsiNotOverboughtForLong: MOVE_EXHAUSTION_FILTER_PARAMS.STOCHRSI_NOT_OVERBOUGHT_FOR_LONG,
-                  exceptionMinAdx: MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX,
+                  exceptionMinAdx: MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX,
                   // NEW: Relaxation info
                   relaxationApplied: useRelaxedThresholds,
                   relaxationCondition,
