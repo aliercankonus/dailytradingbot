@@ -191,36 +191,36 @@ Deno.test("MOVE_EXHAUSTED: strong trend relaxation raises hard threshold", () =>
   const resultNoRelax = evaluateMoveExhausted('long', 6.5, 20, 0.0);
   assertEquals(resultNoRelax.blocked, false, "6.5% < default 7.0% — passes without relaxation");
   
-  // ADX=30 >= 28 qualifies for relaxation, slope=0.0 >= RISING_SLOPE(0.0) → hard=8.0%
-  // 6.5 < 8.0 → NOT blocked with RISING tier
+  // ADX=30 >= 28 qualifies for relaxation, slope=0.0 >= RISING_SLOPE(0.0) → hard=10.0%
+  // 6.5 < 10.0 → NOT blocked with RISING tier
   const resultRelaxed = evaluateMoveExhausted('long', 6.5, 30, 0.0);
-  assertEquals(resultRelaxed.blocked, false, "6.5% < 8.0% RISING relaxation threshold — passes");
+  assertEquals(resultRelaxed.blocked, false, "6.5% < 10.0% RISING relaxation threshold — passes");
 
-  // 8.5% should be blocked with RISING tier (> 8.0%)
-  const resultBlocked = evaluateMoveExhausted('long', 8.5, 30, 0.0);
-  assertEquals(resultBlocked.blocked, true, "8.5% > 8.0% RISING threshold — blocked");
+  // 10.5% should be blocked with RISING tier (> 10.0%)
+  const resultBlocked = evaluateMoveExhausted('long', 10.5, 30, 0.0);
+  assertEquals(resultBlocked.blocked, true, "10.5% > 10.0% RISING threshold — blocked");
 
-  // ADX=30, slope=-0.5 → FULL tier (6.0%)
-  const resultFull = evaluateMoveExhausted('long', 5.8, 30, -0.5);
-  assertEquals(resultFull.blocked, false, "5.8% < 6.0% FULL threshold — passes");
-  const resultFullBlocked = evaluateMoveExhausted('long', 6.5, 30, -0.5);
-  assertEquals(resultFullBlocked.blocked, true, "6.5% > 6.0% FULL threshold — blocked");
+  // ADX=30, slope=-0.5 → FULL tier (8.0%)
+  const resultFull = evaluateMoveExhausted('long', 7.8, 30, -0.5);
+  assertEquals(resultFull.blocked, false, "7.8% < 8.0% FULL threshold — passes");
+  const resultFullBlocked = evaluateMoveExhausted('long', 8.5, 30, -0.5);
+  assertEquals(resultFullBlocked.blocked, true, "8.5% > 8.0% FULL threshold — blocked");
 });
 
-Deno.test("MOVE_EXHAUSTED: ACCELERATING tier raises threshold to 10%", () => {
+Deno.test("MOVE_EXHAUSTED: ACCELERATING tier raises threshold to 12%", () => {
   // ADX=30, slope=0.6 (>= ACCELERATING_SLOPE=0.5)
-  const result = evaluateMoveExhausted('long', 9.0, 30, 0.6);
-  assertEquals(result.blocked, false, "9% should pass with ACCELERATING threshold of 10%");
+  const result = evaluateMoveExhausted('long', 11.0, 30, 0.6);
+  assertEquals(result.blocked, false, "11% should pass with ACCELERATING threshold of 12%");
 
-  const resultBlocked = evaluateMoveExhausted('long', 11.0, 30, 0.6);
-  assertEquals(resultBlocked.blocked, true, "11% should still be blocked (> 10%)");
+  const resultBlocked = evaluateMoveExhausted('long', 13.0, 30, 0.6);
+  assertEquals(resultBlocked.blocked, true, "13% should still be blocked (> 12%)");
 });
 
 Deno.test("MOVE_EXHAUSTED: BB squeeze enables relaxation even at lower ADX", () => {
   // ADX=22 (< 28), but BB squeeze active → relaxation applies
-  const result = evaluateMoveExhausted('short', 5.8, 22, -0.5, true);
-  // Squeeze qualifies for relaxation, slope=-0.5 >= FULL_RELAXATION_SLOPE(-1.0) → hard=6.0%
-  assertEquals(result.blocked, false, "5.8% should pass with squeeze relaxation (6.0% threshold)");
+  const result = evaluateMoveExhausted('short', 7.8, 22, -0.5, true);
+  // Squeeze qualifies for relaxation, slope=-0.5 >= FULL_RELAXATION_SLOPE(-1.0) → hard=8.0%
+  assertEquals(result.blocked, false, "7.8% should pass with squeeze relaxation (8.0% threshold)");
 });
 
 Deno.test("MOVE_EXHAUSTED: declining ADX slope limits relaxation", () => {
