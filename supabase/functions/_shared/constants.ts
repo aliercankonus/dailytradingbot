@@ -4332,6 +4332,32 @@ export const FOUR_STATE_REGIME = {
   LOG_BLOCK_DETAILS: true,
 } as const;
 
+// ============= MOMENTUM SCORING PARAMETERS =============
+// Extracted from getMomentumScore(): ADX-based momentum floor & continuation thresholds
+// Philosophy: Very strong trends (high ADX) IS momentum — prevent false rejections
+export const MOMENTUM_SCORING_PARAMS = {
+  // === VERY STRONG TREND FLOOR ===
+  // ADX >= this threshold = trend strength is momentum confirmation
+  VERY_STRONG_ADX_THRESHOLD: 40,
+  // ADX slope must be above this to qualify (not sharply falling)
+  VERY_STRONG_MIN_SLOPE: -0.5,
+  // Minimum momentum score floor for very strong trends
+  VERY_STRONG_FLOOR: 8,
+  
+  // === STRONG TREND FLOOR ===
+  // ADX >= this threshold = meaningful trend energy
+  STRONG_ADX_THRESHOLD: 35,
+  // ADX slope must be above this for strong trend floor
+  STRONG_MIN_SLOPE: -0.3,
+  // Minimum momentum score floor for strong trends
+  STRONG_FLOOR: 6,
+  
+  // === MOMENTUM CONTINUATION THRESHOLDS ===
+  // ADX thresholds for "mixed + MACD expanding" momentum continuation scoring
+  CONTINUATION_ADX_STRONG: 25,
+  CONTINUATION_ADX_DECENT: 22,
+} as const;
+
 // ============= COMPRESSION MICRO-RANGE MODULE =============
 // Independent second engine for RANGE_COMPRESSION regimes
 // Executes small mean-reversion scalps during low-volatility compression
