@@ -13381,7 +13381,7 @@ serve(async (req) => {
         // ============= DYNAMIC ADX THRESHOLD WITH STOCHRSI ALIGNMENT =============
         // When 1h bearish AND StochRSI < 20, OR 1h bullish AND StochRSI > 80,
         // reduce the strong trend exception threshold from 28 to 22
-        let effectiveStrongTrendADX: number = ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // Default 23
+        let effectiveStrongTrendADX: number = ADX_THRESHOLDS.STRONG_TREND_EARLY_OVERRIDE; // Default 23
         let stochRsiAdxAlignmentActive = false;
         
         if (STOCHRSI_ADX_ALIGNMENT_PARAMS.ENABLED) {

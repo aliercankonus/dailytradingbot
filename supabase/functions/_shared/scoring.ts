@@ -1383,12 +1383,12 @@ export const calculateUnifiedReversalScore = (
   
   // 3. MOMENTUM STATE (0-30 points) - PHASE 2: Apply cap
   // RELAXED: Allow "none" state with reduced penalty when ADX >= 28 (strong trend exception)
-  const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EXCEPTION; // 28+ (relaxed from 30)
+  const isStrongTrendException = adx >= ADX_THRESHOLDS.STRONG_TREND_EARLY_OVERRIDE; // 23+ (dead zone bypass)
   let rawMomentumScore = 0;
   
   // Check "mixed" state FIRST (highest penalty) - prevents premature catch by other conditions
   if (momentumState === "mixed") {
-    if (adx < ADX_THRESHOLDS.STRONG_TREND_EXCEPTION) {
+    if (adx < ADX_THRESHOLDS.STRONG_TREND_EARLY_OVERRIDE) {
       rawMomentumScore = REVERSAL_CROSS_SCORES.MIXED_WEAK_ADX;
       reasons.push(`Mixed momentum with weak ADX`);
     } else {
