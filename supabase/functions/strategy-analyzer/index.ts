@@ -72,7 +72,7 @@ import {
   // NEW: Neutral persistence modeling for confidence bonus
   NEUTRAL_PERSISTENCE_PARAMS,
   // v1.1: ADX Gate minimal spec - single responsibility gate
-  ADX_GATE_V1_1,
+  ADX_GATE as ADX_GATE_V1_1, // Renamed: canonical export is ADX_GATE, aliased here for 120+ existing refs
   // LEGACY (preserved for fallback): Low ADX trend exception for strong HTF setups
   LOW_ADX_TREND_EXCEPTION_PARAMS,
   // LEGACY: Phase 2 - Regime-adaptive ADX thresholds (now superseded by ADX_GATE_V1_1)
