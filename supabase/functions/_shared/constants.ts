@@ -2978,21 +2978,6 @@ export const CONVERGENCE_PARAMS = {
   MAX_REVERSAL_SCORE: 45,
 } as const;
 
-// ============= STRONG 1H TREND ENTRY PARAMETERS =============
-// Allow entries when 1h trend is very strong even when 4h is neutral/mixed
-// This captures trending moves that haven't propagated to higher timeframes yet
-export const STRONG_1H_TREND_PARAMS = {
-  // Enable strong 1h trend entries
-  ENABLED: true,
-  // Minimum 1h confidence required
-  MIN_1H_CONFIDENCE: 70,
-  // Allow "mixed" momentum state when 1h is very strong
-  ALLOW_MIXED_MOMENTUM_STATE: true,
-  // ADX relaxation for EMA strategies when 1h is strong
-  EMA_REDUCED_ADX: 22,  // Reduced from 25
-  // Position size multiplier for strong 1h entries with neutral 4h
-  POSITION_SIZE_MULTIPLIER: 0.75,
-} as const;
 
 // ============= PHASE 3: CONTEXT-AWARE EXIT MANAGEMENT =============
 // Smart stop loss and trailing activation based on market context
