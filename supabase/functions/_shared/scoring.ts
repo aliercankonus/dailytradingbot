@@ -2532,7 +2532,7 @@ export interface DirectionResult {
 }
 
 // Import direction params
-import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS, MOMENTUM_OVERRIDE_DIRECTION_PARAMS, BIAS_RESOLUTION_TIER, NET_SIGNAL_THRESHOLDS } from "./constants.ts";
+import { GATE_RELAXATION_FLAGS, DIRECTION_DERIVATION_PARAMS, MOMENTUM_OVERRIDE_DIRECTION_PARAMS, BIAS_RESOLUTION_TIER, NET_SIGNAL_THRESHOLDS, DIRECTION_TIER_2_3, DIRECTION_TIER_2_5, DIRECTION_TIER_10_5 } from "./constants.ts";
 
 // ============= PHASE 1: DIRECTION REGIME CLASSIFIER =============
 // Classifies market into regime BEFORE direction derivation
@@ -4008,8 +4008,8 @@ export const deriveTradeDirection = (
   
   if (
     trend4h === "neutral" &&
-    consecutiveBars1h >= 5 &&
-    adx >= 20
+    consecutiveBars1h >= DIRECTION_TIER_2_3.MIN_CONSECUTIVE_BARS_1H &&
+    adx >= DIRECTION_TIER_2_3.MIN_ADX
   ) {
     const inferredDirection = trend1h !== "neutral" ? trend1h : 
                               (trend30m !== "neutral" ? trend30m : null);
@@ -4017,31 +4017,31 @@ export const deriveTradeDirection = (
     if (inferredDirection) {
       const direction: TradeDirection = inferredDirection === "bullish" ? "long" : "short";
       
-      let baseConf = 55 + Math.min(15, (consecutiveBars1h - 5) * 3);
-      const adxBonus = Math.min(10, (adx - 20) * 0.5);
-      const conf30mBonus = consecutiveBars30m >= 4 ? 5 : 0;
-      const conf1hBonus = conf1h >= 55 ? Math.min(5, (conf1h - 55) * 0.5) : 0;
+      let baseConf = DIRECTION_TIER_2_3.BASE_CONFIDENCE + Math.min(DIRECTION_TIER_2_3.MAX_BAR_BONUS, (consecutiveBars1h - DIRECTION_TIER_2_3.MIN_CONSECUTIVE_BARS_1H) * DIRECTION_TIER_2_3.PER_BAR_BONUS);
+      const adxBonus = Math.min(DIRECTION_TIER_2_3.MAX_ADX_BONUS, (adx - DIRECTION_TIER_2_3.MIN_ADX) * DIRECTION_TIER_2_3.ADX_BONUS_RATE);
+      const conf30mBonus = consecutiveBars30m >= DIRECTION_TIER_2_3.MIN_CONSECUTIVE_BARS_30M ? DIRECTION_TIER_2_3.CONF_30M_BONUS : 0;
+      const conf1hBonus = conf1h >= DIRECTION_TIER_2_3.CONF_1H_THRESHOLD ? Math.min(DIRECTION_TIER_2_3.MAX_CONF_1H_BONUS, (conf1h - DIRECTION_TIER_2_3.CONF_1H_THRESHOLD) * DIRECTION_TIER_2_3.CONF_1H_BONUS_RATE) : 0;
       
-      const finalConf = Math.min(75, baseConf + adxBonus + conf30mBonus + conf1hBonus) * 0.85;
+      const finalConf = Math.min(DIRECTION_TIER_2_3.MAX_CONFIDENCE, baseConf + adxBonus + conf30mBonus + conf1hBonus) * DIRECTION_TIER_2_3.CONFIDENCE_REDUCTION;
       
       reasons.push(`CONSECUTIVE CANDLE OVERRIDE: ${consecutiveBars1h} consecutive 1h bars in ${inferredDirection} direction`);
       reasons.push(`4h neutral but price action confirms momentum`);
       reasons.push(`ADX=${adx.toFixed(1)}, 30m bars=${consecutiveBars30m}`);
-      reasons.push("Momentum-based entry - 65% position size recommended");
+      reasons.push(`Momentum-based entry - ${(DIRECTION_TIER_2_3.POSITION_MULTIPLIER * 100).toFixed(0)}% position size recommended`);
       
       return { 
         direction, 
         confidence: finalConf, 
         source: "consecutive-candle-momentum", 
         reasons,
-        positionSizeMultiplier: 0.65,
+        positionSizeMultiplier: DIRECTION_TIER_2_3.POSITION_MULTIPLIER,
         regime,
         directionContext: createDirectionContext(direction, {
           evidenceType: 'MOMENTUM',
           tier: 4,
           tierSource: 'TIER_4_CONSECUTIVE_CANDLE_MOMENTUM',
           confidence: finalConf,
-          positionMultiplier: 0.65,
+          positionMultiplier: DIRECTION_TIER_2_3.POSITION_MULTIPLIER,
           isCounterTrend: false,
           riskClass: 'MEDIUM',
           evidenceStrength: consecutiveBars1h >= 7 ? 'STRONG' : 'MODERATE',
@@ -4057,35 +4057,35 @@ export const deriveTradeDirection = (
   if (
     trend4h === "neutral" &&
     trend1h !== "neutral" &&
-    conf1h >= 57 && conf1h < 60 &&
-    adx >= 18 && adx <= 35 &&
+    conf1h >= DIRECTION_TIER_2_5.MIN_CONF_1H && conf1h < DIRECTION_TIER_2_5.MAX_CONF_1H &&
+    adx >= DIRECTION_TIER_2_5.MIN_ADX && adx <= DIRECTION_TIER_2_5.MAX_ADX &&
     adxRising &&
-    Math.abs(priceMove) >= 0.8
+    Math.abs(priceMove) >= DIRECTION_TIER_2_5.MIN_PRICE_MOVE_PERCENT
   ) {
     const direction: TradeDirection = trend1h === "bullish" ? "long" : "short";
     const priceAligned = (trend1h === "bullish" && priceMove > 0) || (trend1h === "bearish" && priceMove < 0);
     
     if (priceAligned) {
-      const earlyConf = conf1h * 0.85;
+      const earlyConf = conf1h * DIRECTION_TIER_2_5.CONFIDENCE_REDUCTION;
       
       reasons.push(`EARLY TREND DETECTION: 1h ${trend1h} (${conf1h.toFixed(0)}% conf, reduced to ${earlyConf.toFixed(0)}%)`);
-      reasons.push(`ADX=${adx.toFixed(1)} rising in building zone (18-35)`);
+      reasons.push(`ADX=${adx.toFixed(1)} rising in building zone (${DIRECTION_TIER_2_5.MIN_ADX}-${DIRECTION_TIER_2_5.MAX_ADX})`);
       reasons.push(`Price action confirms: ${Math.abs(priceMove).toFixed(2)}% move ${priceMove > 0 ? 'up' : 'down'}`);
-      reasons.push("Early signal - 75% position size recommended");
+      reasons.push(`Early signal - ${(DIRECTION_TIER_2_5.POSITION_MULTIPLIER * 100).toFixed(0)}% position size recommended`);
       
       return { 
         direction, 
         confidence: earlyConf, 
         source: "1h-building-override", 
         reasons,
-        positionSizeMultiplier: 0.75,
+        positionSizeMultiplier: DIRECTION_TIER_2_5.POSITION_MULTIPLIER,
         regime,
         directionContext: createDirectionContext(direction, {
           evidenceType: 'MOMENTUM',
           tier: 5,
           tierSource: 'TIER_5_BUILDING_TREND_DETECTION',
           confidence: earlyConf,
-          positionMultiplier: 0.75,
+          positionMultiplier: DIRECTION_TIER_2_5.POSITION_MULTIPLIER,
           isCounterTrend: false,
           riskClass: 'MEDIUM',
           evidenceStrength: 'MODERATE',
@@ -4553,8 +4553,6 @@ export const deriveTradeDirection = (
     // use order flow direction. This catches scenarios like:
     // - momentum=-33 (bearish), order_flow=70 (strong buy) → derive LONG
     // Order flow is more leading than momentum score in neutral/ranging markets
-    const STRONG_OF_OVERRIDE_THRESHOLD = 65;
-    const EXTREME_MOMENTUM_THRESHOLD = 45;  // Only override if momentum isn't extreme
     const tier105OfScore = orderFlowData?.score ?? 0;
     const tier105OfSignal = orderFlowData?.signal?.toLowerCase() ?? "";
     const tier105OfBullish = tier105OfSignal.includes("buy") || tier105OfSignal === "bullish";
@@ -4562,32 +4560,28 @@ export const deriveTradeDirection = (
     const tier105MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
     const tier105AbsMomentum = Math.abs(tier105MomentumScore);
     
-    // Order flow must be strong AND momentum must be only moderate (not extreme)
-    // This prevents overriding a -60 momentum (extreme bearish) with +70 order flow
-    const ofIsStrongBullish = tier105OfBullish && tier105OfScore >= STRONG_OF_OVERRIDE_THRESHOLD;
-    const ofIsStrongBearish = tier105OfBearish && tier105OfScore >= STRONG_OF_OVERRIDE_THRESHOLD;
-    const momentumNotExtreme = tier105AbsMomentum < EXTREME_MOMENTUM_THRESHOLD;
+    const ofIsStrongBullish = tier105OfBullish && tier105OfScore >= DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD;
+    const ofIsStrongBearish = tier105OfBearish && tier105OfScore >= DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD;
+    const momentumNotExtreme = tier105AbsMomentum < DIRECTION_TIER_10_5.EXTREME_MOMENTUM_THRESHOLD;
     
-    // Additional safety: StochRSI should not be at extreme that contradicts OF direction
     const tier105StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
-    const stochAllowsLong = tier105StochK < 90;  // Not deeply overbought
-    const stochAllowsShort = tier105StochK > 10; // Not deeply oversold
+    const stochAllowsLong = tier105StochK < DIRECTION_TIER_10_5.STOCH_MAX_FOR_LONG;
+    const stochAllowsShort = tier105StochK > DIRECTION_TIER_10_5.STOCH_MIN_FOR_SHORT;
     
     if (ofIsStrongBullish && momentumNotExtreme && stochAllowsLong) {
       tier10Fired = true;
-      const ofConfidence = Math.min(60, 50 + (tier105OfScore - 50) * 0.3);
-      const ofPosition = 0.55;  // Conservative 55% position
+      const ofConfidence = Math.min(DIRECTION_TIER_10_5.MAX_CONFIDENCE, DIRECTION_TIER_10_5.BASE_CONFIDENCE + (tier105OfScore - 50) * DIRECTION_TIER_10_5.CONF_RATE);
       
       reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → LONG: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
-      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${tier105StochK.toFixed(0)} < 90`);
-      reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(ofPosition * 100).toFixed(0)}%`);
+      reasons.push(`Conditions: OF >= ${DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${DIRECTION_TIER_10_5.EXTREME_MOMENTUM_THRESHOLD}, StochK=${tier105StochK.toFixed(0)} < ${DIRECTION_TIER_10_5.STOCH_MAX_FOR_LONG}`);
+      reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(DIRECTION_TIER_10_5.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
       
       return {
         direction: "long",
         confidence: ofConfidence,
         source: "order-flow-override",
         reasons,
-        positionSizeMultiplier: ofPosition,
+        positionSizeMultiplier: DIRECTION_TIER_10_5.POSITION_MULTIPLIER,
         isOrderFlowOverride: true,
         regime,
         directionContext: createDirectionContext("long", {
@@ -4595,8 +4589,8 @@ export const deriveTradeDirection = (
           tier: 10.5,
           tierSource: 'TIER_10.5_ORDER_FLOW_OVERRIDE_LONG',
           confidence: ofConfidence,
-          positionMultiplier: ofPosition,
-          isCounterTrend: tier105MomentumScore < 0,  // Counter to momentum direction
+          positionMultiplier: DIRECTION_TIER_10_5.POSITION_MULTIPLIER,
+          isCounterTrend: tier105MomentumScore < 0,
           riskClass: 'HIGH',
           evidenceStrength: tier105OfScore >= 70 ? 'MODERATE' : 'WEAK',
           weightedScore: outerWeightedScore,
@@ -4606,19 +4600,18 @@ export const deriveTradeDirection = (
     
     if (ofIsStrongBearish && momentumNotExtreme && stochAllowsShort) {
       tier10Fired = true;
-      const ofConfidence = Math.min(60, 50 + (tier105OfScore - 50) * 0.3);
-      const ofPosition = 0.55;  // Conservative 55% position
+      const ofConfidence = Math.min(DIRECTION_TIER_10_5.MAX_CONFIDENCE, DIRECTION_TIER_10_5.BASE_CONFIDENCE + (tier105OfScore - 50) * DIRECTION_TIER_10_5.CONF_RATE);
       
       reasons.push(`TIER 10.5 ORDER FLOW OVERRIDE → SHORT: OF score=${tier105OfScore.toFixed(0)} (${tier105OfSignal}) overrides moderate momentum (${tier105MomentumScore.toFixed(0)})`);
-      reasons.push(`Conditions: OF >= ${STRONG_OF_OVERRIDE_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${EXTREME_MOMENTUM_THRESHOLD}, StochK=${tier105StochK.toFixed(0)} > 10`);
-      reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(ofPosition * 100).toFixed(0)}%`);
+      reasons.push(`Conditions: OF >= ${DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD}, |momentum|=${tier105AbsMomentum.toFixed(0)} < ${DIRECTION_TIER_10_5.EXTREME_MOMENTUM_THRESHOLD}, StochK=${tier105StochK.toFixed(0)} > ${DIRECTION_TIER_10_5.STOCH_MIN_FOR_SHORT}`);
+      reasons.push(`Confidence: ${ofConfidence.toFixed(0)}% | Position: ${(DIRECTION_TIER_10_5.POSITION_MULTIPLIER * 100).toFixed(0)}%`);
       
       return {
         direction: "short",
         confidence: ofConfidence,
         source: "order-flow-override",
         reasons,
-        positionSizeMultiplier: ofPosition,
+        positionSizeMultiplier: DIRECTION_TIER_10_5.POSITION_MULTIPLIER,
         isOrderFlowOverride: true,
         regime,
         directionContext: createDirectionContext("short", {
@@ -4626,8 +4619,8 @@ export const deriveTradeDirection = (
           tier: 10.5,
           tierSource: 'TIER_10.5_ORDER_FLOW_OVERRIDE_SHORT',
           confidence: ofConfidence,
-          positionMultiplier: ofPosition,
-          isCounterTrend: tier105MomentumScore > 0,  // Counter to momentum direction
+          positionMultiplier: DIRECTION_TIER_10_5.POSITION_MULTIPLIER,
+          isCounterTrend: tier105MomentumScore > 0,
           riskClass: 'HIGH',
           evidenceStrength: tier105OfScore >= 70 ? 'MODERATE' : 'WEAK',
           weightedScore: outerWeightedScore,
