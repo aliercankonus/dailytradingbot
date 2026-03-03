@@ -117,7 +117,7 @@
 // [6] SCORING & QUALITY — Quality scoring, momentum scoring, reversal scoring
 // ═══════════════════════════════════════════════════════════════════════════════
 //   QUALITY_THRESHOLDS ............... L1742  Quality score thresholds
-//   MOMENTUM_SCORING_PARAMS .......... L4609  Momentum score floors (ADX-based)
+//   MOMENTUM_ADX_FLOOR_PARAMS ........ L4609  Momentum score floors (ADX-based)
 //   MOMENTUM_SCORE_COMPONENTS ........ L8348  Momentum score component limits
 //   MOMENTUM_SCORE_BEHAVIOR_PARAMS ... L4733  High-ADX momentum behavior change
 //   MOMENTUM_THRESHOLDS .............. L2119  Momentum score minimums
@@ -4606,7 +4606,7 @@ export const FOUR_STATE_REGIME = {
 // ============= MOMENTUM SCORING PARAMETERS =============
 // Extracted from getMomentumScore(): ADX-based momentum floor & continuation thresholds
 // Philosophy: Very strong trends (high ADX) IS momentum — prevent false rejections
-export const MOMENTUM_SCORING_PARAMS = {
+export const MOMENTUM_ADX_FLOOR_PARAMS = {
   // === VERY STRONG TREND FLOOR ===
   // ADX >= this threshold = trend strength is momentum confirmation
   VERY_STRONG_ADX_THRESHOLD: 40,
