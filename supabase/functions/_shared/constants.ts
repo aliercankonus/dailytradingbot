@@ -3666,6 +3666,70 @@ export const DIRECTION_DERIVATION_PARAMS = {
   STOCHRSI_BIAS_WEIGHT: 0.10,         // ±0.10 bias adjustment to weighted sum
 } as const;
 
+// ============= DIRECTION TIER 2.3: CONSECUTIVE CANDLE MOMENTUM OVERRIDE =============
+// When 1h has N+ consecutive candles in the same direction, override neutral 4h
+export const DIRECTION_TIER_2_3 = {
+  // Minimum consecutive 1h bars to trigger
+  MIN_CONSECUTIVE_BARS_1H: 5,
+  // Minimum ADX for validity
+  MIN_ADX: 20,
+  // Base confidence for consecutive candle override
+  BASE_CONFIDENCE: 55,
+  // Max bonus from extra consecutive bars: (bars - MIN) * PER_BAR_BONUS, capped
+  PER_BAR_BONUS: 3,
+  MAX_BAR_BONUS: 15,
+  // ADX bonus: (adx - MIN_ADX) * ADX_BONUS_RATE, capped
+  ADX_BONUS_RATE: 0.5,
+  MAX_ADX_BONUS: 10,
+  // 30m consecutive bars bonus
+  MIN_CONSECUTIVE_BARS_30M: 4,
+  CONF_30M_BONUS: 5,
+  // 1h confidence bonus
+  CONF_1H_THRESHOLD: 55,
+  CONF_1H_BONUS_RATE: 0.5,
+  MAX_CONF_1H_BONUS: 5,
+  // Final confidence cap and reduction
+  MAX_CONFIDENCE: 75,
+  CONFIDENCE_REDUCTION: 0.85,
+  // Position sizing
+  POSITION_MULTIPLIER: 0.65,
+} as const;
+
+// ============= DIRECTION TIER 2.5: BUILDING TREND DIRECTION OVERRIDE =============
+// Early trend detection when 1h is building but confidence hasn't reached 60
+export const DIRECTION_TIER_2_5 = {
+  // 1h confidence window (must be in this range)
+  MIN_CONF_1H: 57,
+  MAX_CONF_1H: 60,
+  // ADX range for building zone
+  MIN_ADX: 18,
+  MAX_ADX: 35,
+  // Minimum absolute price move percent
+  MIN_PRICE_MOVE_PERCENT: 0.8,
+  // Confidence reduction factor
+  CONFIDENCE_REDUCTION: 0.85,
+  // Position sizing
+  POSITION_MULTIPLIER: 0.75,
+} as const;
+
+// ============= DIRECTION TIER 10.5: STRONG ORDER FLOW OVERRIDE =============
+// When order flow is very strong and momentum is only moderate, use OF direction
+export const DIRECTION_TIER_10_5 = {
+  // Minimum order flow score to trigger override
+  STRONG_OF_THRESHOLD: 65,
+  // Maximum absolute momentum to allow override (prevents overriding extreme momentum)
+  EXTREME_MOMENTUM_THRESHOLD: 45,
+  // StochRSI safety limits (prevent OF override when stoch contradicts)
+  STOCH_MAX_FOR_LONG: 90,
+  STOCH_MIN_FOR_SHORT: 10,
+  // Confidence calculation: min(MAX_CONF, BASE_CONF + (score - 50) * CONF_RATE)
+  BASE_CONFIDENCE: 50,
+  CONF_RATE: 0.3,
+  MAX_CONFIDENCE: 60,
+  // Position sizing (conservative)
+  POSITION_MULTIPLIER: 0.55,
+} as const;
+
 // ============= BIAS RESOLUTION TIER (TIER 9.5) PARAMETERS =============
 // Pre-terminal tier that resolves direction when all tiers fail but micro-evidence exists
 // Prevents NO_CLEAR_DIRECTION during impulse phases
