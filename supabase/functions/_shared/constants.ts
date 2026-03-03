@@ -316,31 +316,52 @@ export const CONTEXTUAL_TP_EXPANSION = {
   LOG_TP_EXPANSION: true,
 } as const;
 
+// ===== ADX THRESHOLDS — Regime Lifecycle Ladder =====
+// Ordered by ascending ADX value. Each tier serves a distinct semantic role:
+//
+//  ADX  | Tier                          | Role
+//  -----|-------------------------------|----------------------------------------------
+//   12  | VERY_WEAK                     | Scoring: near-zero energy, deep penalty zone
+//   15  | SEVERE_PENALTY                | Scoring: enhanced score penalty trigger floor
+//   15  | WEAK                          | Regime: minimum activity for classification
+//       |                               | (same value as SEVERE_PENALTY — intentional;
+//       |                               |  SEVERE_PENALTY → score math, WEAK → regime gates)
+//   18  | ABSOLUTE_FLOOR                | Gate: hard block floor, no exceptions below
+//   20  | MINIMUM                       | Gate: standard ADX pass threshold
+//   21  | STRONG_TREND_EARLY_OVERRIDE_PARTIAL | Dead-zone bypass: 25% position reduction
+//   22  | MODERATE                      | Gate: graduated tier boundary
+//   23  | STRONG_TREND_EARLY_OVERRIDE   | Dead-zone bypass: base threshold
+//   23  | STRONG_TREND_EARLY_OVERRIDE_FULL | Dead-zone bypass: no position reduction
+//   25  | STRONG                        | Gate: confirmed trend energy
+//   30  | VERY_STRONG                   | Gate: strong directional conviction
+//   35  | EXCEPTIONAL                   | Gate: high-energy trend territory
+//   40  | EXTREME                       | Gate: extreme ADX, parabolic lead-in zone
+//   45  | EXHAUSTION                    | Risk: exhaustion risk, reversal sensitivity up
+//   50  | PARABOLIC                     | Risk: parabolic trend, maximum gate relaxation
+//
+// REMOVED (dead config, 0 usage):
+//   - SQUEEZE_MINIMUM (was 15, duplicated WEAK with no references)
+//   - REVERSAL_BLOCK (was 30, duplicated VERY_STRONG with no references)
 export const ADX_THRESHOLDS = {
   VERY_WEAK: 12,
+  // Scoring penalty trigger: enhanced -= 10 when adx < SEVERE_PENALTY (trend-core.ts)
+  // Distinct from WEAK — this drives score math, not regime classification
   SEVERE_PENALTY: 15,
-  // PHASE 1 FIX: Reduced from 18 to 15 to allow earlier entries during breakout initiation
-  // ADX 15-18 is where impulsive moves START - waiting for 18 misses 30-50% of the move
+  // Regime classification floor: minimum activity for direction derivation, momentum gating
+  // Distinct from SEVERE_PENALTY — this drives gate decisions, not score penalties
   WEAK: 15,
-  // SQUEEZE_MINIMUM: Allows squeeze breakout entries when ADX is 15-20 (relaxed from 18)
-  // This enables more signals during transitional/ranging markets when squeeze breakouts occur
-  SQUEEZE_MINIMUM: 15,
   MINIMUM: 20,
   MODERATE: 22,
   STRONG: 25,
-  // PHASE 1 FIX: Separated strong trend exception thresholds
-  STRONG_TREND_EXCEPTION: 23,  // For dead zone bypass only (lowered from 25 to capture ranging markets)
-  STRONG_TREND_EXCEPTION_PARTIAL: 21,  // Partial exception: 25% position reduction (lowered from 23)
-  STRONG_TREND_EXCEPTION_FULL: 23,     // Full exception: no position reduction (lowered from 28 to 23)
+  // Dead-zone bypass thresholds for strong trend early override
+  STRONG_TREND_EARLY_OVERRIDE: 23,          // Base: dead zone bypass (lowered from 25)
+  STRONG_TREND_EARLY_OVERRIDE_PARTIAL: 21,  // Partial: 25% position reduction
+  STRONG_TREND_EARLY_OVERRIDE_FULL: 23,     // Full: no position reduction
   VERY_STRONG: 30,
   EXCEPTIONAL: 35,
   EXTREME: 40,
-  // PHASE 1: ADX Phase State Machine thresholds
   EXHAUSTION: 45,  // ADX > 45 = exhaustion risk, increase reversal sensitivity
-  // Ultra-strong ADX: parabolic trend territory
   PARABOLIC: 50,   // ADX >= 50 = parabolic trend, maximum gate relaxation
-  // PHASE 1 FIX: Reversal override block threshold
-  REVERSAL_BLOCK: 30,  // No reversals allowed when ADX >= 30 (strong trend)
   // V1.1: Absolute floor for ADX gate - no exceptions below this
   ABSOLUTE_FLOOR: 18,
 } as const;
