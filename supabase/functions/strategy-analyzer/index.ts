@@ -7373,8 +7373,8 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price dropped too far already =====
             if (distanceFromHigh >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
-              // Check for strong trend exception (continuation)
-              const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_EXCEPTION &&
+              // Check for strong trend continuation override
+              const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
                 adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
               
@@ -7688,8 +7688,8 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price rallied too far already =====
             if (distanceFromLow >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
-              // Check for strong trend exception (continuation)
-              const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_EXCEPTION &&
+              // Check for strong trend continuation override
+              const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX &&
                 adxSlope >= MOVE_EXHAUSTION_FILTER_PARAMS.EXCEPTION_MIN_ADX_SLOPE;
               
