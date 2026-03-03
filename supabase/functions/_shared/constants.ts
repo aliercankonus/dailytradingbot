@@ -4150,6 +4150,20 @@ export const FOUR_STATE_REGIME = {
     MR_BYPASS_MIN_STOCHRSI_DISTANCE: 15,  // StochRSI K must be < 15 or > 85 for MR
   },
   
+  // ===== IGNITION BYPASS =====
+  // Prevents textbook ignition-phase setups (ADX 20-22, rising slope, momentum edge)
+  // from being killed by RANGE_COMPRESSION. Routes to BREAKOUT_SETUP at conservative sizing.
+  IGNITION_BYPASS: {
+    ENABLED: true,
+    MIN_ADX: 20,
+    MIN_MOMENTUM: 15,
+    POSITION_MULTIPLIER: 0.35,
+    // Require neutral trend (otherwise normal breakout logic handles it)
+    REQUIRE_NEUTRAL_TREND: true,
+    // ADX slope must be strictly rising
+    MIN_ADX_SLOPE: 0,
+  },
+  
   // ===== BREAKOUT SETUP =====
   // ADX rising from compression - potential new trend forming
   BREAKOUT_SETUP: {
