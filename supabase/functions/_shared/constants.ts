@@ -14,250 +14,250 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // [1] INDICATOR THRESHOLDS — Raw numeric boundaries for technical indicators
 // ═══════════════════════════════════════════════════════════════════════════════
-//   ADX_THRESHOLDS ..................... L57    ADX level classifications (WEAK→EXTREME)
-//   ADX_PHASES ........................ L368   ADX phase classification (RANGE/TRANSITION/TRENDING)
-//   ADX_EXHAUSTION_PARAMS ............. L380   ADX exhaustion detection (slope decay)
-//   STOCHRSI_THRESHOLDS ............... L419   StochRSI level classifications
-//   RSI_THRESHOLDS .................... L1216  RSI level classifications
-//   RSI_ZONE_THRESHOLDS ............... L7284  RSI zone thresholds (scoring/pullback)
-//   CONFIDENCE_THRESHOLDS ............. L1235  Multi-timeframe confidence levels
-//   NET_SIGNAL_THRESHOLDS ............. L3721  Trend classification sensitivity per TF
-//   TIME_IN_EXTREME_PARAMS ............ L820   StochRSI extreme duration tracking
+//   ADX_THRESHOLDS ..................... L319   ADX level classifications (WEAK→EXTREME)
+//   ADX_PHASES ........................ L630   ADX phase classification (RANGE/TRANSITION/TRENDING)
+//   ADX_EXHAUSTION_PARAMS ............. L642   ADX exhaustion detection (slope decay)
+//   STOCHRSI_THRESHOLDS ............... L681   StochRSI level classifications
+//   RSI_THRESHOLDS .................... L1478  RSI level classifications
+//   RSI_ZONE_THRESHOLDS ............... L7546  RSI zone thresholds (scoring/pullback)
+//   CONFIDENCE_THRESHOLDS ............. L1497  Multi-timeframe confidence levels
+//   NET_SIGNAL_THRESHOLDS ............. L3983  Trend classification sensitivity per TF
+//   TIME_IN_EXTREME_PARAMS ............ L1082  StochRSI extreme duration tracking
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [2] ENTRY GATES — Hard/soft filters that block or reduce signal admission
 // ═══════════════════════════════════════════════════════════════════════════════
-//   ADX_GATE .......................... L90    Primary ADX gate (tiered bypass system)
-//   DEEP_STOCHRSI_HARD_GATE .......... L486   Tier 0 hard block at K<5/K>95
-//   MOMENTUM_SLOPE_GATE .............. L6612  Priority 1: opposing momentum acceleration block
-//   LTF_SPIKE_PROTECTION_GATE ........ L6645  Priority 2: 15m climax candle block
-//   LTF_CONFIRMATION_GATE ............ L6675  LTF alignment check for continuation
-//   NEAR_EXTREME_PROTECTION_GATE ..... L6722  24h high/low proximity block
-//   MOMENTUM_DIRECTION_ALIGNMENT ..... L4720  Momentum-direction alignment gate
-//   COUNTER_TREND_PROTECTION ......... L4600  Counter-trend entry block (ADX>35)
-//   MOVE_EXHAUSTION_FILTER_PARAMS .... L5278  Price move exhaustion filter (swing distance)
-//   NO_MOMENTUM_GATE_PARAMS .......... L3352  NO_MOMENTUM_CONFIRMATION hard gate
-//   BOLLINGER_TIERED_BYPASS_PARAMS ... L1075  Tiered Bollinger %B bypass
-//   TREND_EXHAUSTION_PROTECTION ...... L5134  ADX slope + trend strength block
-//   REGIME_TRANSITION_PROTECTION ..... L5157  Quality boost on regime weakening
-//   MOMENTUM_REVERSAL_PROTECTION ..... L5180  Momentum flip block
-//   SAME_DIRECTION_REENTRY_PROTECTION  L5063  Same-direction re-entry cooldown
-//   SAME_DIRECTION_STACKING_PREVENTION L5101  Same-direction position stacking block
-//   ADX_EXHAUSTION_LATE_ENTRY_PROTECTION L4651 Late trend entry protection
-//   BLOCK_DECISION_LOGGING ........... L4769  Structured logging for block decisions
+//   ADX_GATE .......................... L352   Primary ADX gate (tiered bypass system)
+//   DEEP_STOCHRSI_HARD_GATE .......... L748   Tier 0 hard block at K<5/K>95
+//   MOMENTUM_SLOPE_GATE .............. L6874  Priority 1: opposing momentum acceleration block
+//   LTF_SPIKE_PROTECTION_GATE ........ L6907  Priority 2: 15m climax candle block
+//   LTF_CONFIRMATION_GATE ............ L6937  LTF alignment check for continuation
+//   NEAR_EXTREME_PROTECTION_GATE ..... L6984  24h high/low proximity block
+//   MOMENTUM_DIRECTION_ALIGNMENT ..... L4982  Momentum-direction alignment gate
+//   COUNTER_TREND_PROTECTION ......... L4862  Counter-trend entry block (ADX>35)
+//   MOVE_EXHAUSTION_FILTER_PARAMS .... L5540  Price move exhaustion filter (swing distance)
+//   NO_MOMENTUM_GATE_PARAMS .......... L3614  NO_MOMENTUM_CONFIRMATION hard gate
+//   BOLLINGER_TIERED_BYPASS_PARAMS ... L1337  Tiered Bollinger %B bypass
+//   TREND_EXHAUSTION_PROTECTION ...... L5396  ADX slope + trend strength block
+//   REGIME_TRANSITION_PROTECTION ..... L5419  Quality boost on regime weakening
+//   MOMENTUM_REVERSAL_PROTECTION ..... L5442  Momentum flip block
+//   SAME_DIRECTION_REENTRY_PROTECTION  L5325  Same-direction re-entry cooldown
+//   SAME_DIRECTION_STACKING_PREVENTION L5363  Same-direction position stacking block
+//   ADX_EXHAUSTION_LATE_ENTRY_PROTECTION L4913 Late trend entry protection
+//   BLOCK_DECISION_LOGGING ........... L5031  Structured logging for block decisions
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [3] ENTRY STRATEGIES & EXCEPTIONS — Signal generation and exception paths
 // ═══════════════════════════════════════════════════════════════════════════════
-//   EARLY_IGNITION_ENTRY ............. L280   Early ignition entry (squeeze expansion)
-//   STRONG_TREND_TIER0_OVERRIDE ...... L524   K<5/K>95 entry in strong trends (ADX≥40)
-//   CAPITULATION_BOUNCE_PROBE ........ L601   Capitulation bounce probe (K<2/K>98)
-//   FLASH_CRASH_BOUNCE_PROBE ......... L723   Flash crash bounce probe (5%+ move)
-//   CONTINUATION_MODE_PARAMS ......... L841   Impulse follow-through entries
-//   MOMENTUM_CONTINUATION_PARAMS ..... L903   StochRSI extreme continuation
-//   TREND_CONTINUATION_AFTER_EXIT .... L951   Re-entry after profitable exit
-//   STRONG_TREND_BOLLINGER_EXTENSION .. L993   %B>97 entry in strong trends
-//   EARLY_TREND_DETECTION_PARAMS ..... L1033  Early trend catch (rising ADX)
-//   TREND_ACCELERATION_PARAMS ........ L1165  3%+ price move acceleration
-//   STEALTH_TREND_PARAMS ............. L2072  Gradual price drift detection
-//   LATE_GRIND_ACCEPTANCE_PARAMS ..... L2153  Entry after 1.5-2% drift
-//   QUIET_TREND_PARAMS ............... L3048  BTC/ETH quiet trend detection
-//   LOW_ADX_TREND_EXCEPTION_PARAMS ... L3145  Low ADX + strong HTF exception
-//   MOMENTUM_EXHAUSTION_OVERRIDE ..... L3100  Exhaustion override with confirmed momentum
-//   PRE_MOMENTUM_STOCHRSI_PARAMS ..... L3290  Deep StochRSI + 1h directional
-//   SHORT_TERM_ALIGNMENT_PARAMS ...... L3321  1h+30m+micro alignment override
-//   SQUEEZE_MOMENTUM_BYPASS_PARAMS ... L5206  Squeeze regime gate bypass
-//   SQUEEZE_BREAKOUT_SIGNAL_PARAMS ... L5248  Squeeze breakout signal type
-//   IMPULSE_CONTINUATION_PARAMS ...... L4577  Mid-impulse continuation
-//   TREND_CONTINUATION_PULLBACK_REGIME L7042  Pullback re-entry in strong trends
-//   TREND_CONTINUATION_REENTRY_PARAMS  L4501  Stateful re-entry after profit
-//   COMPRESSION_MODULE ............... L4375  Range compression micro scalps
-//   MEAN_REVERSION_CONFIG ............ L5516  MR strategy (LONG/SHORT asymmetric)
-//   COUNTER_TREND_ADMISSION .......... L5729  Counter-trend admission layer
-//   EXHAUSTION_ESCAPE_PARAMS ......... L3752  Exhaustion escape valve
-//   ADAPTIVE_SIGNAL_MODE ............. L5030  Strategy-independent signal mode
-//   CONVERGENCE_PARAMS ............... L3003  Multi-strategy convergence fallback
+//   EARLY_IGNITION_ENTRY ............. L542   Early ignition entry (squeeze expansion)
+//   STRONG_TREND_TIER0_OVERRIDE ...... L786   K<5/K>95 entry in strong trends (ADX≥40)
+//   CAPITULATION_BOUNCE_PROBE ........ L863   Capitulation bounce probe (K<2/K>98)
+//   FLASH_CRASH_BOUNCE_PROBE ......... L985   Flash crash bounce probe (5%+ move)
+//   CONTINUATION_MODE_PARAMS ......... L1103  Impulse follow-through entries
+//   MOMENTUM_CONTINUATION_PARAMS ..... L1165  StochRSI extreme continuation
+//   TREND_CONTINUATION_AFTER_EXIT .... L1213  Re-entry after profitable exit
+//   STRONG_TREND_BOLLINGER_EXTENSION .. L1255  %B>97 entry in strong trends
+//   EARLY_TREND_DETECTION_PARAMS ..... L1295  Early trend catch (rising ADX)
+//   TREND_ACCELERATION_PARAMS ........ L1427  3%+ price move acceleration
+//   STEALTH_TREND_PARAMS ............. L2334  Gradual price drift detection
+//   LATE_GRIND_ACCEPTANCE_PARAMS ..... L2415  Entry after 1.5-2% drift
+//   QUIET_TREND_PARAMS ............... L3310  BTC/ETH quiet trend detection
+//   LOW_ADX_TREND_EXCEPTION_PARAMS ... L3407  Low ADX + strong HTF exception
+//   MOMENTUM_EXHAUSTION_OVERRIDE ..... L3362  Exhaustion override with confirmed momentum
+//   PRE_MOMENTUM_STOCHRSI_PARAMS ..... L3552  Deep StochRSI + 1h directional
+//   SHORT_TERM_ALIGNMENT_PARAMS ...... L3583  1h+30m+micro alignment override
+//   SQUEEZE_MOMENTUM_BYPASS_PARAMS ... L5468  Squeeze regime gate bypass
+//   SQUEEZE_BREAKOUT_SIGNAL_PARAMS ... L5510  Squeeze breakout signal type
+//   IMPULSE_CONTINUATION_PARAMS ...... L4839  Mid-impulse continuation
+//   TREND_CONTINUATION_PULLBACK_REGIME L7304  Pullback re-entry in strong trends
+//   TREND_CONTINUATION_REENTRY_PARAMS  L4763  Stateful re-entry after profit
+//   COMPRESSION_MODULE ............... L4637  Range compression micro scalps
+//   MEAN_REVERSION_CONFIG ............ L5778  MR strategy (LONG/SHORT asymmetric)
+//   COUNTER_TREND_ADMISSION .......... L5991  Counter-trend admission layer
+//   EXHAUSTION_ESCAPE_PARAMS ......... L4014  Exhaustion escape valve
+//   ADAPTIVE_SIGNAL_MODE ............. L5292  Strategy-independent signal mode
+//   CONVERGENCE_PARAMS ............... L3265  Multi-strategy convergence fallback
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [4] DIRECTION DERIVATION — Trade direction determination pipeline
 // ═══════════════════════════════════════════════════════════════════════════════
-//   DIRECTION_DERIVATION_PARAMS ...... L3502  Weighted direction with persistence
-//   DIRECTION_REGIME_PARAMS .......... L6336  Pre-direction regime classifier
-//   DIRECTION_TIER_2_3 ............... L3614  Consecutive candle momentum override
-//   DIRECTION_TIER_2_5 ............... L3645  Building trend direction override
-//   DIRECTION_TIER_10_5 .............. L3662  Strong order flow override
-//   BIAS_RESOLUTION_TIER ............. L3681  Pre-terminal direction resolution
-//   MOMENTUM_DIRECTION_OVERRIDE_PARAMS L3237  Confirmed momentum direction
-//   ORDER_FLOW_DIRECTION_PARAMS ...... L3268  Order flow direction fallback
-//   MOMENTUM_OVERRIDE_DIRECTION_PARAMS L6432  Momentum override (30m trend)
-//   EXHAUSTION_REVERSAL_OVERRIDE ..... L6480  Extreme exhaustion direction flip
-//   MOMENTUM_FALLBACK_DIRECTION ...... L6570  Final momentum+OF fallback
-//   DIRECTIONAL_BIAS_ESCAPE_PARAMS ... L6408  Final escape hatch for building momentum
-//   TIER2_WEIGHTED_CONFIRMATION ...... L6375  Tier 2 weighted scoring
-//   STOCHRSI_ADX_ALIGNMENT_PARAMS .... L3418  Dynamic ADX threshold with StochRSI
-//   STOCHRSI_DECLINE_BONUS_PARAMS .... L3402  Declining StochRSI momentum bonus
-//   GATE_RELAXATION_FLAGS ............ L3481  Per-gate feature flags for rollout
+//   DIRECTION_DERIVATION_PARAMS ...... L3764  Weighted direction with persistence
+//   DIRECTION_REGIME_PARAMS .......... L6598  Pre-direction regime classifier
+//   DIRECTION_TIER_2_3 ............... L3876  Consecutive candle momentum override
+//   DIRECTION_TIER_2_5 ............... L3907  Building trend direction override
+//   DIRECTION_TIER_10_5 .............. L3924  Strong order flow override
+//   BIAS_RESOLUTION_TIER ............. L3943  Pre-terminal direction resolution
+//   MOMENTUM_DIRECTION_OVERRIDE_PARAMS L3499  Confirmed momentum direction
+//   ORDER_FLOW_DIRECTION_PARAMS ...... L3530  Order flow direction fallback
+//   MOMENTUM_OVERRIDE_DIRECTION_PARAMS L6694  Momentum override (30m trend)
+//   EXHAUSTION_REVERSAL_OVERRIDE ..... L6742  Extreme exhaustion direction flip
+//   MOMENTUM_FALLBACK_DIRECTION ...... L6832  Final momentum+OF fallback
+//   DIRECTIONAL_BIAS_ESCAPE_PARAMS ... L6670  Final escape hatch for building momentum
+//   TIER2_WEIGHTED_CONFIRMATION ...... L6637  Tier 2 weighted scoring
+//   STOCHRSI_ADX_ALIGNMENT_PARAMS .... L3680  Dynamic ADX threshold with StochRSI
+//   STOCHRSI_DECLINE_BONUS_PARAMS .... L3664  Declining StochRSI momentum bonus
+//   GATE_RELAXATION_FLAGS ............ L3743  Per-gate feature flags for rollout
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [5] REGIME CLASSIFICATION — Market regime detection and state management
 // ═══════════════════════════════════════════════════════════════════════════════
-//   FOUR_STATE_REGIME ................ L4091  4-state regime (EXPANSION/EXHAUSTION/COMPRESSION/BREAKOUT)
-//   MARKET_REGIME_CLASSIFIER ......... L4021  Master regime (NORMAL/STRONG/PARABOLIC/STEALTH)
-//   REGIME_ADAPTIVE_ADX_PARAMS ....... L3217  Regime-adaptive ADX thresholds
-//   TREND_PHASE_GATE ................. L5674  Orthogonal trend phase classifier
-//   EXPANSION_GATE ................... L5693  Orthogonal expansion state classifier
-//   MEAN_REVERSION_REGIME_REQUIREMENTS L5713  MR regime requirements
-//   MARKET_REGIME_DETECTION .......... L8076  Legacy regime detection thresholds
-//   NEUTRAL_PERSISTENCE_PARAMS ....... L3448  Neutral state duration tracking
-//   NO_TRADE_ZONE_STATE .............. L7194  Explicit no-trade state types
-//   TREND_EXPANSION_EXEMPTION ........ L8262  StochRSI exemption in expansion
-//   RALLY_OVERRIDE ................... L8320  Multi-TF rally override
+//   FOUR_STATE_REGIME ................ L4353  4-state regime (EXPANSION/EXHAUSTION/COMPRESSION/BREAKOUT)
+//   MARKET_REGIME_CLASSIFIER ......... L4283  Master regime (NORMAL/STRONG/PARABOLIC/STEALTH)
+//   REGIME_ADAPTIVE_ADX_PARAMS ....... L3479  Regime-adaptive ADX thresholds
+//   TREND_PHASE_GATE ................. L5936  Orthogonal trend phase classifier
+//   EXPANSION_GATE ................... L5955  Orthogonal expansion state classifier
+//   MEAN_REVERSION_REGIME_REQUIREMENTS L5975  MR regime requirements
+//   MARKET_REGIME_DETECTION .......... L8338  Legacy regime detection thresholds
+//   NEUTRAL_PERSISTENCE_PARAMS ....... L3710  Neutral state duration tracking
+//   NO_TRADE_ZONE_STATE .............. L7456  Explicit no-trade state types
+//   TREND_EXPANSION_EXEMPTION ........ L8524  StochRSI exemption in expansion
+//   RALLY_OVERRIDE ................... L8582  Multi-TF rally override
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [6] SCORING & QUALITY — Quality scoring, momentum scoring, reversal scoring
 // ═══════════════════════════════════════════════════════════════════════════════
-//   QUALITY_THRESHOLDS ............... L1480  Quality score thresholds
-//   MOMENTUM_SCORING_PARAMS .......... L4347  Momentum score floors (ADX-based)
-//   MOMENTUM_SCORE_COMPONENTS ........ L8086  Momentum score component limits
-//   MOMENTUM_SCORE_BEHAVIOR_PARAMS ... L4471  High-ADX momentum behavior change
-//   MOMENTUM_THRESHOLDS .............. L1857  Momentum score minimums
-//   REGIME_SCORE_PARAMS .............. L1587  Regime confidence scoring
-//   REVERSAL_CROSS_SCORES ............ L8041  StochRSI cross reversal scoring
-//   ADX_REVERSAL_WEIGHTS ............. L5646  ADX-based reversal score reduction
-//   DYNAMIC_REVERSAL_EXIT ............ L7299  Adaptive reversal exit thresholds
-//   REVERSAL_RISK_EXIT_SCORES ........ L7534  Component scores for exit reversal
-//   COMPONENT_CAPS ................... L1720  Max indicator contributions
-//   GRADUATED_QUALITY_PARAMS ......... L1633  Graduated quality penalties
-//   GRADUATED_QUALITY_GATE ........... L7250  Execute-trade quality gate
-//   QUALITY_NEAR_MISS_BOOST_PARAMS ... L4530  Quality near-miss ADX boost
-//   ADAPTIVE_ENTRY_THRESHOLDS ........ L7270  Adaptive trend entry thresholds
-//   ENTRY_QUALITY_GRADES ............. L8228  Entry quality grade thresholds
-//   TRADE_QUALITY_ESTIMATION ......... L7736  Trade quality at close time
-//   TREND_STRENGTH_PARAMS ............ L1786  Quantified trend strength score
-//   TRUE_ALIGNMENT_SCORING ........... L7792  Multi-TF alignment calculation
-//   MICRO_TREND_SCORING .............. L7826  Micro-trend alignment scoring
-//   HTF_ALIGNMENT_SCORING ............ L7960  HTF alignment scoring
+//   QUALITY_THRESHOLDS ............... L1742  Quality score thresholds
+//   MOMENTUM_SCORING_PARAMS .......... L4609  Momentum score floors (ADX-based)
+//   MOMENTUM_SCORE_COMPONENTS ........ L8348  Momentum score component limits
+//   MOMENTUM_SCORE_BEHAVIOR_PARAMS ... L4733  High-ADX momentum behavior change
+//   MOMENTUM_THRESHOLDS .............. L2119  Momentum score minimums
+//   REGIME_SCORE_PARAMS .............. L1849  Regime confidence scoring
+//   REVERSAL_CROSS_SCORES ............ L8303  StochRSI cross reversal scoring
+//   ADX_REVERSAL_WEIGHTS ............. L5908  ADX-based reversal score reduction
+//   DYNAMIC_REVERSAL_EXIT ............ L7561  Adaptive reversal exit thresholds
+//   REVERSAL_RISK_EXIT_SCORES ........ L7796  Component scores for exit reversal
+//   COMPONENT_CAPS ................... L1982  Max indicator contributions
+//   GRADUATED_QUALITY_PARAMS ......... L1895  Graduated quality penalties
+//   GRADUATED_QUALITY_GATE ........... L7512  Execute-trade quality gate
+//   QUALITY_NEAR_MISS_BOOST_PARAMS ... L4792  Quality near-miss ADX boost
+//   ADAPTIVE_ENTRY_THRESHOLDS ........ L7532  Adaptive trend entry thresholds
+//   ENTRY_QUALITY_GRADES ............. L8490  Entry quality grade thresholds
+//   TRADE_QUALITY_ESTIMATION ......... L7998  Trade quality at close time
+//   TREND_STRENGTH_PARAMS ............ L2048  Quantified trend strength score
+//   TRUE_ALIGNMENT_SCORING ........... L8054  Multi-TF alignment calculation
+//   MICRO_TREND_SCORING .............. L8088  Micro-trend alignment scoring
+//   HTF_ALIGNMENT_SCORING ............ L8222  HTF alignment scoring
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [7] POSITION SIZING — Position size adjustments and scaling
 // ═══════════════════════════════════════════════════════════════════════════════
-//   MICRO_TREND_MOMENTUM_SAFETY ...... L6032  Comprehensive MICRO_TREND sizing
-//   STRONG_ADX_UNIVERSAL_OVERRIDE .... L4444  ADX-based gate downgrade
-//   RISK_SEPARATION_THRESHOLDS ....... L1671  Continuation vs reversal risk
-//   CORRELATION_PARAMS ............... L2054  Cross-symbol exposure limits
-//   CORRELATION_CONFIDENCE_PARAMS .... L2216  Multi-symbol drift confidence
-//   PRICE_ACTION_PULLBACK_PARAMS ..... L5109  HTF pullback entry sizing
-//   MOMENTUM_POSITION_ADJ ........... L7658  Momentum-based position adjustments
-//   ALIGNMENT_POSITION_ADJ ........... L7667  Alignment-based position adjustments
-//   BOLLINGER_POSITION_ADJ ........... L7684  Bollinger-based position adjustments
-//   QUALITY_BASED_SIZING ............. L7701  Quality-based default sizing
-//   LEGACY_STRATEGY_MULTIPLIERS ...... L7711  Legacy strategy multipliers
+//   MICRO_TREND_MOMENTUM_SAFETY ...... L6294  Comprehensive MICRO_TREND sizing
+//   STRONG_ADX_UNIVERSAL_OVERRIDE .... L4706  ADX-based gate downgrade
+//   RISK_SEPARATION_THRESHOLDS ....... L1933  Continuation vs reversal risk
+//   CORRELATION_PARAMS ............... L2316  Cross-symbol exposure limits
+//   CORRELATION_CONFIDENCE_PARAMS .... L2478  Multi-symbol drift confidence
+//   PRICE_ACTION_PULLBACK_PARAMS ..... L5371  HTF pullback entry sizing
+//   MOMENTUM_POSITION_ADJ ........... L7920  Momentum-based position adjustments
+//   ALIGNMENT_POSITION_ADJ ........... L7929  Alignment-based position adjustments
+//   BOLLINGER_POSITION_ADJ ........... L7946  Bollinger-based position adjustments
+//   QUALITY_BASED_SIZING ............. L7963  Quality-based default sizing
+//   LEGACY_STRATEGY_MULTIPLIERS ...... L7973  Legacy strategy multipliers
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [8] EXIT & TRAILING — Stop loss, take profit, trailing stop management
 // ═══════════════════════════════════════════════════════════════════════════════
-//   RISK_PARAMS ....................... L1258  Core risk parameters (BE, trailing, quality)
-//   TRADING_FEE_PARAMS ............... L7     Trading fee configuration
-//   CONTEXTUAL_TP_EXPANSION .......... L24    Context-aware TP widening
-//   TRAILING_MIN_PROFIT_FLOOR ........ L1287  Fee-aware trailing activation floor
-//   R_MULTIPLE_TRAILING_PARAMS ....... L1315  R-multiple trailing activation
-//   DECAY_VELOCITY_TIERS ............. L1330  Tiered decay velocity thresholds
-//   MICRO_PROFIT_LOCK_PARAMS ......... L1374  Micro-profit lock (0-0.55%)
-//   PROGRESSIVE_PROFIT_LOCK_PARAMS ... L1403  Progressive profit lock (0.55-2.75%)
-//   PROGRESSIVE_LOCK_PERCENT_PARAMS .. L1434  Dynamic lock percentage
-//   STALE_PEAK_BONUS_PARAMS .......... L1450  Stale peak lock tightening
-//   PEAK_ADAPTIVE_TRAILING ........... L7378  Peak-adaptive trailing distance
-//   TRAILING_STOP_INLINE ............. L7412  Inline trailing stop params
-//   MICRO_TREND_EXIT ................. L7434  MICRO_TREND time-bound exit
-//   MOMENTUM_CONTINUATION_EXIT ....... L7452  MOMENTUM_CONTINUATION exit identity
-//   LOW_CONFIDENCE_STANDARD_EXIT ..... L7478  Low-confidence enhanced exit
-//   MODERATE_EXHAUSTION_EXIT_PARAMS .. L1462  Moderate exhaustion exit
-//   SLIPPAGE_PARAMS .................. L1468  Slippage buffer constants
-//   EMERGENCY_EXIT_PARAMS ............ L2284  Flash crash / volatility spike exits
-//   EXIT_THRESHOLDS .................. L2311  Various exit condition thresholds
-//   EXIT_PRIORITY .................... L2344  Exit condition priority order
-//   EXIT_MANAGEMENT_PRIORITY ......... L3029  Exit priority scoring weights
-//   EXIT_SIGNAL_SCORING .............. L8181  Component weights for exit signal
-//   PARTIAL_TP_PARAMS ................ L2359  Partial take profit ladder
-//   PARTIAL_TP_LADDER ................ L7554  Monitor-positions TP ladder
-//   COMPRESSION_TRADE_EXIT ........... L7320  Compression strategy exit rules
-//   STRATEGY_EXIT_ADJUSTMENTS ........ L7328  Per-strategy exit adjustments
-//   HTF_ALIGNMENT_EXIT ............... L7348  HTF alignment exit adjustments
-//   HEDGE_EXIT_PARAMS ................ L7526  Hedge position exit
-//   DYNAMIC_TRAILING_PARAMS .......... L8128  Dynamic R-multiple trailing
-//   CONTEXT_STOP_PARAMS .............. L8158  Context-aware stop loss
-//   ENTRY_CONFIRMATION_PARAMS ........ L8214  Entry confirmation thresholds
+//   RISK_PARAMS ....................... L1520  Core risk parameters (BE, trailing, quality)
+//   TRADING_FEE_PARAMS ............... L269   Trading fee configuration
+//   CONTEXTUAL_TP_EXPANSION .......... L286   Context-aware TP widening
+//   TRAILING_MIN_PROFIT_FLOOR ........ L1549  Fee-aware trailing activation floor
+//   R_MULTIPLE_TRAILING_PARAMS ....... L1577  R-multiple trailing activation
+//   DECAY_VELOCITY_TIERS ............. L1592  Tiered decay velocity thresholds
+//   MICRO_PROFIT_LOCK_PARAMS ......... L1636  Micro-profit lock (0-0.55%)
+//   PROGRESSIVE_PROFIT_LOCK_PARAMS ... L1665  Progressive profit lock (0.55-2.75%)
+//   PROGRESSIVE_LOCK_PERCENT_PARAMS .. L1696  Dynamic lock percentage
+//   STALE_PEAK_BONUS_PARAMS .......... L1712  Stale peak lock tightening
+//   PEAK_ADAPTIVE_TRAILING ........... L7640  Peak-adaptive trailing distance
+//   TRAILING_STOP_INLINE ............. L7674  Inline trailing stop params
+//   MICRO_TREND_EXIT ................. L7696  MICRO_TREND time-bound exit
+//   MOMENTUM_CONTINUATION_EXIT ....... L7714  MOMENTUM_CONTINUATION exit identity
+//   LOW_CONFIDENCE_STANDARD_EXIT ..... L7740  Low-confidence enhanced exit
+//   MODERATE_EXHAUSTION_EXIT_PARAMS .. L1724  Moderate exhaustion exit
+//   SLIPPAGE_PARAMS .................. L1730  Slippage buffer constants
+//   EMERGENCY_EXIT_PARAMS ............ L2546  Flash crash / volatility spike exits
+//   EXIT_THRESHOLDS .................. L2573  Various exit condition thresholds
+//   EXIT_PRIORITY .................... L2606  Exit condition priority order
+//   EXIT_MANAGEMENT_PRIORITY ......... L3291  Exit priority scoring weights
+//   EXIT_SIGNAL_SCORING .............. L8443  Component weights for exit signal
+//   PARTIAL_TP_PARAMS ................ L2621  Partial take profit ladder
+//   PARTIAL_TP_LADDER ................ L7816  Monitor-positions TP ladder
+//   COMPRESSION_TRADE_EXIT ........... L7582  Compression strategy exit rules
+//   STRATEGY_EXIT_ADJUSTMENTS ........ L7590  Per-strategy exit adjustments
+//   HTF_ALIGNMENT_EXIT ............... L7610  HTF alignment exit adjustments
+//   HEDGE_EXIT_PARAMS ................ L7788  Hedge position exit
+//   DYNAMIC_TRAILING_PARAMS .......... L8390  Dynamic R-multiple trailing
+//   CONTEXT_STOP_PARAMS .............. L8420  Context-aware stop loss
+//   ENTRY_CONFIRMATION_PARAMS ........ L8476  Entry confirmation thresholds
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [9] RISK MANAGEMENT — Portfolio-level and recovery risk controls
 // ═══════════════════════════════════════════════════════════════════════════════
-//   RECOVERY_MODE_PARAMS ............. L1507  Recovery mode (entry/exit logic)
-//   PRE_RECOVERY_PARAMS .............. L1563  Pre-recovery soft state
-//   LOSS_CLUSTERING_PARAMS ........... L1621  Low-quality loss cooldown
-//   RECOVERY_EXIT_PARAMS ............. L1655  Recovery exit conditions
-//   REVERSAL_OVERRIDE_SAFETY ......... L1692  Reversal override safety gates
-//   EXCEPTION_HIERARCHY .............. L1813  Exception type priority order
-//   EXCEPTION_BUDGET ................. L1823  Exception usage budget
-//   DYNAMIC_MAX_TRADES ............... L7563  Performance-based trade limits
-//   TRAILING_DAILY_LIMIT ............. L7579  Daily profit locking
-//   DYNAMIC_CONSISTENCY .............. L7588  Context-dependent consistency
-//   RISK_REWARD_FILTER ............... L7731  Minimum R:R ratio
+//   RECOVERY_MODE_PARAMS ............. L1769  Recovery mode (entry/exit logic)
+//   PRE_RECOVERY_PARAMS .............. L1825  Pre-recovery soft state
+//   LOSS_CLUSTERING_PARAMS ........... L1883  Low-quality loss cooldown
+//   RECOVERY_EXIT_PARAMS ............. L1917  Recovery exit conditions
+//   REVERSAL_OVERRIDE_SAFETY ......... L1954  Reversal override safety gates
+//   EXCEPTION_HIERARCHY .............. L2075  Exception type priority order
+//   EXCEPTION_BUDGET ................. L2085  Exception usage budget
+//   DYNAMIC_MAX_TRADES ............... L7825  Performance-based trade limits
+//   TRAILING_DAILY_LIMIT ............. L7841  Daily profit locking
+//   DYNAMIC_CONSISTENCY .............. L7850  Context-dependent consistency
+//   RISK_REWARD_FILTER ............... L7993  Minimum R:R ratio
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [10] EXECUTION — Order execution, validation, volume filters
 // ═══════════════════════════════════════════════════════════════════════════════
-//   ORDER_EXECUTION_PARAMS ........... L2236  Retry logic and fill ratios
-//   TREND_VALIDATION_PARAMS .......... L2248  Trend-direction agreement check
-//   STRATEGY_PARAMS .................. L2257  Strategy performance selection
-//   SYMBOL_PARAMS .................... L2275  Symbol win rate filtering
-//   VOLUME_FILTER .................... L7596  24h volume requirements
-//   OBV_FILTER ....................... L7611  OBV divergence detection
-//   VWAP_FILTER ...................... L7625  VWAP overextension filter
-//   SLIPPAGE_PROTECTION .............. L7647  Pre/post-trade slippage limits
-//   STRATEGY_ADX_RESTRICTIONS ........ L4676  Per-strategy ADX limits
-//   BREAKOUT_THRESHOLDS .............. L1707  Breakout definition thresholds
-//   BREAKOUT_MODE_PARAMS ............. L1748  Breakout mode penalty reduction
-//   ENTRY_TIMING_PARAMS .............. L1843  Entry timing score thresholds
-//   ENTRY_TIMING_PHASE2_PARAMS ....... L2013  Phase 2 pullback/bounce timing
+//   ORDER_EXECUTION_PARAMS ........... L2498  Retry logic and fill ratios
+//   TREND_VALIDATION_PARAMS .......... L2510  Trend-direction agreement check
+//   STRATEGY_PARAMS .................. L2519  Strategy performance selection
+//   SYMBOL_PARAMS .................... L2537  Symbol win rate filtering
+//   VOLUME_FILTER .................... L7858  24h volume requirements
+//   OBV_FILTER ....................... L7873  OBV divergence detection
+//   VWAP_FILTER ...................... L7887  VWAP overextension filter
+//   SLIPPAGE_PROTECTION .............. L7909  Pre/post-trade slippage limits
+//   STRATEGY_ADX_RESTRICTIONS ........ L4938  Per-strategy ADX limits
+//   BREAKOUT_THRESHOLDS .............. L1969  Breakout definition thresholds
+//   BREAKOUT_MODE_PARAMS ............. L2010  Breakout mode penalty reduction
+//   ENTRY_TIMING_PARAMS .............. L2105  Entry timing score thresholds
+//   ENTRY_TIMING_PHASE2_PARAMS ....... L2275  Phase 2 pullback/bounce timing
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [11] MONITORING & HEALTH — Bot health, heartbeat, alerting
 // ═══════════════════════════════════════════════════════════════════════════════
-//   BOT_HEARTBEAT_CONFIG ............. L7152  Heartbeat monitoring config
-//   HEALTH_ALERT_TYPES ............... L7221  3-tier alert classifications
-//   MOMENTUM_FLIP_DETECTION_PARAMS ... L5983  Momentum score flip detection
+//   BOT_HEARTBEAT_CONFIG ............. L7414  Heartbeat monitoring config
+//   HEALTH_ALERT_TYPES ............... L7483  3-tier alert classifications
+//   MOMENTUM_FLIP_DETECTION_PARAMS ... L6245  Momentum score flip detection
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [12] MICRO-STRUCTURE & SPECIALIZED — Niche detection and edge cases
 // ═══════════════════════════════════════════════════════════════════════════════
-//   MICRO_TREND_PARAMS ............... L1763  Micro-trend bypass hardening
-//   ADX_RISING_DIRECTIONAL_BYPASS .... L4000  ADX rising directional bypass
-//   RELAXED_ORDER_FLOW_PARAMS ........ L3437  Relaxed OF when 1h directional
-//   LATE_GRIND_ENHANCED_PARAMS ....... L4564  Late grind consolidation pause
-//   STEALTH_TREND_ENHANCED_PARAMS .... L4550  Stealth trend slope logging
-//   ADX_SLOPE_GRADUATED .............. L5840  Graduated ADX slope penalties
-//   MOMENTUM_FLIP_DETECTION_PARAMS ... L5983  Momentum flip cooldown
-//   DIRECTIONAL_RUNWAY_GATE .......... L6972  StochRSI runway validation
-//   STRATEGY_TYPES ................... L2374  Strategy type classification
-//   DISABLED_STRATEGIES .............. L4980  Disabled strategy list
-//   BOLLINGER_CALC_PARAMS ............ L7767  Bollinger calculation params
-//   MARKET_STRUCTURE_VALIDATION ...... L7782  HH/LL pattern validation
-//   DIVERGENCE_POSITION_SIZING ....... L7786  Divergence-based position sizing
-//   TIME_STOP_MULTIPLIER ............. L7550  Time-based stop multiplier
+//   MICRO_TREND_PARAMS ............... L2025  Micro-trend bypass hardening
+//   ADX_RISING_DIRECTIONAL_BYPASS .... L4262  ADX rising directional bypass
+//   RELAXED_ORDER_FLOW_PARAMS ........ L3699  Relaxed OF when 1h directional
+//   LATE_GRIND_ENHANCED_PARAMS ....... L4826  Late grind consolidation pause
+//   STEALTH_TREND_ENHANCED_PARAMS .... L4812  Stealth trend slope logging
+//   ADX_SLOPE_GRADUATED .............. L6102  Graduated ADX slope penalties
+//   MOMENTUM_FLIP_DETECTION_PARAMS ... L6245  Momentum flip cooldown
+//   DIRECTIONAL_RUNWAY_GATE .......... L7234  StochRSI runway validation
+//   STRATEGY_TYPES ................... L2636  Strategy type classification
+//   DISABLED_STRATEGIES .............. L5242  Disabled strategy list
+//   BOLLINGER_CALC_PARAMS ............ L8029  Bollinger calculation params
+//   MARKET_STRUCTURE_VALIDATION ...... L8044  HH/LL pattern validation
+//   DIVERGENCE_POSITION_SIZING ....... L8048  Divergence-based position sizing
+//   TIME_STOP_MULTIPLIER ............. L7812  Time-based stop multiplier
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // [13] TYPES & FUNCTIONS — Exported types and utility functions
 // ═══════════════════════════════════════════════════════════════════════════════
-//   AdxPhase (type) .................. L417
-//   FourStateRegime (type) ........... L4089
-//   MasterMarketRegime (type) ........ L4078
-//   DirectionRegime (type) ........... L6370
-//   ExceptionType (type) ............. L1841
-//   NoMomentumExceptionType (type) ... L3391
-//   AdaptiveSignalModeType (type) .... L5057
-//   MicroTrendScalingResult (interface) L6137
-//   MicroTrendScalingInput (interface)  L6153
-//   calculateMicroTrendScaling (fn) .. L6168
+//   AdxPhase (type) .................. L679
+//   FourStateRegime (type) ........... L4351
+//   MasterMarketRegime (type) ........ L4340
+//   DirectionRegime (type) ........... L6632
+//   ExceptionType (type) ............. L2103
+//   NoMomentumExceptionType (type) ... L3653
+//   AdaptiveSignalModeType (type) .... L5319
+//   MicroTrendScalingResult (interface) L6399
+//   MicroTrendScalingInput (interface)  L6415
+//   calculateMicroTrendScaling (fn) .. L6430
 //
 // ═══════════════════════════════════════════════════════════════════════════════
 // Total exports: ~130 const + 7 types + 2 interfaces + 1 function
