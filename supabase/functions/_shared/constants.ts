@@ -81,12 +81,13 @@ export const ADX_THRESHOLDS = {
   ABSOLUTE_FLOOR: 18,
 } as const;
 
-// ============= ADX GATE V1.1 PARAMETERS =============
+// ============= ADX GATE PARAMETERS =============
+// Renamed from ADX_GATE_V1_1 → ADX_GATE (version suffix unnecessary)
 // v1.1 Minimal Gate: Role discipline - only answers "Is there market energy?"
 // REMOVED in v1.1: 1H Fallback, Neutral 4H Handling, Mean Reversion Override, 
 // Quiet Trend Bypass, Low ADX Trend Exception (moved to dedicated handlers)
 // v1.2 FIX: Only ONE bypass allowed per signal in transitional zone
-export const ADX_GATE_V1_1 = {
+export const ADX_GATE = {
   ENABLED: true,
   
   // ===== TIER 0: ABSOLUTE FLOOR (NO EXCEPTIONS) =====

@@ -19,7 +19,7 @@ import {
   HTF_EXTREME_HARD_GATES,
   ADX_THRESHOLDS,
   ADX_PHASES,
-  ADX_GATE_V1_1,
+  ADX_GATE,
   RALLY_OVERRIDE,
   STRONG_TREND_TIER0_OVERRIDE,
   DEEP_STOCHRSI_HARD_GATE,
@@ -318,8 +318,8 @@ Deno.test("INVARIANT: ADX phases are monotonically increasing and non-overlappin
 
 Deno.test("INVARIANT: ADX hard floor < TRANSITION zone min", () => {
   // Hard floor should be within the transition zone, not above it
-  const hardFloor = ADX_GATE_V1_1.HARD_FLOOR;
-  const transMax = ADX_GATE_V1_1.TRANSITIONAL_MAX;
+  const hardFloor = ADX_GATE.HARD_FLOOR;
+  const transMax = ADX_GATE.TRANSITIONAL_MAX;
   
   assert(hardFloor < transMax,
     `Hard floor (${hardFloor}) must be < transition max (${transMax}). ` +
