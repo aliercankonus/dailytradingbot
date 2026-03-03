@@ -5154,8 +5154,9 @@ export const classify4StateRegime = (
     const diSepNorm = normalize(diSeparation, TB.DI_SEP_NORM_MIN, TB.DI_SEP_NORM_MAX);
     
     // Momentum alignment: 1.0 if aligned, 0.5 if neutral, 0.0 if opposing
-    const momentumAligned = derivedDirection === 'long' ? momentumScore > 10 : momentumScore < -10;
-    const momentumNeutral = Math.abs(momentumScore) <= 10;
+    const mAt = R.MOMENTUM_ALIGNMENT_THRESHOLD;
+    const momentumAligned = derivedDirection === 'long' ? momentumScore > mAt : momentumScore < -mAt;
+    const momentumNeutral = Math.abs(momentumScore) <= mAt;
     const momentumNorm = momentumAligned ? 1.0 : momentumNeutral ? 0.5 : 0.0;
     
     // Weighted sum → 0-100 scale
@@ -5231,8 +5232,8 @@ export const classify4StateRegime = (
     let isTransition = isBufferedExpansion;
     
     if (TB.ENABLED && regimeConfidence < TB.EXPANSION_THRESHOLD) {
-      if (regimeConfidence >= 55) {
-        // Upper transition (55-70): cautious expansion at 70% sizing
+      if (regimeConfidence >= R.UPPER_TRANSITION_CONFIDENCE) {
+        // Upper transition (UPPER_TRANSITION_CONFIDENCE-70): cautious expansion at 70% sizing
         posMultiplier = Math.min(posMultiplier, TB.TRANSITION_POSITION_MULTIPLIER_HIGH);
       } else {
         // Lower transition (45-54): very cautious at 40% sizing
@@ -5241,7 +5242,7 @@ export const classify4StateRegime = (
       isTransition = true;
     }
     
-    const confidenceLabel = regimeConfidence < 55 ? ` [LOWER TRANSITION: 40% sizing]` : 
+    const confidenceLabel = regimeConfidence < R.UPPER_TRANSITION_CONFIDENCE ? ` [LOWER TRANSITION: 40% sizing]` : 
                             regimeConfidence < 70 ? ` [UPPER TRANSITION: 70% sizing]` : '';
     const bufferLabel = isBufferedExpansion ? ` [BUFFERED: slope=${adxSlope.toFixed(2)} in noise band, ${(posMultiplier * 100).toFixed(0)}% sizing]` : '';
     
@@ -5276,7 +5277,7 @@ export const classify4StateRegime = (
   // Determine exhaustion tier
   const slopeInConditionalZone = adx >= R.TREND_EXHAUSTION.MIN_ADX && adxSlope < R.TREND_EXHAUSTION.CONDITIONAL_SLOPE_THRESHOLD && adxSlope >= R.TREND_EXHAUSTION.CONDITIONAL_EXHAUSTION_SLOPE;
   const slopeConfirmedExhaustion = adx >= R.TREND_EXHAUSTION.MIN_ADX && adxSlope < R.TREND_EXHAUSTION.CONDITIONAL_EXHAUSTION_SLOPE;
-  const secondaryForcedExhaustion = adx >= R.TREND_EXHAUSTION.MIN_ADX && secondaryCount >= 2; // 2+ secondary signals = exhaustion regardless of slope
+  const secondaryForcedExhaustion = adx >= R.TREND_EXHAUSTION.MIN_ADX && secondaryCount >= R.SECONDARY_FORCED_EXHAUSTION_COUNT;
   
   if (slopeConfirmedExhaustion || secondaryForcedExhaustion) {
     // TIER: CONFIRMED EXHAUSTION — hard reduction
@@ -5358,7 +5359,7 @@ export const classify4StateRegime = (
   
   // ===== IGNITION BYPASS: Centralized from FOUR_STATE_REGIME.IGNITION_BYPASS =====
   // Prevents textbook ignition-phase setups from being killed by RANGE_COMPRESSION.
-  const IB = R.IGNITION_BYPASS || { ENABLED: false, MIN_ADX: 20, MIN_MOMENTUM: 15, POSITION_MULTIPLIER: 0.35, MIN_ADX_SLOPE: 0, SHADOW_FLAT_TOLERANCE: { ENABLED: false, MAX_ABS_SLOPE: 0.1 } };
+  const IB = R.IGNITION_BYPASS;
   
   // Production ignition: strict slope > 0
   const allowIgnitionBypass = (
@@ -5418,8 +5419,8 @@ export const classify4StateRegime = (
   const adxBelowThreshold = adx < R.RANGE_COMPRESSION.MAX_ADX;
   const momentumScoreTooLow = absMomentumScore < R.RANGE_COMPRESSION.MAX_ABS_MOMENTUM_SCORE;
   
-  // BB width expanding check: if relativeATR > 1.1 (above historical avg), volatility is expanding → not compression
-  const bbWidthExpanding = relativeATR > 1.1;
+  // BB width expanding check: if relativeATR > threshold (above historical avg), volatility is expanding → not compression
+  const bbWidthExpanding = relativeATR > R.BB_WIDTH_EXPANDING_ATR_THRESHOLD;
   
   const isExplicitRangeCompression = trendIsNeutral && !bbWidthExpanding && (adxBelowThreshold || (momentumHasNoEdge && momentumScoreTooLow));
   
