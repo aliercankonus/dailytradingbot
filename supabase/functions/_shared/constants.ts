@@ -2792,6 +2792,9 @@ export const HTF_EXTREME_HARD_GATES = {
   STOCHRSI_OVERSOLD_BLOCK_PARABOLIC: 8,    // Tier 2 parabolic: relaxed from 20
   
   // ADX thresholds for parabolic mode activation
+  // INTENTIONAL: 45, not ADX_THRESHOLDS.PARABOLIC (50). Parabolic mode activates 5 points
+  // earlier to pre-position StochRSI gate relaxation BEFORE the trend reaches full parabolic
+  // strength. This prevents late entries when K is already pinned at extremes.
   PARABOLIC_MODE_MIN_ADX: 45,
   PARABOLIC_MODE_REQUIRE_ADX_RISING: true,
   
