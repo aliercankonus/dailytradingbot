@@ -704,7 +704,7 @@ export const STOCHRSI_THRESHOLDS = {
   // PHASE 1 FIX: NEW Tier 0 (Ultra Strong) - ADX >= 50, no continuation requirement
   // Allows entries when ADX is very high even if slope slightly negative or DI shrinking
   // This fixes missed opportunities during strong trend continuation
-  TIER0_MIN_ADX: 50,
+  TIER0_MIN_ADX: ADX_THRESHOLDS.PARABOLIC,  // 50
   TIER0_MIN_ADX_SLOPE: -0.5,  // Allow slightly negative slope (trend cruising)
   TIER0_MIN_DI_GAP: 8,        // Relaxed DI gap (gap can shrink during consolidation)
   TIER0_POSITION_SIZE: 30,    // Conservative 30% position due to late entry
@@ -4188,7 +4188,7 @@ export const SIGNAL_TYPE_VALIDITY_PARAMS = {
     REQUIRE_MOMENTUM_ALIGNED: true,     // Momentum must match signal direction
     MIN_ALIGNED_MOMENTUM: 5,            // Minimum momentum score in signal direction
     BLOCK_IF_EXHAUSTED: true,           // Block at trend exhaustion
-    EXHAUSTION_ADX: 50,                 // ADX level considered potentially exhausted
+    EXHAUSTION_ADX: ADX_THRESHOLDS.PARABOLIC,  // 50 — ADX level considered potentially exhausted
     EXHAUSTION_SLOPE: -0.5,             // Negative slope threshold for exhaustion
     BLOCK_IF_RANGING: true,             // Block in RANGING regime
   },
