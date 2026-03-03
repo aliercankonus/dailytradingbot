@@ -2,7 +2,7 @@
 // Single source of truth for quality score and reversal score calculations
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 
-import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, FOUR_STATE_REGIME, RSI_ZONE_THRESHOLDS, VOLUME_SCORE_PARAMS, ADX_SCORE_PARAMS, ALIGNMENT_SCORE_PARAMS, ADX_REVERSAL_WEIGHTS, REVERSAL_CROSS_SCORES, MARKET_REGIME_DETECTION, ADX_GATE_V1_1, EARLY_IGNITION_ENTRY, type AdxPhase, type ExceptionType, type MasterMarketRegime, type FourStateRegime, type DirectionRegime } from "./constants.ts";
+import { ADX_THRESHOLDS, ADX_PHASES, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, BREAKOUT_MODE_PARAMS, RISK_SEPARATION_THRESHOLDS, COMPONENT_CAPS, TIME_IN_EXTREME_PARAMS, TREND_STRENGTH_PARAMS, EXCEPTION_HIERARCHY, EXCEPTION_BUDGET, PRE_RECOVERY_PARAMS, REGIME_SCORE_PARAMS, STOCHRSI_DYNAMIC_PARAMS, MARKET_REGIME_CLASSIFIER, STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS, MOMENTUM_SCORE_BEHAVIOR_PARAMS, QUALITY_NEAR_MISS_BOOST_PARAMS, TREND_CONTINUATION_REENTRY_PARAMS, IMPULSE_CONTINUATION_PARAMS, PRICE_ACTION_PULLBACK_PARAMS, MOMENTUM_FALLBACK_DIRECTION_PARAMS, DIRECTION_REGIME_PARAMS, TIER2_WEIGHTED_CONFIRMATION, DIRECTIONAL_BIAS_ESCAPE_PARAMS, EXHAUSTION_REVERSAL_OVERRIDE_PARAMS, EXHAUSTION_ESCAPE_PARAMS, FOUR_STATE_REGIME, RSI_ZONE_THRESHOLDS, VOLUME_SCORE_PARAMS, ADX_SCORE_PARAMS, ALIGNMENT_SCORE_PARAMS, ADX_REVERSAL_WEIGHTS, REVERSAL_CROSS_SCORES, MARKET_REGIME_DETECTION, ADX_GATE_V1_1, EARLY_IGNITION_ENTRY, MOMENTUM_SCORING_PARAMS, type AdxPhase, type ExceptionType, type MasterMarketRegime, type FourStateRegime, type DirectionRegime } from "./constants.ts";
 
 // ============= ADX PHASE STATE MACHINE =============
 // PHASE 1 IMPROVEMENT: Classify ADX into phases for context-aware behavior
@@ -654,9 +654,8 @@ export const getAdxScore = (adx: number, adxSlope?: number): number => {
 export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: boolean = false, stochRsiData?: { k: number; d: number }, adxSlope?: number): number => {
   if (!momentum) {
     // PHASE 1 FIX: Even without momentum data, very high ADX IS momentum confirmation
-    // ADX >= 40 with non-falling slope = trend strength is the momentum
-    if (adx >= 40 && (adxSlope === undefined || adxSlope > -0.5)) {
-      return 8;  // Floor at 8/20 for very strong trends
+    if (adx >= MOMENTUM_SCORING_PARAMS.VERY_STRONG_ADX_THRESHOLD && (adxSlope === undefined || adxSlope > MOMENTUM_SCORING_PARAMS.VERY_STRONG_MIN_SLOPE)) {
+      return MOMENTUM_SCORING_PARAMS.VERY_STRONG_FLOOR;
     }
     return 0;
   }
@@ -664,7 +663,6 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
   const state = momentum.state || "none";
   const confirms = momentum.confirms || false;
   const volumeConfirms = momentum.volumeConfirms || false;
-  // Fix: check both boolean and string state for "building"
   const building = momentum.building || state === "building";
   const macdExpanding = momentum.macdExpanding || false;
   
@@ -681,21 +679,19 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
     score = 8;
   } else if (state === "mixed" && macdExpanding) {
     // IMPROVED: "mixed" + MACD expanding + ADX rising = ACTIVE MOMENTUM CONTINUATION
-    // This is a valid entry during strong trends, not a reject scenario
-    if (adx >= 25 && adxRising) {
-      score = 10;  // Was 6, now 10 for active momentum continuation
-    } else if (adx >= 22) {
-      score = 8;   // Decent ADX + MACD expanding = 8 pts
+    if (adx >= MOMENTUM_SCORING_PARAMS.CONTINUATION_ADX_STRONG && adxRising) {
+      score = 10;
+    } else if (adx >= MOMENTUM_SCORING_PARAMS.CONTINUATION_ADX_DECENT) {
+      score = 8;
     } else {
-      score = 6;   // Original score for weaker trends
+      score = 6;
     }
   } else if (building && macdExpanding) {
     score = 4;
   } else if (state === "mixed") {
     score = 2;
   } else if (macdExpanding) {
-    // MACD expanding alone should get more credit when ADX is strong
-    score = adx >= 25 ? 4 : 2;
+    score = adx >= MOMENTUM_SCORING_PARAMS.CONTINUATION_ADX_STRONG ? 4 : 2;
   } else {
     score = 0;
   }
@@ -703,29 +699,22 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
   // Volume bonus
   if (volumeConfirms) score += 4;
   
-  // ============= NEW: STOCHRSI DECLINE BONUS =============
-  // When StochRSI K is at extreme and declining (K < D), add momentum bonus
-  // This helps detect early bearish/bullish momentum before MACD confirms
+  // ============= STOCHRSI DECLINE BONUS =============
   if (stochRsiData) {
     const { k, d } = stochRsiData;
-    // Bearish bonus: K < 20 and K < D (declining from oversold = bearish momentum building)
     if (k < 20 && k < d) {
-      score += 3;  // +3 for declining StochRSI in oversold zone
-    }
-    // Bullish bonus: K > 80 and K > D (rising from overbought = bullish momentum building)
-    else if (k > 80 && k > d) {
-      score += 3;  // +3 for rising StochRSI in overbought zone
+      score += 3;
+    } else if (k > 80 && k > d) {
+      score += 3;
     }
   }
   
-  // ============= PHASE 1 FIX: MOMENTUM FLOOR FOR VERY STRONG ADX =============
-  // When ADX >= 40 and not sharply falling, the trend strength IS confirmation of momentum
-  // Apply minimum score of 8 to prevent false rejections during consolidation in strong trends
+  // ============= MOMENTUM FLOOR FOR VERY STRONG ADX =============
   const effectiveAdxSlope = adxSlope ?? (adxRising ? 0.5 : -0.3);
-  if (adx >= 40 && effectiveAdxSlope > -0.5) {
-    score = Math.max(score, 8);  // Floor at 8/20 for very strong trends
-  } else if (adx >= 35 && effectiveAdxSlope > -0.3) {
-    score = Math.max(score, 6);  // Floor at 6/20 for strong trends
+  if (adx >= MOMENTUM_SCORING_PARAMS.VERY_STRONG_ADX_THRESHOLD && effectiveAdxSlope > MOMENTUM_SCORING_PARAMS.VERY_STRONG_MIN_SLOPE) {
+    score = Math.max(score, MOMENTUM_SCORING_PARAMS.VERY_STRONG_FLOOR);
+  } else if (adx >= MOMENTUM_SCORING_PARAMS.STRONG_ADX_THRESHOLD && effectiveAdxSlope > MOMENTUM_SCORING_PARAMS.STRONG_MIN_SLOPE) {
+    score = Math.max(score, MOMENTUM_SCORING_PARAMS.STRONG_FLOOR);
   }
   
   return Math.min(20, score);
