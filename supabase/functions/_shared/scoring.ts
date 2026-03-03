@@ -5356,6 +5356,35 @@ export const classify4StateRegime = (
     };
   }
   
+  // ===== IGNITION BYPASS: ADX 20-22 with rising slope + momentum edge =====
+  // Prevents textbook ignition-phase setups from being killed by RANGE_COMPRESSION.
+  // Conditions: ADX in [20, MAX_ADX), slope rising, directional momentum confirmed.
+  // Routes to BREAKOUT_SETUP at 0.35x sizing instead of hard block.
+  const IGNITION_MIN_ADX = 20;
+  const IGNITION_MIN_MOMENTUM = 15;
+  const IGNITION_POSITION_MULTIPLIER = 0.35;
+  const allowIgnitionBypass = (
+    trendIsNeutral &&
+    adx >= IGNITION_MIN_ADX &&
+    adx < R.RANGE_COMPRESSION.MAX_ADX &&
+    adxSlope > 0 &&
+    absMomentumScore >= IGNITION_MIN_MOMENTUM
+  );
+  
+  if (allowIgnitionBypass) {
+    return {
+      regime: 'BREAKOUT_SETUP',
+      positionMultiplier: IGNITION_POSITION_MULTIPLIER,
+      allowContinuation: true,
+      allowMeanReversion: true,
+      requireConfirmation: true,
+      reason: `BREAKOUT_SETUP [IGNITION BYPASS]: ADX=${adx.toFixed(1)} (${IGNITION_MIN_ADX}-${R.RANGE_COMPRESSION.MAX_ADX}), slope=${adxSlope.toFixed(2)}>0, |momentum|=${absMomentumScore.toFixed(0)}>=${IGNITION_MIN_MOMENTUM}, confidence=${regimeConfidence} → ignition probe at ${(IGNITION_POSITION_MULTIPLIER * 100).toFixed(0)}% sizing`,
+      regimeConfidence,
+      isTransitionZone: true,
+      diagnostics: diag,
+    };
+  }
+  
   // ===== STATE 3: RANGE COMPRESSION =====
   // FIX: BB width expanding = NOT compression. Only classify as RANGE_COMPRESSION
   // if volatility is actually contracting, not expanding.
