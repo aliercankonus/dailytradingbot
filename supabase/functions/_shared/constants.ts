@@ -4150,6 +4150,16 @@ export const FOUR_STATE_REGIME = {
     MR_BYPASS_MIN_STOCHRSI_DISTANCE: 15,  // StochRSI K must be < 15 or > 85 for MR
   },
   
+  // ===== INLINE THRESHOLDS (extracted from classify4StateRegime) =====
+  // Momentum alignment: score above/below these = directionally aligned
+  MOMENTUM_ALIGNMENT_THRESHOLD: 10,
+  // Upper transition lower bound for confidence-based sizing
+  UPPER_TRANSITION_CONFIDENCE: 55,
+  // Secondary forced exhaustion: if this many secondary signals fire, exhaustion regardless of slope
+  SECONDARY_FORCED_EXHAUSTION_COUNT: 2,
+  // BB width expanding: relativeATR above this = volatility expanding, NOT compression
+  BB_WIDTH_EXPANDING_ATR_THRESHOLD: 1.1,
+  
   // ===== IGNITION BYPASS =====
   // Prevents textbook ignition-phase setups (ADX 20-22, rising slope, momentum edge)
   // from being killed by RANGE_COMPRESSION. Routes to BREAKOUT_SETUP at conservative sizing.
