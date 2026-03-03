@@ -115,6 +115,10 @@ export const ADX_GATE_V1_1 = {
     },
   },
   
+  // ===== EARLY IGNITION EXCEPTION (checkEarlyIgnitionException) =====
+  // Position multiplier for EARLY_TREND regime with aligned HTF
+  EARLY_IGNITION_EXCEPTION_MULTIPLIER: 0.70,
+  
   // ===== TRANSITIONAL ZONE (16-22) =====
   // Exception paths: Squeeze Expansion, Early Ignition, MR, ETI
   // These fire when graduated slope condition is NOT met (slope <= 0)
