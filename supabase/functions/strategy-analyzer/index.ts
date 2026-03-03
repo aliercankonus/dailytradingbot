@@ -5246,6 +5246,54 @@ serve(async (req) => {
               
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
               
+              // ===== SHADOW-ONLY IGNITION FLAT TOLERANCE =====
+              // If this symbol would have passed ignition bypass with flat slope tolerance,
+              // log a shadow signal for A/B comparison. Production path unchanged.
+              const shadowIgnitionDiag = fourStateRegime.diagnostics?.shadowIgnitionEligible;
+              if (shadowIgnitionDiag && shadowModeEnabled && derivedDirection) {
+                const shadowDetails = fourStateRegime.diagnostics?.shadowIgnitionDetails || {};
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 SHADOW IGNITION: Would have bypassed RANGE_COMPRESSION with flat tolerance (slope=${adxSlope.toFixed(3)}, |momentum|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)}, ADX=${adx.toFixed(1)})`);
+                
+                try {
+                  await logShadowSignal(supabase as any, {
+                    userId,
+                    symbol,
+                    signalType: derivedDirection as 'long' | 'short',
+                    strategyName: 'IGNITION_FLAT_TOLERANCE',
+                    gateBlockedBy: 'trend_consistency',  // closest match in existing enum
+                    oldGateResult: 'blocked',
+                    newGateResult: 'passed',
+                    gateDetails: {
+                      gate: 'IGNITION_FLAT_TOLERANCE',
+                      adx: parseFloat(adx.toFixed(1)),
+                      adxSlope: parseFloat(adxSlope.toFixed(3)),
+                      absSlope: parseFloat(Math.abs(adxSlope).toFixed(3)),
+                      flatToleranceThreshold: shadowDetails.flatToleranceThreshold || 0.1,
+                      momentumScore: earlySmartMomentum?.score ?? 0,
+                      absMomentumScore: Math.abs(earlySmartMomentum?.score ?? 0),
+                      wouldHaveMultiplier: shadowDetails.wouldHaveMultiplier || 0.35,
+                      regime: fourStateRegime.regime,
+                    },
+                    confidenceScore: trendData?.alignment?.confidence4h || 0,
+                    entryPrice: trendData?.currentPrice || 0,
+                    atr: trendData?.volatility?.atr || 0,
+                    trend: primaryTrendForRegime,
+                    oldPositionMultiplier: 0,  // blocked
+                    newPositionMultiplier: shadowDetails.wouldHaveMultiplier || 0.35,
+                    indicators: {
+                      adx: parseFloat(adx.toFixed(1)),
+                      adxSlope: parseFloat(adxSlope.toFixed(3)),
+                      momentumScore: earlySmartMomentum?.score ?? 0,
+                      momentumState: momentumStateForRegime,
+                      bbWidth: trendData?.bollingerBands?.['1h']?.width || 0,
+                      relativeATR: trendData?.volatility?.relativeATR || 0,
+                    },
+                  });
+                } catch (shadowErr) {
+                  logger.forSymbol(symbol).error(`Failed to log shadow ignition signal: ${shadowErr}`);
+                }
+              }
+              
               await logRejectionWithAI(supabase, userId, symbol, blockReason, {
                 gate: compressionEntryResult ? 'COMPRESSION_NO_SETUP' : 'RANGE_COMPRESSION_BLOCK',
                 fourStateRegime: fourStateRegime.regime,
@@ -5268,6 +5316,7 @@ serve(async (req) => {
                 bbExpanding: bbExpandingInCompression,
                 adxSlopeForBreakout: adxSlopeForBreakout.toFixed(2),
                 breakoutWatchBlocked: bbExpandingInCompression ? `ADX slope ${adxSlopeForBreakout.toFixed(2)} <= 0 (not rising)` : 'BB not expanding',
+                shadowIgnitionEligible: shadowIgnitionDiag || false,
               }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
