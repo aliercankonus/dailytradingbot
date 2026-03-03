@@ -14,6 +14,9 @@ import {
   SLIPPAGE_PARAMS,
   MEAN_REVERSION_CONFIG,
   TRADING_FEE_PARAMS,
+  PROGRESSIVE_LOCK_PERCENT_PARAMS,
+  STALE_PEAK_BONUS_PARAMS,
+  MODERATE_EXHAUSTION_EXIT_PARAMS,
 } from "./constants.ts";
 import { extractADX, extractADXSlope } from "./scoring.ts";
 
@@ -367,7 +370,7 @@ export function evaluateMeanReversionExit(
     const momentumFloor = MEAN_REVERSION_CONFIG.MODERATE_EXHAUSTION?.INVALIDATION_MOMENTUM_FLOOR ?? 30;
     const isLong = position.side === "BUY";
     const invalidated = isLong ? momentumScore < momentumFloor : momentumScore > -momentumFloor;
-    if (invalidated && market.pnlPercent < 0.5) {
+    if (invalidated && market.pnlPercent < MODERATE_EXHAUSTION_EXIT_PARAMS.MAX_PNL_FOR_INVALIDATION) {
       return { shouldExit: true, exitReason: "moderate_exhaustion_momentum_invalidated", suggestedStopLoss, newMaeAtr };
     }
   }
@@ -381,21 +384,19 @@ export function evaluateMeanReversionExit(
 
 /** Dynamic profit lock percentage based on peak P&L and aggressiveness setting */
 export function getProgressiveLockPercent(peakPnl: number, aggressiveness: number): number {
-  const baseLock = 0.30 + (aggressiveness * 0.05);
+  const baseLock = PROGRESSIVE_LOCK_PERCENT_PARAMS.BASE_LOCK + (aggressiveness * PROGRESSIVE_LOCK_PERCENT_PARAMS.AGGR_MULTIPLIER);
   let tierBonus = 0;
-  if (peakPnl >= 5) tierBonus = 0.30;
-  else if (peakPnl >= 3) tierBonus = 0.20;
-  else if (peakPnl >= 2) tierBonus = 0.15;
-  else if (peakPnl >= 1) tierBonus = 0.10;
-  return Math.min(0.85, baseLock + tierBonus);
+  for (const tier of PROGRESSIVE_LOCK_PERCENT_PARAMS.TIERS) {
+    if (peakPnl >= tier.peakThreshold) { tierBonus = tier.bonus; break; }
+  }
+  return Math.min(PROGRESSIVE_LOCK_PERCENT_PARAMS.MAX_CAP, baseLock + tierBonus);
 }
 
 /** Extra lock tightening when peak hasn't been refreshed */
 export function getStalePeakBonus(minutesSincePeak: number, enabled: boolean): number {
   if (!enabled) return 0;
-  if (minutesSincePeak > 120) return 0.25;
-  if (minutesSincePeak > 60) return 0.20;
-  if (minutesSincePeak > 30) return 0.10;
-  if (minutesSincePeak > 15) return 0.05;
+  for (const tier of STALE_PEAK_BONUS_PARAMS.TIERS) {
+    if (minutesSincePeak > tier.minutesSincePeak) return tier.bonus;
+  }
   return 0;
 }
