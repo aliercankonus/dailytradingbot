@@ -71,11 +71,11 @@ import {
   MOMENTUM_EXHAUSTION_OVERRIDE_PARAMS,
   // NEW: Neutral persistence modeling for confidence bonus
   NEUTRAL_PERSISTENCE_PARAMS,
-  // v1.1: ADX Gate minimal spec - single responsibility gate
-  ADX_GATE as ADX_GATE_V1_1, // Renamed: canonical export is ADX_GATE, aliased here for 120+ existing refs
+  // ADX Gate - single responsibility gate
+  ADX_GATE,
   // LEGACY (preserved for fallback): Low ADX trend exception for strong HTF setups
   LOW_ADX_TREND_EXCEPTION_PARAMS,
-  // LEGACY: Phase 2 - Regime-adaptive ADX thresholds (now superseded by ADX_GATE_V1_1)
+  // LEGACY: Phase 2 - Regime-adaptive ADX thresholds (now superseded by ADX_GATE)
   REGIME_ADAPTIVE_ADX_PARAMS,
   // NEW: Phase 3 - Price Action Direction Override
   PRICE_ACTION_DIRECTION_OVERRIDE_PARAMS,
@@ -6953,8 +6953,8 @@ serve(async (req) => {
         // even when those gates block and `continue`, we still capture whether
         // TRANSITION_EXPANSION conditions were met for shadow analysis.
         let earlyTransitionExpansionShadowFired = false;
-        if (ADX_GATE_V1_1.TRANSITION_EXPANSION.ENABLED && shadowModeEnabled) {
-          const teConfig = ADX_GATE_V1_1.TRANSITION_EXPANSION;
+        if (ADX_GATE.TRANSITION_EXPANSION.ENABLED && shadowModeEnabled) {
+          const teConfig = ADX_GATE.TRANSITION_EXPANSION;
           const earlyAdxSlope = fullAdxResult.adxSlope ?? 0;
           const earlyPriceChange4h = extractPriceChange(trendData, '4h');
           const earlyAbsPriceMove = Math.abs(earlyPriceChange4h);
@@ -12884,7 +12884,7 @@ serve(async (req) => {
         let adxGateV11PositionMultiplier = 1.0;
         let adxGateV11Reason = "";
         
-        const adxGateEnabled = ADX_GATE_V1_1.ENABLED;
+        const adxGateEnabled = ADX_GATE.ENABLED;
         // v1.1: ADX slope for exception checks
         const adxSlopeV11 = fullAdxResult.adxSlope ?? 0;
         
@@ -12903,34 +12903,34 @@ serve(async (req) => {
         let earlyTrendIgnitionMultiplier = 1.0;
         
         // Get the v1.1 adaptive threshold based on regime
-        const v11AdaptiveThreshold = ADX_GATE_V1_1.ADAPTIVE_THRESHOLDS[regime.regime] ?? 
-          ADX_GATE_V1_1.ADAPTIVE_THRESHOLDS.RANGE;
+        const v11AdaptiveThreshold = ADX_GATE.ADAPTIVE_THRESHOLDS[regime.regime] ?? 
+          ADX_GATE.ADAPTIVE_THRESHOLDS.RANGE;
         
         // Log v1.1 gate check
-        if (ADX_GATE_V1_1.LOG_GATE_CHECKS) {
+        if (ADX_GATE.LOG_GATE_CHECKS) {
           logger.forSymbol(symbol).info(
-            `${LOG_CATEGORIES.GATE} ADX_GATE_v1.1: ADX=${adx.toFixed(1)}, slope=${adxSlopeV11.toFixed(3)}, ` +
-            `regime=${regime.regime}, adaptiveThreshold=${v11AdaptiveThreshold}, hardFloor=${ADX_GATE_V1_1.HARD_FLOOR}`
+            `${LOG_CATEGORIES.GATE} ADX_GATE: ADX=${adx.toFixed(1)}, slope=${adxSlopeV11.toFixed(3)}, ` +
+            `regime=${regime.regime}, adaptiveThreshold=${v11AdaptiveThreshold}, hardFloor=${ADX_GATE.HARD_FLOOR}`
           );
         }
         
         // ===== TIER 0: HARD FLOOR (NO EXCEPTIONS) =====
         // v1.3: Lowered from 18 → 16 (graduated model)
-        if (adx < ADX_GATE_V1_1.HARD_FLOOR) {
+        if (adx < ADX_GATE.HARD_FLOOR) {
           // Absolute block - no exceptions allowed below ADX 16
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { 
             gate: 'ADX_TOO_LOW', 
-            details: `ADX=${adx.toFixed(1)} < ${ADX_GATE_V1_1.HARD_FLOOR} (HARD FLOOR - no exceptions)` 
+            details: `ADX=${adx.toFixed(1)} < ${ADX_GATE.HARD_FLOOR} (HARD FLOOR - no exceptions)` 
           });
           await logRejectionWithAI(
             supabase, userId, symbol,
-            `HARD GATE (v1.3): ADX ${adx.toFixed(1)} below absolute floor ${ADX_GATE_V1_1.HARD_FLOOR} - structural no-trend`,
+            `HARD GATE (v1.3): ADX ${adx.toFixed(1)} below absolute floor ${ADX_GATE.HARD_FLOOR} - structural no-trend`,
             { 
               gate: "ADX_TOO_LOW",
               tier: "TIER_0_HARD_FLOOR",
               adx: adx.toFixed(1),
-              hardFloor: ADX_GATE_V1_1.HARD_FLOOR,
+              hardFloor: ADX_GATE.HARD_FLOOR,
               regime: regime.regime,
               adxSlope: adxSlopeV11.toFixed(3),
               derivedDirection,
@@ -12943,8 +12943,8 @@ serve(async (req) => {
               meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
               meanReversionAllowed: earlyMeanReversionSignal?.allowed ?? false,
               bypassHints: {
-                needsADX: ADX_GATE_V1_1.HARD_FLOOR,
-                message: `No exceptions below ADX ${ADX_GATE_V1_1.HARD_FLOOR}. Wait for market energy to build.`
+                needsADX: ADX_GATE.HARD_FLOOR,
+                message: `No exceptions below ADX ${ADX_GATE.HARD_FLOOR}. Wait for market energy to build.`
               }
             },
             trendData,
@@ -12960,8 +12960,8 @@ serve(async (req) => {
         let graduatedAdxMultiplier = 1.0;
         let graduatedAdxTier = '';
         
-        if (ADX_GATE_V1_1.GRADUATED_TIERS?.ENABLED && adx < v11AdaptiveThreshold && adxSlopeV11 > 0) {
-          const gradTiers = ADX_GATE_V1_1.GRADUATED_TIERS;
+        if (ADX_GATE.GRADUATED_TIERS?.ENABLED && adx < v11AdaptiveThreshold && adxSlopeV11 > 0) {
+          const gradTiers = ADX_GATE.GRADUATED_TIERS;
           
           if (adx >= gradTiers.EARLY_TRANSITION.MIN_ADX && adx < gradTiers.EARLY_TRANSITION.MAX_ADX) {
             // Tier 2: Early Transition Probe — ADX 16-20 with rising slope → 0.35x
@@ -12991,8 +12991,8 @@ serve(async (req) => {
         // Detects regime transition latency: BREAKOUT_SETUP with rising ADX slope + price move
         // SHADOW MODE: Only logs what WOULD have been allowed — does NOT alter trade flow
         let transitionExpansionShadowTriggered = false;
-        if (ADX_GATE_V1_1.TRANSITION_EXPANSION.ENABLED) {
-          const teConfig = ADX_GATE_V1_1.TRANSITION_EXPANSION;
+        if (ADX_GATE.TRANSITION_EXPANSION.ENABLED) {
+          const teConfig = ADX_GATE.TRANSITION_EXPANSION;
           const priceChange4hForTE = extractPriceChange(trendData, '4h');
           const absPriceMove = Math.abs(priceChange4hForTE);
           const momentumDir = smartMomentum?.direction ?? 'neutral';
@@ -13077,18 +13077,18 @@ serve(async (req) => {
         // ===== TRANSITIONAL ZONE (16-22): Exception checks when graduated tier didn't fire =====
         if (adx < v11AdaptiveThreshold && !graduatedAdxActive) {
           // ADX below adaptive threshold - check for v1.1 exceptions
-          const isInTransitionalZone = adx >= ADX_GATE_V1_1.TRANSITIONAL_MIN && adx < ADX_GATE_V1_1.TRANSITIONAL_MAX;
+          const isInTransitionalZone = adx >= ADX_GATE.TRANSITIONAL_MIN && adx < ADX_GATE.TRANSITIONAL_MAX;
           
           // Check Squeeze Expansion Exception first
-          if (ADX_GATE_V1_1.SQUEEZE_EXPANSION.ENABLED && isInTransitionalZone) {
+          if (ADX_GATE.SQUEEZE_EXPANSION.ENABLED && isInTransitionalZone) {
             const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
             
             if (squeezeResult.isValid) {
               // Squeeze Expansion exception approved
               squeezeBreakoutActive = true;
-              squeezePositionMultiplier = ADX_GATE_V1_1.SQUEEZE_EXPANSION.POSITION_MULTIPLIER;
+              squeezePositionMultiplier = ADX_GATE.SQUEEZE_EXPANSION.POSITION_MULTIPLIER;
               
-              if (ADX_GATE_V1_1.LOG_EXCEPTION_DETAILS) {
+              if (ADX_GATE.LOG_EXCEPTION_DETAILS) {
                 logger.forSymbol(symbol).info(
                   `${LOG_CATEGORIES.SUCCESS} 🔄 SQUEEZE_EXPANSION (v1.1): ADX=${adx.toFixed(1)} allowed ` +
                   `(${squeezeResult.confidence}% confidence, ${(squeezePositionMultiplier * 100).toFixed(0)}% size)`
@@ -13103,15 +13103,15 @@ serve(async (req) => {
           }
           
           // Check Early Ignition Exception if squeeze didn't pass
-          if (!squeezeBreakoutActive && ADX_GATE_V1_1.EARLY_IGNITION.ENABLED && isInTransitionalZone) {
+          if (!squeezeBreakoutActive && ADX_GATE.EARLY_IGNITION.ENABLED && isInTransitionalZone) {
             const ignitionResult = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
             
             if (ignitionResult.isValid) {
               // Early Ignition exception approved
               earlyIgnitionActive = true;
-              earlyIgnitionPositionMultiplier = ADX_GATE_V1_1.EARLY_IGNITION.POSITION_MULTIPLIER;
+              earlyIgnitionPositionMultiplier = ADX_GATE.EARLY_IGNITION.POSITION_MULTIPLIER;
               
-              if (ADX_GATE_V1_1.LOG_EXCEPTION_DETAILS) {
+              if (ADX_GATE.LOG_EXCEPTION_DETAILS) {
                 logger.forSymbol(symbol).info(
                   `${LOG_CATEGORIES.SUCCESS} 🚀 EARLY_IGNITION (v1.1): ADX=${adx.toFixed(1)} allowed ` +
                   `(regime=${regime.regime}, slope=${adxSlopeV11.toFixed(3)}, ${(earlyIgnitionPositionMultiplier * 100).toFixed(0)}% size)`
@@ -13143,7 +13143,7 @@ serve(async (req) => {
             meanReversionTransitionalActive = true;
             meanReversionTransitionalMultiplier = COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER; // 0.25x
 
-            if (ADX_GATE_V1_1.LOG_BYPASS_SELECTION) {
+            if (ADX_GATE.LOG_BYPASS_SELECTION) {
               logger.forSymbol(symbol).info(
                 `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION_BYPASS (v1.1): ADX=${adx.toFixed(1)} allowed ` +
                 `(exhaustionScore=${transitionalMRSignal.exhaustionScore}, ` +
@@ -13163,7 +13163,7 @@ serve(async (req) => {
           // Captures pre-expansion energy: low ADX + strong directional bias + rising slope
           // NOT a blanket relaxation — requires 4-way confluence
           if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
-            const etiConfig = ADX_GATE_V1_1.EARLY_TREND_IGNITION;
+            const etiConfig = ADX_GATE.EARLY_TREND_IGNITION;
             if (etiConfig.ENABLED) {
               const dirCtxForETI = directionResult?.directionContext;
               const etiWeightedScore = dirCtxForETI?.weightedScore ?? 0;
@@ -13233,7 +13233,7 @@ serve(async (req) => {
                 tier: "TRANSITIONAL_ZONE",
                 adx: adx.toFixed(1),
                 adaptiveThreshold: v11AdaptiveThreshold,
-                hardFloor: ADX_GATE_V1_1.HARD_FLOOR,
+                hardFloor: ADX_GATE.HARD_FLOOR,
                 regime: regime.regime,
                 adxSlope: adxSlopeV11.toFixed(3),
                 derivedDirection,
@@ -13260,7 +13260,7 @@ serve(async (req) => {
                 },
                 // Early Trend Ignition diagnostic
                 earlyTrendIgnitionCheck: (() => {
-                  const etiConfig = ADX_GATE_V1_1.EARLY_TREND_IGNITION;
+                  const etiConfig = ADX_GATE.EARLY_TREND_IGNITION;
                   const dirCtxETI = directionResult?.directionContext;
                   const etiScore = Math.abs(dirCtxETI?.weightedScore ?? 0);
                   return {
@@ -13281,12 +13281,12 @@ serve(async (req) => {
                   needsADX: v11AdaptiveThreshold,
                   needsSqueeze: squeezeCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
                   needsIgnition: ignitionCheck.reasons.filter(r => r.includes("not") || r.includes("No")),
-                  needsETI: `absScore >= ${ADX_GATE_V1_1.EARLY_TREND_IGNITION.MIN_WEIGHTED_SCORE} + rising slope + confirmed direction`,
+                  needsETI: `absScore >= ${ADX_GATE.EARLY_TREND_IGNITION.MIN_WEIGHTED_SCORE} + rising slope + confirmed direction`,
                 },
                 // Fix #1: TRANSITION_EXPANSION shadow diagnostic
                 transitionExpansionShadow: {
                   wouldHaveTriggered: transitionExpansionShadowTriggered,
-                  shadowModeActive: ADX_GATE_V1_1.TRANSITION_EXPANSION?.SHADOW_MODE ?? true,
+                  shadowModeActive: ADX_GATE.TRANSITION_EXPANSION?.SHADOW_MODE ?? true,
                   message: transitionExpansionShadowTriggered 
                     ? 'WOULD HAVE ALLOWED entry if shadow mode disabled'
                     : 'Conditions not met for transition expansion bypass',
