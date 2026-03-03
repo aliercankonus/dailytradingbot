@@ -5697,9 +5697,10 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   // Legacy alias (backward compatibility)
   STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 20,  // Renamed - now means MIN K for short entry
   
-  // ===== EXCEPTION: STRONG TREND CONTINUATION =====
+  // ===== STRONG TREND CONTINUATION OVERRIDE =====
   // Allow entry despite exhaustion ONLY if ADX is VERY strong (>=40) and clearly rising
-  ALLOW_STRONG_TREND_EXCEPTION: true,
+  // Renamed from ALLOW_STRONG_TREND_EXCEPTION for consistency with ADX_THRESHOLDS naming
+  ALLOW_STRONG_TREND_CONTINUATION: true,
   EXCEPTION_MIN_ADX: 40,              // Very strong trend required
   EXCEPTION_MIN_ADX_SLOPE: 0.2,       // ADX must be rising
   EXCEPTION_POSITION_SIZE: 0.40,      // 40% position for exception entries
