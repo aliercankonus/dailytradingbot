@@ -3021,47 +3021,8 @@ export const CONVERGENCE_PARAMS = {
 // REMOVED: CONTEXT_AWARE_STOP_PARAMS — consolidated into CONTEXT_STOP_PARAMS (line ~8232)
 // All consumers now use CONTEXT_STOP_PARAMS exclusively
 
-// Enhanced R-multiple trailing with dynamic activation
-export const PHASE3_R_MULTIPLE_PARAMS = {
-  // Enable dynamic R-multiple trailing
-  ENABLED: true,
-  
-  // === DYNAMIC ACTIVATION BASED ON ADX ===
-  // Strong trend: Activate earlier (more directional = can trail sooner)
-  STRONG_TREND_ACTIVATION_R: 1.0,    // Activate at 1R in strong trends
-  // Medium trend: Standard activation
-  MEDIUM_TREND_ACTIVATION_R: 1.2,    // Activate at 1.2R (default)
-  // Weak trend: Activate later (need more buffer for chop)
-  WEAK_TREND_ACTIVATION_R: 1.5,      // Activate at 1.5R in weak trends
-  
-  // === TRAILING DISTANCE BASED ON ADX ===
-  // Strong trend: Trail tighter
-  STRONG_TREND_TRAIL_R: 0.5,         // Trail 0.5R behind
-  // Medium trend: Standard trailing
-  MEDIUM_TREND_TRAIL_R: 0.75,        // Trail 0.75R behind
-  // Weak trend: Trail looser
-  WEAK_TREND_TRAIL_R: 1.0,           // Trail 1R behind (more room)
-  
-  // === PROFIT LOCK TIERS (R-multiple based) ===
-  // Lock profits at increasingly protective levels as R increases
-  LOCK_TIERS: [
-    { rMultiple: 1.0, lockR: 0.25 },   // At 1R profit, lock 0.25R
-    { rMultiple: 1.5, lockR: 0.5 },    // At 1.5R profit, lock 0.5R
-    { rMultiple: 2.0, lockR: 0.75 },   // At 2R profit, lock 0.75R
-    { rMultiple: 2.5, lockR: 1.0 },    // At 2.5R profit, lock 1R (break-even on risk)
-    { rMultiple: 3.0, lockR: 1.5 },    // At 3R profit, lock 1.5R
-    { rMultiple: 4.0, lockR: 2.0 },    // At 4R profit, lock 2R
-    { rMultiple: 5.0, lockR: 3.0 },    // At 5R profit, lock 3R
-  ],
-  
-  // === ACCELERATION ZONE ===
-  // When momentum is accelerating, use tighter trails
-  ACCELERATION_TRAIL_MULTIPLIER: 0.7, // 30% tighter trailing when accelerating
-  
-  // === EXHAUSTION PROTECTION ===
-  // When momentum shows exhaustion signs, lock more aggressively
-  EXHAUSTION_LOCK_BONUS_R: 0.5,       // Add 0.5R to lock level when exhausted
-} as const;
+// REMOVED: PHASE3_R_MULTIPLE_PARAMS — consolidated into DYNAMIC_TRAILING_PARAMS (line ~8166)
+// All consumers now use DYNAMIC_TRAILING_PARAMS exclusively
 
 // Exit priority scoring
 export const EXIT_MANAGEMENT_PRIORITY = {
@@ -8164,6 +8125,8 @@ export const MOMENTUM_SCORE_COMPONENTS = {
 // ============= DYNAMIC TRAILING R-MULTIPLE PARAMS (smart-momentum.ts) =============
 // R-multiple based trailing stop parameters
 export const DYNAMIC_TRAILING_PARAMS = {
+  // Enable dynamic R-multiple trailing
+  ENABLED: true,
   // ADX-based activation thresholds
   STRONG_ADX: 30,
   MEDIUM_ADX: 22,
