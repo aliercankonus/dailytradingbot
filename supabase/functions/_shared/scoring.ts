@@ -168,10 +168,10 @@ export const calculateTimeInExtremePenalty = (
   let minBarsForPenalty: number;
   let adxTier: string;
   
-  if (adx >= 35) {
+  if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
     minBarsForPenalty = DP.BARS_FOR_PENALTY_BY_ADX.ADX_ABOVE_35;  // 10 bars
     adxTier = "ADX_ABOVE_35";
-  } else if (adx >= 25) {
+  } else if (adx >= ADX_THRESHOLDS.STRONG) {
     minBarsForPenalty = DP.BARS_FOR_PENALTY_BY_ADX.ADX_25_35;     // 7 bars
     adxTier = "ADX_25_35";
   } else {
@@ -1677,15 +1677,15 @@ export const detectMarketRegimeEnhanced = (trendData: any): MarketRegimeEnhanced
   let regimeScore = 50;  // Start at neutral baseline
   
   // ============= ADX CONTRIBUTION (0-30 points) =============
-  if (adx >= 35) {
+  if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
     regimeScore += 30;  // Exceptional trend
-  } else if (adx >= 30) {
+  } else if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
     regimeScore += 25;  // Very strong trend
-  } else if (adx >= 25) {
+  } else if (adx >= ADX_THRESHOLDS.STRONG) {
     regimeScore += 20;  // Strong trend
-  } else if (adx >= 22) {
+  } else if (adx >= ADX_THRESHOLDS.MODERATE) {
     regimeScore += 15;  // Moderate trend
-  } else if (adx >= 18) {
+  } else if (adx >= ADX_THRESHOLDS.ABSOLUTE_FLOOR) {
     regimeScore += 5;   // Transition zone (minimal credit)
   } else {
     regimeScore -= 15;  // Below 18 = ranging penalty
@@ -4910,7 +4910,7 @@ export const classifyMasterRegime = (
   
   // Check for mature trend (ADX >= 45 AND slope < 0)
   // Expert insight: "ADX > 45 with declining slope often signals trend maturity, not opportunity"
-  const isMatureTrend = adx >= 45 && adxSlope < 0;
+  const isMatureTrend = adx >= ADX_THRESHOLDS.EXHAUSTION && adxSlope < 0;
   const requirePullback = isMatureTrend;
   
   // PARABOLIC: ADX >= 45 and not exhausted (or ADX >= 50 regardless)
@@ -5552,16 +5552,16 @@ export const getEffectiveMomentumThreshold = (
   }
   
   // Graduated thresholds based on ADX level
-  if (adx >= 40) {
+  if (adx >= ADX_THRESHOLDS.EXTREME) {
     return { threshold: MSB.ADX_40_MIN_SCORE, canBlock: true, adjustmentType: 'adx_40' };
   }
-  if (adx >= 35) {
+  if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
     return { threshold: MSB.ADX_35_MIN_SCORE, canBlock: true, adjustmentType: 'adx_35' };
   }
-  if (adx >= 30) {
+  if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
     return { threshold: MSB.ADX_30_MIN_SCORE, canBlock: true, adjustmentType: 'adx_30' };
   }
-  if (adx >= 25) {
+  if (adx >= ADX_THRESHOLDS.STRONG) {
     return { threshold: MSB.ADX_25_MIN_SCORE, canBlock: true, adjustmentType: 'adx_25' };
   }
   
@@ -5597,13 +5597,13 @@ export const applyQualityNearMissBoost = (
   let boost = 0;
   let reasons: string[] = [];
   
-  if (adx >= 45) {
+  if (adx >= ADX_THRESHOLDS.EXHAUSTION) {
     boost += NMB.ADX_45_BOOST;
     reasons.push(`ADX_45+: +${NMB.ADX_45_BOOST}`);
-  } else if (adx >= 40) {
+  } else if (adx >= ADX_THRESHOLDS.EXTREME) {
     boost += NMB.ADX_40_BOOST;
     reasons.push(`ADX_40+: +${NMB.ADX_40_BOOST}`);
-  } else if (adx >= 35) {
+  } else if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
     boost += NMB.ADX_35_BOOST;
     reasons.push(`ADX_35+: +${NMB.ADX_35_BOOST}`);
   }
