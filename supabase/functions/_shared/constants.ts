@@ -3018,46 +3018,8 @@ export const CONVERGENCE_PARAMS = {
 // ============= PHASE 3: CONTEXT-AWARE EXIT MANAGEMENT =============
 // Smart stop loss and trailing activation based on market context
 
-// ADX-based stop loss width adjustment
-export const CONTEXT_AWARE_STOP_PARAMS = {
-  // Enable context-aware stop placement
-  ENABLED: true,
-  
-  // === ADX-BASED STOP WIDTH ===
-  // Strong trend (ADX > 30): Use tighter stops (trend is directional)
-  STRONG_TREND_ADX: 30,
-  STRONG_TREND_ATR_MULTIPLIER: 1.2,  // 1.2x ATR stop
-  
-  // Medium trend (ADX 22-30): Use normal stops
-  MEDIUM_TREND_ADX_MIN: 22,
-  MEDIUM_TREND_ADX_MAX: 30,
-  MEDIUM_TREND_ATR_MULTIPLIER: 1.5,  // 1.5x ATR stop
-  
-  // Weak trend (ADX < 22): Use wider stops (choppy market needs room)
-  WEAK_TREND_ADX: 22,
-  WEAK_TREND_ATR_MULTIPLIER: 2.0,    // 2.0x ATR stop
-  
-  // === SWING-BASED STOP PLACEMENT ===
-  // Use recent swing high/low for stop placement when available
-  SWING_STOP_ENABLED: true,
-  // Lookback period for finding swing points (candles)
-  SWING_LOOKBACK: 20,
-  // Buffer beyond swing point (ATR multiplier)
-  SWING_BUFFER_ATR: 0.3,
-  // Maximum distance from entry for swing stop (ATR multiplier)
-  MAX_SWING_DISTANCE_ATR: 3.0,
-  // Minimum distance from entry for swing stop (ATR multiplier)
-  MIN_SWING_DISTANCE_ATR: 0.8,
-  
-  // === VOLATILITY ADJUSTMENT ===
-  // Expand stops in high volatility conditions
-  HIGH_VOLATILITY_ATR_RATIO: 1.5,    // Current ATR / historical ATR > 1.5
-  HIGH_VOLATILITY_EXPANSION: 1.3,    // 30% wider stops in high volatility
-  
-  // Contract stops in low volatility conditions
-  LOW_VOLATILITY_ATR_RATIO: 0.7,     // Current ATR / historical ATR < 0.7
-  LOW_VOLATILITY_CONTRACTION: 0.85,  // 15% tighter stops in low volatility
-} as const;
+// REMOVED: CONTEXT_AWARE_STOP_PARAMS — consolidated into CONTEXT_STOP_PARAMS (line ~8232)
+// All consumers now use CONTEXT_STOP_PARAMS exclusively
 
 // Enhanced R-multiple trailing with dynamic activation
 export const PHASE3_R_MULTIPLE_PARAMS = {
