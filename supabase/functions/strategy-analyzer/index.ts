@@ -5968,6 +5968,15 @@ serve(async (req) => {
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
             (trendData as any).ignitionTier = tierLabel;
+            // Enrich trendData with ignition audit metadata for shadow tracking
+            (trendData as any).ignitionAudit = {
+              ignitionTier: tierLabel,
+              adxAtEntry: parseFloat(adx.toFixed(2)),
+              slopeAtEntry: parseFloat(adxSlope.toFixed(3)),
+              momentumAtEntry: smartMomentum.score,
+              regime: fourStateRegime.regime,
+              tierMultiplier: multiplier,
+            };
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_IGNITION_MOMENTUM_BYPASS',
               details: `ADX=${adx.toFixed(1)}, tier=${tierLabel}, mult=${(multiplier*100).toFixed(0)}%, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
@@ -5982,6 +5991,16 @@ serve(async (req) => {
               `dir=${derivedDirection} → ${(multiplier * 100).toFixed(0)}% position (micro-probe)`
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
+            (trendData as any).ignitionTier = 'MICRO_PROBE';
+            // Enrich trendData with ignition audit metadata for shadow tracking
+            (trendData as any).ignitionAudit = {
+              ignitionTier: 'MICRO_PROBE',
+              adxAtEntry: parseFloat(adx.toFixed(2)),
+              slopeAtEntry: parseFloat(adxSlope.toFixed(3)),
+              momentumAtEntry: smartMomentum.score,
+              regime: fourStateRegime.regime,
+              tierMultiplier: multiplier,
+            };
             // Apply confidence penalty for weak-floor risk premium
             if (microProbeConfig.CONFIDENCE_PENALTY) {
               (trendData as any).microProbeConfidencePenalty = microProbeConfig.CONFIDENCE_PENALTY;
@@ -18122,6 +18141,8 @@ serve(async (req) => {
               applied: tier0SoftCapApplied,
               multiplier: tier0SoftCapMultiplier,
             },
+            // NEW: Ignition audit metadata for shadow mode tier-based expectancy tracking
+            ignitionAudit: (trendData as any).ignitionAudit || null,
             // NEW: Final cumulative position multiplier for sizing compression analysis
             finalCumulativeMultiplier: positionSizeMultiplier,
           },
