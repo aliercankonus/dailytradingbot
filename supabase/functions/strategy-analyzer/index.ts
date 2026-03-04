@@ -8918,6 +8918,8 @@ serve(async (req) => {
                       orderFlowScore: earlyOrderFlowAnalysis?.score?.toFixed(1) ?? 'N/A',
                       orderFlowRequired: `+${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
                       tf1hDir, tf30mDir,
+                      effectiveRegime: fourStateRegime.regime,
+                      regimeConfidence: fourStateRegime.confidence,
                       relaxationApplied: nearExtremeRelaxationApplied,
                       wouldPassWith: `ADX >= ${regimeBlockLong.MIN_ADX_TO_BYPASS} OR momentum >= +${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow >= +${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
                     },
