@@ -18141,6 +18141,8 @@ serve(async (req) => {
               applied: tier0SoftCapApplied,
               multiplier: tier0SoftCapMultiplier,
             },
+            // NEW: Ignition audit metadata for shadow mode tier-based expectancy tracking
+            ignitionAudit: (trendData as any).ignitionAudit || null,
             // NEW: Final cumulative position multiplier for sizing compression analysis
             finalCumulativeMultiplier: positionSizeMultiplier,
           },
