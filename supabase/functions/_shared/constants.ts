@@ -4500,16 +4500,32 @@ export const FOUR_STATE_REGIME = {
     MIN_MOMENTUM_SCORE: 15,  // |score| must be >= 15 in trade direction
     // ===== BREAKOUT IGNITION BYPASS CONFIG =====
     // Relaxes downstream gates during ignition window to prevent gate cascade
+    // Data-driven calibration (7-day audit, n=3945): median ADX=20, P25=16.3, P90=26
+    // Old ≥22 threshold captured only 29% of breakouts; ≥18+slope captures ~62%
     IGNITION_GATE_BYPASS: {
       // NO_MOMENTUM_STATE bypass: use numeric edge instead of state-based check
-      MOMENTUM_BYPASS_MIN_ADX: 22,        // ADX >= 22 → energy present
-      MOMENTUM_BYPASS_MIN_ADX_SLOPE: 0.2, // slope > 0.2 → accelerating
-      MOMENTUM_BYPASS_MIN_SCORE: 10,      // |momentum| >= 10 → not flat
+      MOMENTUM_BYPASS_MIN_ADX: 18,        // ADX >= 18 → breakout energy threshold (was 22, median=20)
+      MOMENTUM_BYPASS_MIN_ADX_SLOPE: 0.25, // slope > 0.25 → accelerating (tightened from 0.2 for 18-zone safety)
+      MOMENTUM_BYPASS_MIN_SCORE: 8,       // |momentum| >= 8 → not flat (relaxed from 10 for earlier capture)
+      MOMENTUM_BYPASS_REQUIRE_DIRECTION: true, // momentum must align with trade direction
       MOMENTUM_BYPASS_MULTIPLIER: 0.50,   // 50% position for bypassed entries
       // ATR overextension: raised limit during breakout ignition
       OVEREXTENSION_ATR_LIMIT: 3.2,       // vs 2.0 default — breakout naturally extends
       // Transition buffer: lower confidence threshold for BREAKOUT_SETUP
       CONFIDENCE_HARD_BLOCK_MIN: 35,      // vs 45 default — ignition has lower conviction initially
+    },
+    // ===== MICRO-PROBE TIER (ADX 16-18) =====
+    // Weak-floor breakout capture: only the strongest slope signals, reduced position
+    // Data: 16-18 band has 53% rising slope reliability → needs tighter filters + smaller size
+    MICRO_PROBE: {
+      ENABLED: true,
+      MIN_ADX: 16,
+      MAX_ADX: 18,
+      MIN_ADX_SLOPE: 0.4,                 // Aggressive slope requirement (weak zone safety)
+      MIN_MOMENTUM_SCORE: 10,             // Tighter than main bypass
+      REQUIRE_DIRECTION: true,            // Momentum must align with direction
+      POSITION_MULTIPLIER: 0.25,          // Quarter-size probe (half of standard bypass)
+      CONFIDENCE_PENALTY: -5,             // Risk premium on confidence
     },
   },
   
