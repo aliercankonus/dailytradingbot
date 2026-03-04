@@ -9014,6 +9014,59 @@ serve(async (req) => {
                       
                       logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
                       
+                      // ===== SHADOW: TRANSITION-AWARE NEAR HIGH GATE =====
+                      // Test if context-aware model would allow: ADX >= 25 + momentum >= 38 + TREND_EXPANSION
+                      const shadowNearHighAdx = adx >= 25;
+                      const shadowNearHighMom = smartMomentum.score >= 38;
+                      const shadowNearHighRegime = fourStateRegime.regime === 'TREND_EXPANSION' || fourStateRegime.regime === 'BREAKOUT_SETUP';
+                      const wouldPassTransitionAware = shadowNearHighAdx && shadowNearHighMom && shadowNearHighRegime;
+                      // Also track ADX-only bypass for broader analysis
+                      const wouldPassAdxOnly = adx >= 23 && smartMomentum.score >= 0;
+                      
+                      if ((wouldPassTransitionAware || wouldPassAdxOnly) && shadowModeEnabled) {
+                        try {
+                          const _shadowSLTP3 = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                          await supabase.from('shadow_mode_signals').insert({
+                            user_id: userId,
+                            symbol,
+                            signal_type: derivedDirection,
+                            strategy_name: 'NEAR_HIGH_TRANSITION_AWARE',
+                            gate_blocked_by: 'NEAR_24H_HIGH_EXPANDED',
+                            old_gate_result: 'blocked',
+                            new_gate_result: wouldPassTransitionAware ? 'passed' : 'soft_pass',
+                            old_position_multiplier: 0,
+                            new_position_multiplier: wouldPassTransitionAware ? 0.50 : 0.25,
+                            confidence_score: smartMomentum.score,
+                            entry_price: trendData?.currentPrice || null,
+                            stop_loss: _shadowSLTP3.stopLoss || null,
+                            take_profit: _shadowSLTP3.takeProfit || null,
+                            gate_details: {
+                              gate: 'NEAR_24H_HIGH_SHADOW',
+                              shadowModel: wouldPassTransitionAware ? 'TRANSITION_AWARE' : 'ADX_ONLY',
+                              distanceFromHigh: parseFloat(distanceFromHigh.toFixed(3)),
+                              high24h: priceDistance.high24h,
+                              adx: parseFloat(adx.toFixed(1)),
+                              adxSlope: parseFloat(adxSlope.toFixed(3)),
+                              momentumScore: parseFloat(momScore.toFixed(1)),
+                              regime: fourStateRegime.regime,
+                              regimeConfidence: fourStateRegime.confidence,
+                              tf1hDir, tf30mDir,
+                              conditionsMet: {
+                                adxGte25: shadowNearHighAdx,
+                                momGte38: shadowNearHighMom,
+                                expansionRegime: shadowNearHighRegime,
+                                adxGte23: adx >= 23,
+                                momPositive: smartMomentum.score >= 0,
+                              },
+                            },
+                            trend: trendData?.trend || null,
+                          });
+                          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 NEAR_HIGH SHADOW: Would ${wouldPassTransitionAware ? 'PASS' : 'SOFT_PASS'} with transition-aware model (ADX=${adx.toFixed(1)}, mom=${momScore.toFixed(0)}, regime=${fourStateRegime.regime})`);
+                        } catch (shadowErr) {
+                          logger.forSymbol(symbol).warn(`Shadow near-high log failed: ${shadowErr}`);
+                        }
+                      }
+                      
                       await logRejectionWithAI(
                         supabase, userId, symbol,
                         blockReason,
@@ -9027,6 +9080,7 @@ serve(async (req) => {
                           opposingThreshold: graduatedMomentumLong.NEUTRAL_LONG_MIN,
                           momentumState: trendData?.momentum?.state || 'unknown',
                           tf1hDir, tf30mDir,
+                          effectiveRegime: fourStateRegime.regime,
                           graduatedBands: {
                             fullPass: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
                             moderate: `>= ${graduatedMomentumLong.MODERATE_LONG_MIN} → ${(graduatedMomentumLong.MODERATE_MULTIPLIER * 100).toFixed(0)}%`,
