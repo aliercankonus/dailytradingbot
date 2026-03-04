@@ -9858,6 +9858,53 @@ serve(async (req) => {
           // overextensionATR is always >= 0 (absolute distance), so check moveZone instead
           const isMRDirection = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed;
           if (!isMRDirection) {
+            // ===== SHADOW: REGIME-ADAPTIVE OVEREXTENSION THRESHOLD =====
+            // Test if a regime-aware threshold would have allowed this entry
+            const regimeAdaptiveThresholds: Record<string, number> = {
+              'RANGE_COMPRESSION': 2.5,
+              'BREAKOUT_SETUP': 3.2, // Already applied above
+              'TREND_EXPANSION': 3.8,
+              'TREND_EXHAUSTION': 2.5,
+            };
+            const shadowThreshold = regimeAdaptiveThresholds[fourStateRegime.regime] ?? 3.0;
+            const wouldPassWithAdaptive = currentOverextensionAtr <= shadowThreshold;
+            
+            if (wouldPassWithAdaptive && shadowModeEnabled) {
+              try {
+                const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                await supabase.from('shadow_mode_signals').insert({
+                  user_id: userId,
+                  symbol,
+                  signal_type: derivedDirection,
+                  strategy_name: 'OVEREXTENSION_REGIME_ADAPTIVE',
+                  gate_blocked_by: 'OVEREXTENSION_ATR_BLOCK',
+                  old_gate_result: 'blocked',
+                  new_gate_result: 'passed',
+                  old_position_multiplier: 0,
+                  new_position_multiplier: 0.5, // Conservative shadow sizing
+                  confidence_score: smartMomentum.score,
+                  entry_price: trendData?.currentPrice || null,
+                  stop_loss: _shadowSLTP.stopLoss || null,
+                  take_profit: _shadowSLTP.takeProfit || null,
+                  gate_details: {
+                    gate: 'OVEREXTENSION_ATR_SHADOW',
+                    currentATR: parseFloat(currentOverextensionAtr.toFixed(2)),
+                    currentThreshold: maxOverextensionAtr,
+                    shadowThreshold,
+                    regime: fourStateRegime.regime,
+                    adx: parseFloat(adx.toFixed(1)),
+                    adxSlope: parseFloat(adxSlope.toFixed(3)),
+                    momentumScore: parseFloat(smartMomentum.score.toFixed(1)),
+                    regimeConfidence: fourStateRegime.confidence,
+                  },
+                  trend: trendData?.trend || null,
+                });
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 OVEREXTENSION SHADOW: Would PASS with regime-adaptive threshold ${shadowThreshold}x (regime=${fourStateRegime.regime}, current=${currentOverextensionAtr.toFixed(2)} ATR, blocked at ${maxOverextensionAtr}x)`);
+              } catch (shadowErr) {
+                logger.forSymbol(symbol).warn(`Shadow overextension log failed: ${shadowErr}`);
+              }
+            }
+            
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
               gate: 'OVEREXTENSION_ATR_BLOCK', 
@@ -9876,7 +9923,9 @@ serve(async (req) => {
                 atrLimitSource: fourStateRegime.regime === 'BREAKOUT_SETUP' ? 'ignition_bypass_3.2x' : 'default_2.0x',
                 adx: adx.toFixed(1),
                 momentumScore: smartMomentum.score,
-                architecture: "Hard block — no ADX override"
+                architecture: "Hard block — no ADX override",
+                shadowAdaptiveThreshold: shadowThreshold,
+                wouldPassWithAdaptive,
               },
               trendData,
               riskParams.ai_analysis_enabled !== false,
