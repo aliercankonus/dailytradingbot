@@ -17,6 +17,26 @@ interface ShadowSignal {
   gate_details: Record<string, unknown> | null;
 }
 
+// ===== SPECULATIVE TIER TIME STOP =====
+// 18-20 ADX band has only 24% expansion transition rate.
+// If no expansion within 8 bars (~2h on 15m TF), exit as TIME_STOP.
+const SPECULATIVE_TIME_STOP_HOURS = 8; // ~8 bars × 15m = 2h, or 8 bars × 1h = 8h
+const SPECULATIVE_MAX_AGE_HOURS = 8;   // Conservative: exit after 8h if no expansion
+
+function getIgnitionTier(gateDetails: Record<string, unknown> | null): string | null {
+  if (!gateDetails) return null;
+  // Check nested ignitionAudit first
+  const audit = gateDetails.ignitionAudit as Record<string, unknown> | undefined;
+  if (audit?.ignitionTier) return audit.ignitionTier as string;
+  // Check direct ignitionTier field
+  if (gateDetails.ignitionTier) return gateDetails.ignitionTier as string;
+  // Check gate name
+  if (gateDetails.gate === 'BREAKOUT_IGNITION_MOMENTUM_BYPASS' || gateDetails.gate === 'BREAKOUT_MICRO_PROBE') {
+    return (gateDetails.tierLabel as string) || (gateDetails.gate === 'BREAKOUT_MICRO_PROBE' ? 'MICRO_PROBE' : null);
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -70,10 +90,28 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ===== Check regime state for SPECULATIVE time stop =====
+    // Fetch latest regime for each symbol to determine if expansion was reached
+    const regimeMap: Record<string, string> = {};
+    for (const sym of symbolSet) {
+      try {
+        const { data: regimeData } = await supabase
+          .from('market_regime_history')
+          .select('effective_regime')
+          .eq('symbol', sym)
+          .order('recorded_at', { ascending: false })
+          .limit(1);
+        if (regimeData && regimeData.length > 0) {
+          regimeMap[sym] = regimeData[0].effective_regime || 'UNKNOWN';
+        }
+      } catch (_) { /* ignore */ }
+    }
+
     let evaluated = 0;
     let won = 0;
     let lost = 0;
     let skipped = 0;
+    const tierStats: Record<string, { count: number; won: number; lost: number; pnlSum: number }> = {};
 
     for (const signal of signals as ShadowSignal[]) {
       const currentPrice = currentPrices[signal.symbol];
@@ -86,52 +124,91 @@ Deno.serve(async (req) => {
       const sl = signal.stop_loss;
       const tp = signal.take_profit;
       const isLong = signal.signal_type === 'long';
+      const ignitionTier = getIgnitionTier(signal.gate_details);
+      const ageHours = (Date.now() - new Date(signal.created_at).getTime()) / (1000 * 60 * 60);
+      const currentRegime = regimeMap[signal.symbol] || 'UNKNOWN';
 
-      // Check if TP or SL would have been hit
-      // For simplicity: compare current price against SL/TP levels
-      // In a real scenario we'd check the price path (high/low wicks), 
-      // but current price vs levels gives a reasonable approximation
       let wouldHaveWon: boolean | null = null;
       let pnlPercent: number | null = null;
+      let exitMethod = '';
 
+      // Check SL/TP hit
       if (isLong) {
         if (currentPrice >= tp) {
           wouldHaveWon = true;
           pnlPercent = ((tp - entry) / entry) * 100;
+          exitMethod = 'TP_HIT';
         } else if (currentPrice <= sl) {
           wouldHaveWon = false;
           pnlPercent = ((sl - entry) / entry) * 100;
-        } else {
-          // Signal is still "in play" — check if it's old enough to evaluate
-          const ageHours = (Date.now() - new Date(signal.created_at).getTime()) / (1000 * 60 * 60);
-          if (ageHours >= 24) {
-            // After 24h, evaluate at current price (time-based exit)
-            pnlPercent = ((currentPrice - entry) / entry) * 100;
-            wouldHaveWon = pnlPercent > 0;
-          } else {
-            skipped++;
-            continue; // Too early to evaluate
-          }
+          exitMethod = 'SL_HIT';
         }
       } else {
-        // Short
         if (currentPrice <= tp) {
           wouldHaveWon = true;
           pnlPercent = ((entry - tp) / entry) * 100;
+          exitMethod = 'TP_HIT';
         } else if (currentPrice >= sl) {
           wouldHaveWon = false;
           pnlPercent = ((entry - sl) / entry) * 100;
-        } else {
-          const ageHours = (Date.now() - new Date(signal.created_at).getTime()) / (1000 * 60 * 60);
-          if (ageHours >= 24) {
-            pnlPercent = ((entry - currentPrice) / entry) * 100;
-            wouldHaveWon = pnlPercent > 0;
-          } else {
-            skipped++;
-            continue;
-          }
+          exitMethod = 'SL_HIT';
         }
       }
+
+      // ===== SPECULATIVE TIER TIME STOP =====
+      // If tier is SPECULATIVE and no TP/SL hit after 8h, and regime hasn't expanded → time exit
+      if (wouldHaveWon === null && ignitionTier === 'SPECULATIVE' && ageHours >= SPECULATIVE_MAX_AGE_HOURS) {
+        if (currentRegime !== 'TREND_EXPANSION') {
+          pnlPercent = isLong
+            ? ((currentPrice - entry) / entry) * 100
+            : ((entry - currentPrice) / entry) * 100;
+          wouldHaveWon = pnlPercent > 0;
+          exitMethod = 'TIME_STOP_SPECULATIVE';
+        }
+      }
+
+      // ===== MICRO_PROBE TIER TIME STOP (more aggressive: 6h) =====
+      if (wouldHaveWon === null && ignitionTier === 'MICRO_PROBE' && ageHours >= 6) {
+        pnlPercent = isLong
+          ? ((currentPrice - entry) / entry) * 100
+          : ((entry - currentPrice) / entry) * 100;
+        wouldHaveWon = pnlPercent > 0;
+        exitMethod = 'TIME_STOP_MICRO_PROBE';
+      }
+
+      // Standard 24h time exit for all other tiers
+      if (wouldHaveWon === null) {
+        if (ageHours >= 24) {
+          pnlPercent = isLong
+            ? ((currentPrice - entry) / entry) * 100
+            : ((entry - currentPrice) / entry) * 100;
+          wouldHaveWon = pnlPercent > 0;
+          exitMethod = 'TIME_EXIT_24H';
+        } else {
+          skipped++;
+          continue;
+        }
+      }
+
+      // Track tier-level stats
+      if (ignitionTier) {
+        if (!tierStats[ignitionTier]) {
+          tierStats[ignitionTier] = { count: 0, won: 0, lost: 0, pnlSum: 0 };
+        }
+        tierStats[ignitionTier].count++;
+        if (wouldHaveWon) tierStats[ignitionTier].won++;
+        else tierStats[ignitionTier].lost++;
+        tierStats[ignitionTier].pnlSum += pnlPercent!;
+      }
+
+      // Build enriched outcome notes
+      const tierInfo = ignitionTier ? ` | Tier: ${ignitionTier}` : '';
+      const regimeInfo = ` | Regime: ${currentRegime}`;
+      const adxInfo = signal.gate_details?.adxAtEntry
+        ? ` | ADX@entry: ${signal.gate_details.adxAtEntry}`
+        : (signal.gate_details as any)?.ignitionAudit?.adxAtEntry
+          ? ` | ADX@entry: ${(signal.gate_details as any).ignitionAudit.adxAtEntry}`
+          : '';
 
       // Update the signal
       const { error: updateErr } = await supabase
@@ -140,7 +217,7 @@ Deno.serve(async (req) => {
           outcome_tracked: true,
           would_have_won: wouldHaveWon,
           simulated_pnl_percent: Number(pnlPercent!.toFixed(4)),
-          outcome_notes: `Evaluated at $${currentPrice.toFixed(4)} | ${wouldHaveWon ? 'WIN' : 'LOSS'} | PnL: ${pnlPercent!.toFixed(2)}% | Method: ${currentPrice >= tp || currentPrice <= sl || currentPrice <= tp || currentPrice >= sl ? 'SL/TP hit' : '24h time exit'}`,
+          outcome_notes: `${exitMethod} at $${currentPrice.toFixed(4)} | ${wouldHaveWon ? 'WIN' : 'LOSS'} | PnL: ${pnlPercent!.toFixed(2)}%${tierInfo}${regimeInfo}${adxInfo}`,
         })
         .eq('id', signal.id);
 
@@ -160,6 +237,7 @@ Deno.serve(async (req) => {
       skipped,
       total: signals.length,
       winRate: evaluated > 0 ? ((won / evaluated) * 100).toFixed(1) + '%' : 'N/A',
+      tierStats,
     };
 
     console.log(`📊 Shadow outcome evaluation: ${JSON.stringify(summary)}`);
