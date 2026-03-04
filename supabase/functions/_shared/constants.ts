@@ -4498,6 +4498,19 @@ export const FOUR_STATE_REGIME = {
     // Require momentum confirmation
     REQUIRE_MOMENTUM_CONFIRMATION: true,
     MIN_MOMENTUM_SCORE: 15,  // |score| must be >= 15 in trade direction
+    // ===== BREAKOUT IGNITION BYPASS CONFIG =====
+    // Relaxes downstream gates during ignition window to prevent gate cascade
+    IGNITION_GATE_BYPASS: {
+      // NO_MOMENTUM_STATE bypass: use numeric edge instead of state-based check
+      MOMENTUM_BYPASS_MIN_ADX: 22,        // ADX >= 22 → energy present
+      MOMENTUM_BYPASS_MIN_ADX_SLOPE: 0.2, // slope > 0.2 → accelerating
+      MOMENTUM_BYPASS_MIN_SCORE: 10,      // |momentum| >= 10 → not flat
+      MOMENTUM_BYPASS_MULTIPLIER: 0.50,   // 50% position for bypassed entries
+      // ATR overextension: raised limit during breakout ignition
+      OVEREXTENSION_ATR_LIMIT: 3.2,       // vs 2.0 default — breakout naturally extends
+      // Transition buffer: lower confidence threshold for BREAKOUT_SETUP
+      CONFIDENCE_HARD_BLOCK_MIN: 35,      // vs 45 default — ignition has lower conviction initially
+    },
   },
   
   // ===== REGIME PERSISTENCE =====
