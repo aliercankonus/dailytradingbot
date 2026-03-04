@@ -5917,11 +5917,33 @@ serve(async (req) => {
           const FULL_ALLOW_ADX = 25;        // Original threshold — full participation
           
           // ===== BREAKOUT IGNITION BYPASS: Numeric edge replaces state-based check =====
+          // Data-calibrated: ADX≥18 + slope>0.25 captures ~62% of breakouts (was 29% at ≥22)
           const ignitionBypass = FOUR_STATE_REGIME.BREAKOUT_SETUP.IGNITION_GATE_BYPASS;
+          const microProbeConfig = FOUR_STATE_REGIME.BREAKOUT_SETUP.MICRO_PROBE;
+          
+          // Direction alignment: momentum must point same way as trade
+          const momentumDirectionAligned = ignitionBypass.MOMENTUM_BYPASS_REQUIRE_DIRECTION
+            ? (derivedDirection === 'long' && smartMomentum.score > 0) || (derivedDirection === 'short' && smartMomentum.score < 0)
+            : true;
+          
           const isBreakoutIgnition = fourStateRegime.regime === 'BREAKOUT_SETUP' &&
             adx >= ignitionBypass.MOMENTUM_BYPASS_MIN_ADX &&
             adxSlope > ignitionBypass.MOMENTUM_BYPASS_MIN_ADX_SLOPE &&
-            Math.abs(smartMomentum.score) >= ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE;
+            Math.abs(smartMomentum.score) >= ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE &&
+            momentumDirectionAligned;
+          
+          // ===== MICRO-PROBE TIER: ADX 16-18 with aggressive slope filter =====
+          const microProbeDirectionAligned = microProbeConfig?.REQUIRE_DIRECTION
+            ? (derivedDirection === 'long' && smartMomentum.score > 0) || (derivedDirection === 'short' && smartMomentum.score < 0)
+            : true;
+          
+          const isMicroProbeIgnition = microProbeConfig?.ENABLED &&
+            fourStateRegime.regime === 'BREAKOUT_SETUP' &&
+            adx >= microProbeConfig.MIN_ADX &&
+            adx < microProbeConfig.MAX_ADX &&
+            adxSlope > microProbeConfig.MIN_ADX_SLOPE &&
+            Math.abs(smartMomentum.score) >= microProbeConfig.MIN_MOMENTUM_SCORE &&
+            microProbeDirectionAligned;
           
           if (isBreakoutIgnition && (momState === 'none' || momState === 'mixed')) {
             // Breakout ignition: numeric edge confirms energy — bypass state-based block
@@ -5930,12 +5952,31 @@ serve(async (req) => {
               `${LOG_CATEGORIES.GATE} 🚀 BREAKOUT_IGNITION_BYPASS: NO_MOMENTUM_STATE skipped — ` +
               `regime=BREAKOUT_SETUP, ADX=${adx.toFixed(1)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_ADX}, ` +
               `slope=${adxSlope.toFixed(2)}>${ignitionBypass.MOMENTUM_BYPASS_MIN_ADX_SLOPE}, ` +
-              `|momentum|=${Math.abs(smartMomentum.score)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE} → ${(multiplier * 100).toFixed(0)}% position`
+              `|momentum|=${Math.abs(smartMomentum.score)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE}, ` +
+              `dir=${derivedDirection}, momSign=${smartMomentum.score > 0 ? '+' : '-'} → ${(multiplier * 100).toFixed(0)}% position`
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_IGNITION_MOMENTUM_BYPASS',
-              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, state=${momState}`
+              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
+            });
+          } else if (isMicroProbeIgnition && (momState === 'none' || momState === 'mixed')) {
+            // Micro-probe: weak-floor breakout capture with reduced size
+            const multiplier = microProbeConfig.POSITION_MULTIPLIER;
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.GATE} 🔬 BREAKOUT_MICRO_PROBE: NO_MOMENTUM_STATE bypassed (ADX 16-18 tier) — ` +
+              `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}>${microProbeConfig.MIN_ADX_SLOPE}, ` +
+              `|momentum|=${Math.abs(smartMomentum.score)}>=${microProbeConfig.MIN_MOMENTUM_SCORE}, ` +
+              `dir=${derivedDirection} → ${(multiplier * 100).toFixed(0)}% position (micro-probe)`
+            );
+            (trendData as any).noMomentumStateMultiplier = multiplier;
+            // Apply confidence penalty for weak-floor risk premium
+            if (microProbeConfig.CONFIDENCE_PENALTY) {
+              (trendData as any).microProbeConfidencePenalty = microProbeConfig.CONFIDENCE_PENALTY;
+            }
+            perSymbolGateAttribution.set(symbol, {
+              gate: 'BREAKOUT_MICRO_PROBE',
+              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
             });
           } else if (momState === 'none' || momState === 'mixed') {
             // TIER 1: HARD BLOCK — genuine dead zone (none + ADX < 18)
@@ -5946,7 +5987,7 @@ serve(async (req) => {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
-                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h },
+                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h, regime: fourStateRegime.regime },
                 trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
@@ -9790,6 +9831,8 @@ serve(async (req) => {
                 derivedDirection,
                 overextensionATR: currentOverextensionAtr,
                 maxOverextensionATR: maxOverextensionAtr,
+                regime: fourStateRegime.regime,
+                atrLimitSource: fourStateRegime.regime === 'BREAKOUT_SETUP' ? 'ignition_bypass_3.2x' : 'default_2.0x',
                 adx: adx.toFixed(1),
                 momentumScore: smartMomentum.score,
                 architecture: "Hard block — no ADX override"
