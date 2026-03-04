@@ -5987,7 +5987,7 @@ serve(async (req) => {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 ${blockReason}`);
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
-                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h },
+                { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h, regime: fourStateRegime.regime },
                 trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
@@ -9831,6 +9831,8 @@ serve(async (req) => {
                 derivedDirection,
                 overextensionATR: currentOverextensionAtr,
                 maxOverextensionATR: maxOverextensionAtr,
+                regime: fourStateRegime.regime,
+                atrLimitSource: fourStateRegime.regime === 'BREAKOUT_SETUP' ? 'ignition_bypass_3.2x' : 'default_2.0x',
                 adx: adx.toFixed(1),
                 momentumScore: smartMomentum.score,
                 architecture: "Hard block — no ADX override"
