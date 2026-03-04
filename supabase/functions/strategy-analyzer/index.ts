@@ -5946,19 +5946,31 @@ serve(async (req) => {
             microProbeDirectionAligned;
           
           if (isBreakoutIgnition && (momState === 'none' || momState === 'mixed')) {
-            // Breakout ignition: numeric edge confirms energy — bypass state-based block
-            const multiplier = ignitionBypass.MOMENTUM_BYPASS_MULTIPLIER;
+            // Breakout ignition: tiered sizing based on ADX band transition rates
+            // Data: 22+ → 78% transition (1.0x), 20-22 → 46% (0.75x), 18-20 → 24% (0.50x)
+            const tiers = ignitionBypass.MOMENTUM_BYPASS_TIERS || [];
+            let tierMultiplier = ignitionBypass.MOMENTUM_BYPASS_MULTIPLIER; // fallback
+            let tierLabel = 'FALLBACK';
+            for (const tier of tiers) {
+              if (adx >= tier.MIN_ADX) {
+                tierMultiplier = tier.MULTIPLIER;
+                tierLabel = tier.LABEL;
+                break; // tiers are sorted descending by MIN_ADX
+              }
+            }
+            const multiplier = tierMultiplier;
             logger.forSymbol(symbol).info(
-              `${LOG_CATEGORIES.GATE} 🚀 BREAKOUT_IGNITION_BYPASS: NO_MOMENTUM_STATE skipped — ` +
-              `regime=BREAKOUT_SETUP, ADX=${adx.toFixed(1)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_ADX}, ` +
+              `${LOG_CATEGORIES.GATE} 🚀 BREAKOUT_IGNITION_BYPASS [${tierLabel}]: NO_MOMENTUM_STATE skipped — ` +
+              `regime=BREAKOUT_SETUP, ADX=${adx.toFixed(1)} (tier=${tierLabel}), ` +
               `slope=${adxSlope.toFixed(2)}>${ignitionBypass.MOMENTUM_BYPASS_MIN_ADX_SLOPE}, ` +
               `|momentum|=${Math.abs(smartMomentum.score)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE}, ` +
               `dir=${derivedDirection}, momSign=${smartMomentum.score > 0 ? '+' : '-'} → ${(multiplier * 100).toFixed(0)}% position`
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
+            (trendData as any).ignitionTier = tierLabel;
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_IGNITION_MOMENTUM_BYPASS',
-              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
+              details: `ADX=${adx.toFixed(1)}, tier=${tierLabel}, mult=${(multiplier*100).toFixed(0)}%, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
             });
           } else if (isMicroProbeIgnition && (momState === 'none' || momState === 'mixed')) {
             // Micro-probe: weak-floor breakout capture with reduced size
