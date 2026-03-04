@@ -5951,10 +5951,12 @@ serve(async (req) => {
             const tiers = ignitionBypass.MOMENTUM_BYPASS_TIERS || [];
             let tierMultiplier = ignitionBypass.MOMENTUM_BYPASS_MULTIPLIER; // fallback
             let tierLabel = 'FALLBACK';
+            let tierStopWidth = 1.0; // default stop width
             for (const tier of tiers) {
               if (adx >= tier.MIN_ADX) {
                 tierMultiplier = tier.MULTIPLIER;
                 tierLabel = tier.LABEL;
+                tierStopWidth = tier.STOP_WIDTH ?? 1.0;
                 break; // tiers are sorted descending by MIN_ADX
               }
             }
@@ -5968,6 +5970,7 @@ serve(async (req) => {
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
             (trendData as any).ignitionTier = tierLabel;
+            (trendData as any).ignitionStopWidth = tierStopWidth;
             // Enrich trendData with ignition audit metadata for shadow tracking
             (trendData as any).ignitionAudit = {
               ignitionTier: tierLabel,
@@ -5976,6 +5979,7 @@ serve(async (req) => {
               momentumAtEntry: smartMomentum.score,
               regime: fourStateRegime.regime,
               tierMultiplier: multiplier,
+              stopWidth: tierStopWidth,
             };
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_IGNITION_MOMENTUM_BYPASS',
