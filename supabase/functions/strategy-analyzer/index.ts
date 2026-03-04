@@ -17896,6 +17896,18 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
         }
         
+        // ===== IGNITION TIER ADAPTIVE STOP WIDTH =====
+        // ELITE: wider stop (1.2x) — strong continuation, needs room
+        // CONFIRMED: standard (1.0x)
+        // SPECULATIVE: tighter (0.85x) — must prove quickly
+        // MICRO_PROBE: tight (0.75x) — ya patlar ya söner
+        const ignitionStopWidth = (trendData as any).ignitionStopWidth;
+        if (ignitionStopWidth && ignitionStopWidth !== 1.0) {
+          const prevStop = stopLossPercent;
+          stopLossPercent *= ignitionStopWidth;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔥 IGNITION STOP WIDTH [${(trendData as any).ignitionTier}]: ${prevStop.toFixed(2)}% → ${stopLossPercent.toFixed(2)}% (×${ignitionStopWidth})`);
+        }
+        
         // Take profit = stop loss × user-configured multiplier
         let takeProfitPercent = stopLossPercent * baseTpMultiplier;
         
@@ -18159,6 +18171,40 @@ serve(async (req) => {
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
           created_by_rebalancer: false,
         };
+
+        // ===== MICRO_PROBE SHADOW-ONLY ROUTING =====
+        // If MICRO_PROBE tier and SHADOW_ONLY=true, route to shadow instead of live
+        if ((trendData as any).microProbeShadowOnly === true) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 MICRO_PROBE SHADOW_ONLY: Signal routed to shadow_mode_signals instead of live execution`);
+          try {
+            const shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, signalType as 'long' | 'short');
+            await supabase.from('shadow_mode_signals').insert({
+              user_id: userId,
+              symbol,
+              signal_type: signalType,
+              strategy_name: strategy.name,
+              old_gate_result: 'WOULD_EXECUTE',
+              new_gate_result: 'SHADOW_ONLY_MICRO_PROBE',
+              gate_blocked_by: 'MICRO_PROBE_SHADOW_ONLY',
+              confidence_score: adjustedConfidence,
+              entry_price: shadowSLTP.entry,
+              stop_loss: shadowSLTP.sl,
+              take_profit: shadowSLTP.tp,
+              old_position_multiplier: 1.0,
+              new_position_multiplier: signal.indicators?.positionSizePercent || strategyPositionSize,
+              trend: trendData?.primaryTrend || null,
+              gate_details: {
+                gate: 'BREAKOUT_MICRO_PROBE',
+                shadowOnly: true,
+                ignitionAudit: (trendData as any).ignitionAudit || null,
+              },
+              indicators: signal.indicators,
+            });
+          } catch (shadowErr) {
+            logger.forSymbol(symbol).warn(`Shadow insert failed for MICRO_PROBE: ${shadowErr}`);
+          }
+          continue; // Skip live signal insertion
+        }
 
         const { data: insertedSignal, error: insertError } = await supabase
           .from("trading_signals")
