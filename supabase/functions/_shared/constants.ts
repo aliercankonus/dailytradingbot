@@ -4514,7 +4514,7 @@ export const FOUR_STATE_REGIME = {
       MOMENTUM_BYPASS_TIERS: [
         { MIN_ADX: 22, MULTIPLIER: 1.00, LABEL: 'ELITE',       STOP_WIDTH: 1.20 }, // 78% transition → full size, wider stop
         { MIN_ADX: 20, MULTIPLIER: 0.75, LABEL: 'CONFIRMED',   STOP_WIDTH: 1.00 }, // 46% transition → 3/4 size, standard stop
-        { MIN_ADX: 18, MULTIPLIER: 0.50, LABEL: 'SPECULATIVE', STOP_WIDTH: 0.85 }, // 24% transition → half size, tighter stop
+        { MIN_ADX: 18, MULTIPLIER: 0.35, LABEL: 'SPECULATIVE', STOP_WIDTH: 0.85 }, // 24% transition → 0.35x size (was 0.50x, optimized per shadow data), tighter stop
       ],
       MOMENTUM_BYPASS_MULTIPLIER: 0.50,   // Fallback for non-tiered paths
       // ATR overextension: raised limit during breakout ignition
