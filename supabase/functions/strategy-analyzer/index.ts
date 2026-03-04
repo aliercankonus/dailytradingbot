@@ -5988,14 +5988,18 @@ serve(async (req) => {
           } else if (isMicroProbeIgnition && (momState === 'none' || momState === 'mixed')) {
             // Micro-probe: weak-floor breakout capture with reduced size
             const multiplier = microProbeConfig.POSITION_MULTIPLIER;
+            const microStopWidth = microProbeConfig.STOP_WIDTH ?? 0.75;
+            const isShadowOnly = microProbeConfig.SHADOW_ONLY === true;
             logger.forSymbol(symbol).info(
               `${LOG_CATEGORIES.GATE} 🔬 BREAKOUT_MICRO_PROBE: NO_MOMENTUM_STATE bypassed (ADX 16-18 tier) — ` +
               `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}>${microProbeConfig.MIN_ADX_SLOPE}, ` +
               `|momentum|=${Math.abs(smartMomentum.score)}>=${microProbeConfig.MIN_MOMENTUM_SCORE}, ` +
-              `dir=${derivedDirection} → ${(multiplier * 100).toFixed(0)}% position (micro-probe)`
+              `dir=${derivedDirection} → ${(multiplier * 100).toFixed(0)}% position (micro-probe${isShadowOnly ? ', SHADOW_ONLY' : ''})`
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
             (trendData as any).ignitionTier = 'MICRO_PROBE';
+            (trendData as any).ignitionStopWidth = microStopWidth;
+            (trendData as any).microProbeShadowOnly = isShadowOnly;
             // Enrich trendData with ignition audit metadata for shadow tracking
             (trendData as any).ignitionAudit = {
               ignitionTier: 'MICRO_PROBE',
@@ -6004,6 +6008,8 @@ serve(async (req) => {
               momentumAtEntry: smartMomentum.score,
               regime: fourStateRegime.regime,
               tierMultiplier: multiplier,
+              stopWidth: microStopWidth,
+              shadowOnly: isShadowOnly,
             };
             // Apply confidence penalty for weak-floor risk premium
             if (microProbeConfig.CONFIDENCE_PENALTY) {
@@ -6011,7 +6017,7 @@ serve(async (req) => {
             }
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_MICRO_PROBE',
-              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
+              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}${isShadowOnly ? ', shadow_only' : ''}`
             });
           } else if (momState === 'none' || momState === 'mixed') {
             // TIER 1: HARD BLOCK — genuine dead zone (none + ADX < 18)
