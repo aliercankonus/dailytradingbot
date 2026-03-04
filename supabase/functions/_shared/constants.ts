@@ -4508,7 +4508,15 @@ export const FOUR_STATE_REGIME = {
       MOMENTUM_BYPASS_MIN_ADX_SLOPE: 0.25, // slope > 0.25 → accelerating (tightened from 0.2 for 18-zone safety)
       MOMENTUM_BYPASS_MIN_SCORE: 8,       // |momentum| >= 8 → not flat (relaxed from 10 for earlier capture)
       MOMENTUM_BYPASS_REQUIRE_DIRECTION: true, // momentum must align with trade direction
-      MOMENTUM_BYPASS_MULTIPLIER: 0.50,   // 50% position for bypassed entries
+      // ===== TIERED POSITION SIZING (transition-rate calibrated) =====
+      // Data: 22+ → 78% transition, 20-22 → 46%, 18-20 → 24%, 16-18 → 0%
+      // Replaces flat 0.50x with graduated risk model
+      MOMENTUM_BYPASS_TIERS: [
+        { MIN_ADX: 22, MULTIPLIER: 1.00, LABEL: 'ELITE' },       // 78% transition → full size
+        { MIN_ADX: 20, MULTIPLIER: 0.75, LABEL: 'CONFIRMED' },   // 46% transition → 3/4 size
+        { MIN_ADX: 18, MULTIPLIER: 0.50, LABEL: 'SPECULATIVE' }, // 24% transition → half size
+      ],
+      MOMENTUM_BYPASS_MULTIPLIER: 0.50,   // Fallback for non-tiered paths
       // ATR overextension: raised limit during breakout ignition
       OVEREXTENSION_ATR_LIMIT: 3.2,       // vs 2.0 default — breakout naturally extends
       // Transition buffer: lower confidence threshold for BREAKOUT_SETUP
