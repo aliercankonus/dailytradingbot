@@ -4512,9 +4512,9 @@ export const FOUR_STATE_REGIME = {
       // Data: 22+ → 78% transition, 20-22 → 46%, 18-20 → 24%, 16-18 → 0%
       // Replaces flat 0.50x with graduated risk model
       MOMENTUM_BYPASS_TIERS: [
-        { MIN_ADX: 22, MULTIPLIER: 1.00, LABEL: 'ELITE' },       // 78% transition → full size
-        { MIN_ADX: 20, MULTIPLIER: 0.75, LABEL: 'CONFIRMED' },   // 46% transition → 3/4 size
-        { MIN_ADX: 18, MULTIPLIER: 0.50, LABEL: 'SPECULATIVE' }, // 24% transition → half size
+        { MIN_ADX: 22, MULTIPLIER: 1.00, LABEL: 'ELITE',       STOP_WIDTH: 1.20 }, // 78% transition → full size, wider stop
+        { MIN_ADX: 20, MULTIPLIER: 0.75, LABEL: 'CONFIRMED',   STOP_WIDTH: 1.00 }, // 46% transition → 3/4 size, standard stop
+        { MIN_ADX: 18, MULTIPLIER: 0.50, LABEL: 'SPECULATIVE', STOP_WIDTH: 0.85 }, // 24% transition → half size, tighter stop
       ],
       MOMENTUM_BYPASS_MULTIPLIER: 0.50,   // Fallback for non-tiered paths
       // ATR overextension: raised limit during breakout ignition
@@ -4527,12 +4527,14 @@ export const FOUR_STATE_REGIME = {
     // Data: 16-18 band has 53% rising slope reliability → needs tighter filters + smaller size
     MICRO_PROBE: {
       ENABLED: true,
+      SHADOW_ONLY: true,                   // Default shadow-only — no live execution until validated
       MIN_ADX: 16,
       MAX_ADX: 18,
       MIN_ADX_SLOPE: 0.4,                 // Aggressive slope requirement (weak zone safety)
       MIN_MOMENTUM_SCORE: 10,             // Tighter than main bypass
       REQUIRE_DIRECTION: true,            // Momentum must align with direction
       POSITION_MULTIPLIER: 0.25,          // Quarter-size probe (half of standard bypass)
+      STOP_WIDTH: 0.75,                   // Tight stop — ya patlar ya söner
       CONFIDENCE_PENALTY: -5,             // Risk premium on confidence
     },
   },

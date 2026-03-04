@@ -5951,10 +5951,12 @@ serve(async (req) => {
             const tiers = ignitionBypass.MOMENTUM_BYPASS_TIERS || [];
             let tierMultiplier = ignitionBypass.MOMENTUM_BYPASS_MULTIPLIER; // fallback
             let tierLabel = 'FALLBACK';
+            let tierStopWidth = 1.0; // default stop width
             for (const tier of tiers) {
               if (adx >= tier.MIN_ADX) {
                 tierMultiplier = tier.MULTIPLIER;
                 tierLabel = tier.LABEL;
+                tierStopWidth = tier.STOP_WIDTH ?? 1.0;
                 break; // tiers are sorted descending by MIN_ADX
               }
             }
@@ -5968,6 +5970,7 @@ serve(async (req) => {
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
             (trendData as any).ignitionTier = tierLabel;
+            (trendData as any).ignitionStopWidth = tierStopWidth;
             // Enrich trendData with ignition audit metadata for shadow tracking
             (trendData as any).ignitionAudit = {
               ignitionTier: tierLabel,
@@ -5976,6 +5979,7 @@ serve(async (req) => {
               momentumAtEntry: smartMomentum.score,
               regime: fourStateRegime.regime,
               tierMultiplier: multiplier,
+              stopWidth: tierStopWidth,
             };
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_IGNITION_MOMENTUM_BYPASS',
@@ -5984,14 +5988,18 @@ serve(async (req) => {
           } else if (isMicroProbeIgnition && (momState === 'none' || momState === 'mixed')) {
             // Micro-probe: weak-floor breakout capture with reduced size
             const multiplier = microProbeConfig.POSITION_MULTIPLIER;
+            const microStopWidth = microProbeConfig.STOP_WIDTH ?? 0.75;
+            const isShadowOnly = microProbeConfig.SHADOW_ONLY === true;
             logger.forSymbol(symbol).info(
               `${LOG_CATEGORIES.GATE} 🔬 BREAKOUT_MICRO_PROBE: NO_MOMENTUM_STATE bypassed (ADX 16-18 tier) — ` +
               `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}>${microProbeConfig.MIN_ADX_SLOPE}, ` +
               `|momentum|=${Math.abs(smartMomentum.score)}>=${microProbeConfig.MIN_MOMENTUM_SCORE}, ` +
-              `dir=${derivedDirection} → ${(multiplier * 100).toFixed(0)}% position (micro-probe)`
+              `dir=${derivedDirection} → ${(multiplier * 100).toFixed(0)}% position (micro-probe${isShadowOnly ? ', SHADOW_ONLY' : ''})`
             );
             (trendData as any).noMomentumStateMultiplier = multiplier;
             (trendData as any).ignitionTier = 'MICRO_PROBE';
+            (trendData as any).ignitionStopWidth = microStopWidth;
+            (trendData as any).microProbeShadowOnly = isShadowOnly;
             // Enrich trendData with ignition audit metadata for shadow tracking
             (trendData as any).ignitionAudit = {
               ignitionTier: 'MICRO_PROBE',
@@ -6000,6 +6008,8 @@ serve(async (req) => {
               momentumAtEntry: smartMomentum.score,
               regime: fourStateRegime.regime,
               tierMultiplier: multiplier,
+              stopWidth: microStopWidth,
+              shadowOnly: isShadowOnly,
             };
             // Apply confidence penalty for weak-floor risk premium
             if (microProbeConfig.CONFIDENCE_PENALTY) {
@@ -6007,7 +6017,7 @@ serve(async (req) => {
             }
             perSymbolGateAttribution.set(symbol, {
               gate: 'BREAKOUT_MICRO_PROBE',
-              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}`
+              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, dir=${derivedDirection}, state=${momState}${isShadowOnly ? ', shadow_only' : ''}`
             });
           } else if (momState === 'none' || momState === 'mixed') {
             // TIER 1: HARD BLOCK — genuine dead zone (none + ADX < 18)
@@ -17886,6 +17896,18 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
         }
         
+        // ===== IGNITION TIER ADAPTIVE STOP WIDTH =====
+        // ELITE: wider stop (1.2x) — strong continuation, needs room
+        // CONFIRMED: standard (1.0x)
+        // SPECULATIVE: tighter (0.85x) — must prove quickly
+        // MICRO_PROBE: tight (0.75x) — ya patlar ya söner
+        const ignitionStopWidth = (trendData as any).ignitionStopWidth;
+        if (ignitionStopWidth && ignitionStopWidth !== 1.0) {
+          const prevStop = stopLossPercent;
+          stopLossPercent *= ignitionStopWidth;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔥 IGNITION STOP WIDTH [${(trendData as any).ignitionTier}]: ${prevStop.toFixed(2)}% → ${stopLossPercent.toFixed(2)}% (×${ignitionStopWidth})`);
+        }
+        
         // Take profit = stop loss × user-configured multiplier
         let takeProfitPercent = stopLossPercent * baseTpMultiplier;
         
@@ -18149,6 +18171,40 @@ serve(async (req) => {
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
           created_by_rebalancer: false,
         };
+
+        // ===== MICRO_PROBE SHADOW-ONLY ROUTING =====
+        // If MICRO_PROBE tier and SHADOW_ONLY=true, route to shadow instead of live
+        if ((trendData as any).microProbeShadowOnly === true) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 MICRO_PROBE SHADOW_ONLY: Signal routed to shadow_mode_signals instead of live execution`);
+          try {
+            const shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, signalType as 'long' | 'short');
+            await supabase.from('shadow_mode_signals').insert({
+              user_id: userId,
+              symbol,
+              signal_type: signalType,
+              strategy_name: strategy.name,
+              old_gate_result: 'WOULD_EXECUTE',
+              new_gate_result: 'SHADOW_ONLY_MICRO_PROBE',
+              gate_blocked_by: 'MICRO_PROBE_SHADOW_ONLY',
+              confidence_score: adjustedConfidence,
+              entry_price: shadowSLTP.entry,
+              stop_loss: shadowSLTP.sl,
+              take_profit: shadowSLTP.tp,
+              old_position_multiplier: 1.0,
+              new_position_multiplier: signal.indicators?.positionSizePercent || strategyPositionSize,
+              trend: trendData?.primaryTrend || null,
+              gate_details: {
+                gate: 'BREAKOUT_MICRO_PROBE',
+                shadowOnly: true,
+                ignitionAudit: (trendData as any).ignitionAudit || null,
+              },
+              indicators: signal.indicators,
+            });
+          } catch (shadowErr) {
+            logger.forSymbol(symbol).warn(`Shadow insert failed for MICRO_PROBE: ${shadowErr}`);
+          }
+          continue; // Skip live signal insertion
+        }
 
         const { data: insertedSignal, error: insertError } = await supabase
           .from("trading_signals")
