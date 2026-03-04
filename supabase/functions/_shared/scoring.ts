@@ -5177,16 +5177,24 @@ export const classify4StateRegime = (
     // ===== TRANSITION BUFFER ENFORCEMENT =====
     // Hard block when regimeConfidence < TRANSITION_LOW (45) even if ADX/slope meet expansion criteria
     // This prevents entries with strong ADX but weak overall conviction (opposing momentum, poor DI separation, etc.)
-    if (TB.ENABLED && regimeConfidence < TB.TRANSITION_LOW) {
+    // BREAKOUT IGNITION EXCEPTION: Lower threshold to 35 for BREAKOUT_SETUP candidates
+    // Ignition phase has inherently lower conviction (momentum lags structure) — 35 is sufficient
+    const breakoutIgnitionConf = R.BREAKOUT_SETUP?.IGNITION_GATE_BYPASS?.CONFIDENCE_HARD_BLOCK_MIN ?? TB.TRANSITION_LOW;
+    const isBreakoutCandidate = adxSlope >= (R.BREAKOUT_SETUP?.MIN_ADX_SLOPE ?? 0.3) && adx >= (R.BREAKOUT_SETUP?.MIN_ADX ?? 18) && adx <= (R.BREAKOUT_SETUP?.MAX_ADX ?? 30);
+    const effectiveConfidenceFloor = isBreakoutCandidate ? breakoutIgnitionConf : TB.TRANSITION_LOW;
+    
+    if (TB.ENABLED && regimeConfidence < effectiveConfidenceFloor) {
       return {
-        regime: 'RANGE_COMPRESSION',
-        positionMultiplier: 0,
-        allowContinuation: false,
+        regime: isBreakoutCandidate && regimeConfidence >= breakoutIgnitionConf ? 'BREAKOUT_SETUP' : 'RANGE_COMPRESSION',
+        positionMultiplier: isBreakoutCandidate && regimeConfidence >= breakoutIgnitionConf ? R.BREAKOUT_SETUP.POSITION_MULTIPLIER : 0,
+        allowContinuation: isBreakoutCandidate && regimeConfidence >= breakoutIgnitionConf,
         allowMeanReversion: R.RANGE_COMPRESSION.ALLOW_MR_BYPASS,
-        requireConfirmation: false,
-        reason: `RANGE_COMPRESSION [CONFIDENCE HARD BLOCK]: ADX=${adx.toFixed(1)} meets expansion criteria but regimeConfidence=${regimeConfidence} < ${TB.TRANSITION_LOW} → HARD BLOCK (weak conviction despite strong ADX)`,
+        requireConfirmation: isBreakoutCandidate,
+        reason: isBreakoutCandidate && regimeConfidence >= breakoutIgnitionConf
+          ? `BREAKOUT_SETUP [IGNITION BYPASS]: ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, confidence=${regimeConfidence} >= ${breakoutIgnitionConf} (ignition threshold) → routed to BREAKOUT_SETUP at ${(R.BREAKOUT_SETUP.POSITION_MULTIPLIER * 100).toFixed(0)}% sizing`
+          : `RANGE_COMPRESSION [CONFIDENCE HARD BLOCK]: ADX=${adx.toFixed(1)} meets expansion criteria but regimeConfidence=${regimeConfidence} < ${effectiveConfidenceFloor} → HARD BLOCK (weak conviction despite strong ADX)`,
         regimeConfidence,
-        isTransitionZone: false,
+        isTransitionZone: isBreakoutCandidate,
         diagnostics: diag,
       };
     }

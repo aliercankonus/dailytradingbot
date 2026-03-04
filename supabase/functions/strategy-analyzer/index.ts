@@ -5916,7 +5916,28 @@ serve(async (req) => {
           const TRANSITION_ADX = 20;        // Mixed + rising ADX = transition, allow reduced
           const FULL_ALLOW_ADX = 25;        // Original threshold — full participation
           
-          if (momState === 'none' || momState === 'mixed') {
+          // ===== BREAKOUT IGNITION BYPASS: Numeric edge replaces state-based check =====
+          const ignitionBypass = FOUR_STATE_REGIME.BREAKOUT_SETUP.IGNITION_GATE_BYPASS;
+          const isBreakoutIgnition = fourStateRegime.regime === 'BREAKOUT_SETUP' &&
+            adx >= ignitionBypass.MOMENTUM_BYPASS_MIN_ADX &&
+            adxSlope > ignitionBypass.MOMENTUM_BYPASS_MIN_ADX_SLOPE &&
+            Math.abs(smartMomentum.score) >= ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE;
+          
+          if (isBreakoutIgnition && (momState === 'none' || momState === 'mixed')) {
+            // Breakout ignition: numeric edge confirms energy — bypass state-based block
+            const multiplier = ignitionBypass.MOMENTUM_BYPASS_MULTIPLIER;
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.GATE} 🚀 BREAKOUT_IGNITION_BYPASS: NO_MOMENTUM_STATE skipped — ` +
+              `regime=BREAKOUT_SETUP, ADX=${adx.toFixed(1)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_ADX}, ` +
+              `slope=${adxSlope.toFixed(2)}>${ignitionBypass.MOMENTUM_BYPASS_MIN_ADX_SLOPE}, ` +
+              `|momentum|=${Math.abs(smartMomentum.score)}>=${ignitionBypass.MOMENTUM_BYPASS_MIN_SCORE} → ${(multiplier * 100).toFixed(0)}% position`
+            );
+            (trendData as any).noMomentumStateMultiplier = multiplier;
+            perSymbolGateAttribution.set(symbol, {
+              gate: 'BREAKOUT_IGNITION_MOMENTUM_BYPASS',
+              details: `ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, |mom|=${Math.abs(smartMomentum.score)}, state=${momState}`
+            });
+          } else if (momState === 'none' || momState === 'mixed') {
             // TIER 1: HARD BLOCK — genuine dead zone (none + ADX < 18)
             if (momState === 'none' && adx < HARD_BLOCK_ADX) {
               const blockReason = `NO_MOMENTUM_STATE: ${derivedDirection.toUpperCase()} blocked — momentum_state='none' (dead zone), ADX=${adx.toFixed(1)} < ${HARD_BLOCK_ADX}`;
@@ -9744,7 +9765,11 @@ serve(async (req) => {
         // Gate 1b: OVEREXTENSION ATR HARD BLOCK
         // Block entries when price is too far from EMA (overextension measured in ATR multiples)
         // This prevents chasing moves that are statistically likely to revert
-        const maxOverextensionAtr = riskParams.max_overextension_atr ?? 2.0;
+        const baseMaxOverextensionAtr = riskParams.max_overextension_atr ?? 2.0;
+        // BREAKOUT IGNITION: Raise ATR limit during BREAKOUT_SETUP — breakouts naturally extend from EMA
+        const maxOverextensionAtr = fourStateRegime.regime === 'BREAKOUT_SETUP'
+          ? FOUR_STATE_REGIME.BREAKOUT_SETUP.IGNITION_GATE_BYPASS.OVEREXTENSION_ATR_LIMIT
+          : baseMaxOverextensionAtr;
         const currentOverextensionAtr = smartMomentum.overextensionATR;
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
