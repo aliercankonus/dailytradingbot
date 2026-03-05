@@ -7377,9 +7377,24 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
   // ===== TREND STRENGTH REQUIREMENTS =====
   // Must be in a strong trend (ADX >= 30, not 40 which is too restrictive)
   MIN_ADX: 30,
-  // ADX slope must be meaningfully positive (trend gaining strength)
-  // REFINED: Increased from 0.0 to 0.05 - slope hovering at 0 is often trend plateau
+  // ADX slope for full-size pullback entry (trend gaining strength)
   MIN_ADX_SLOPE: 0.05,
+  // GRADUATED ADX SLOPE TIERS: Replace binary block with graduated sizing
+  // Philosophy: Decelerating trend ≠ dead trend. Allow probe entries at reduced size.
+  ADX_SLOPE_GRADUATED: {
+    ENABLED: true,
+    // Tier 1: Flat slope (0 to MIN_ADX_SLOPE) — trend plateau, still structural
+    FLAT_SLOPE_MIN: 0,
+    FLAT_SLOPE_MULTIPLIER: 0.45,
+    // Tier 2: Mild deceleration (0 to -0.5) — trend slowing but structure intact
+    MILD_DECEL_SLOPE_MIN: -0.5,
+    MILD_DECEL_MULTIPLIER: 0.35,
+    // Tier 3: Moderate deceleration (-0.5 to -1.0) — probe entry only
+    MODERATE_DECEL_SLOPE_MIN: -1.0,
+    MODERATE_DECEL_MULTIPLIER: 0.25,
+    // Below -1.0: HARD BLOCK (structural collapse risk)
+    HARD_BLOCK_SLOPE: -1.0,
+  },
   // 4H trend must be directional (not neutral)
   REQUIRE_4H_DIRECTIONAL: true,
   MIN_4H_CONFIDENCE: 50,

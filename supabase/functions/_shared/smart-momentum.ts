@@ -2245,6 +2245,15 @@ export function detectTrendContinuationPullback(
     stopLossAtrMultiplier: number;
     emaStopBufferPercent: number;
     useMaxStop: boolean;                   // NEW: use max of ATR and EMA stops
+    adxSlopeGraduated?: {                  // NEW: graduated slope tiers
+      enabled: boolean;
+      flatSlopeMin: number;
+      flatSlopeMultiplier: number;
+      mildDecelSlopeMin: number;
+      mildDecelMultiplier: number;
+      moderateDecelSlopeMin: number;
+      moderateDecelMultiplier: number;
+    };
   }
 ): TrendContinuationPullbackResult {
   const defaultResult: TrendContinuationPullbackResult = {
@@ -2297,13 +2306,48 @@ export function detectTrendContinuationPullback(
   defaultResult.priceToEma50 = priceToEma50;
   defaultResult.priceToEmaMidpoint = priceToEmaMidpoint;
 
-  // Check ADX requirement
-  defaultResult.adxSufficient = adx >= config.minAdx && adxSlope >= config.minAdxSlope;
-  if (!defaultResult.adxSufficient) {
-    defaultResult.blockReason = `ADX ${adx.toFixed(1)} < ${config.minAdx} or slope ${adxSlope.toFixed(2)} < ${config.minAdxSlope}`;
+  // Check ADX requirement — GRADUATED slope tiers replace binary block
+  const adxAboveMin = adx >= config.minAdx;
+  const slopeAboveMin = adxSlope >= config.minAdxSlope;
+  
+  // Check graduated slope tiers if enabled
+  const graduated = config.adxSlopeGraduated;
+  let slopeMultiplier = 1.0;
+  let slopeGraduated = false;
+  
+  if (adxAboveMin && !slopeAboveMin && graduated?.enabled) {
+    if (adxSlope >= graduated.flatSlopeMin) {
+      // Tier 1: Flat slope (0 to +0.05) — trend plateau
+      slopeMultiplier = graduated.flatSlopeMultiplier;
+      slopeGraduated = true;
+      reasons.push(`⚠️ ADX slope flat (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%`);
+    } else if (adxSlope >= graduated.mildDecelSlopeMin) {
+      // Tier 2: Mild deceleration (0 to -0.5)
+      slopeMultiplier = graduated.mildDecelMultiplier;
+      slopeGraduated = true;
+      reasons.push(`⚠️ ADX slope mild decel (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%`);
+    } else if (adxSlope >= graduated.moderateDecelSlopeMin) {
+      // Tier 3: Moderate deceleration (-0.5 to -1.0) — probe only
+      slopeMultiplier = graduated.moderateDecelMultiplier;
+      slopeGraduated = true;
+      reasons.push(`⚠️ ADX slope moderate decel (${adxSlope.toFixed(2)}), probe entry ${(slopeMultiplier * 100).toFixed(0)}%`);
+    } else {
+      // Below hard block threshold — structural collapse
+      defaultResult.blockReason = `ADX slope structural collapse: ${adxSlope.toFixed(2)} < ${graduated.moderateDecelSlopeMin}`;
+      return defaultResult;
+    }
+  } else if (!adxAboveMin) {
+    defaultResult.adxSufficient = false;
+    defaultResult.blockReason = `ADX ${adx.toFixed(1)} < ${config.minAdx}`;
+    return defaultResult;
+  } else if (!slopeAboveMin && !graduated?.enabled) {
+    defaultResult.adxSufficient = false;
+    defaultResult.blockReason = `ADX slope ${adxSlope.toFixed(2)} < ${config.minAdxSlope} (graduated disabled)`;
     return defaultResult;
   }
-  reasons.push(`ADX ${adx.toFixed(1)} (slope: ${adxSlope >= 0 ? '+' : ''}${adxSlope.toFixed(2)})`);
+  
+  defaultResult.adxSufficient = true;
+  reasons.push(`ADX ${adx.toFixed(1)} (slope: ${adxSlope >= 0 ? '+' : ''}${adxSlope.toFixed(2)}${slopeGraduated ? ' [GRADUATED]' : ''})`);
 
   // Check StochRSI cooldown
   if (direction === 'long') {
@@ -2400,13 +2444,19 @@ export function detectTrendContinuationPullback(
   defaultResult.direction = direction;
   defaultResult.pullbackType = pullbackType;
   
-  // REFINED: Apply appropriate position multiplier
+  // REFINED: Apply appropriate position multiplier with slope graduation
   let positionMultiplier = config.baseMultiplier;
   if (isShallowPullback) {
     positionMultiplier = config.shallowPullbackMultiplier;
     reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (shallow pullback)`);
   } else {
     reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (base)`);
+  }
+  
+  // Apply slope graduation multiplier (stack with base/shallow multiplier)
+  if (slopeGraduated) {
+    positionMultiplier = Math.min(positionMultiplier, slopeMultiplier);
+    reasons.push(`Position size capped to ${(positionMultiplier * 100).toFixed(0)}% (ADX slope graduated)`);
   }
   defaultResult.positionMultiplier = positionMultiplier;
   
