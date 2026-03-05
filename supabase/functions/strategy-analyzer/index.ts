@@ -209,6 +209,8 @@ import {
   // NEW: Momentum flip detection and direction alignment
   detectMomentumFlip,
   checkMomentumDirectionAlignment,
+  // NEW: Trend Continuation Pullback (EMA-based re-entry in decelerating trends)
+  detectTrendContinuationPullback,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
@@ -217,7 +219,8 @@ import {
   type ContinuationModeResult,
   type ADXExhaustionResult,
   type BollingerPriceActionResult,
-  type MomentumFlipResult
+  type MomentumFlipResult,
+  type TrendContinuationPullbackResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
@@ -8533,6 +8536,82 @@ serve(async (req) => {
             
             if (ltfConfirmationApplied && ltfConfirmationPositionMultiplier < 1.0) {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} LTF_CONFIRMATION: Position reduced to ${(ltfConfirmationPositionMultiplier * 100).toFixed(0)}% (4h=${tf4hDir}, 1h=${tf1hDir}, 30m=${tf30mDir})`);
+            }
+          }
+        }
+        
+        // ============= TREND CONTINUATION PULLBACK GATE (NEW) =============
+        // Allows reduced-size entries in decelerating TREND_EXPANSION via EMA pullback detection
+        // Graduated ADX slope: flat → 0.45x, mild decel → 0.35x, moderate decel → 0.25x
+        let trendContinuationPullbackMultiplier = 1.0;
+        let trendContinuationPullbackApplied = false;
+        
+        if (TREND_CONTINUATION_PULLBACK_REGIME.ENABLED && 
+            fourStateRegime?.regime === 'TREND_EXPANSION' &&
+            derivedDirection) {
+          
+          const klines15mForPullback = trendData?.klines15m || [];
+          const prices15m = klines15mForPullback.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
+          
+          if (prices15m.length >= 50) {
+            const pullbackCurrentPrice = trendData?.currentPrice || 0;
+            const pullbackATR = trendData?.volatility?.atr ?? 0;
+            const pullbackStochK4h = extractStochRsiK(trendData, '4h');
+            const pullbackStochK1h = extractStochRsiK(trendData, '1h');
+            const pullbackHigh24h = trendData?.priceDistanceFromSwing?.high24h ?? 0;
+            const pullbackLow24h = trendData?.priceDistanceFromSwing?.low24h ?? 0;
+            const pullbackDirection = derivedDirection === 'long' ? 'long' as const : 'short' as const;
+            
+            const graduatedConfig = TREND_CONTINUATION_PULLBACK_REGIME.ADX_SLOPE_GRADUATED;
+            
+            const pullbackAdxSlope = fullAdxResult.adxSlope ?? 0;
+            
+            const pullbackResult = detectTrendContinuationPullback(
+              prices15m,
+              pullbackDirection,
+              adx,
+              pullbackAdxSlope,
+              pullbackStochK4h,
+              pullbackStochK1h,
+              pullbackHigh24h,
+              pullbackLow24h,
+              pullbackATR,
+              {
+                minAdx: TREND_CONTINUATION_PULLBACK_REGIME.MIN_ADX,
+                minAdxSlope: TREND_CONTINUATION_PULLBACK_REGIME.MIN_ADX_SLOPE,
+                emaProximityThreshold: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.PROXIMITY_THRESHOLD_PERCENT,
+                emaProximityThresholdStrong: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.PROXIMITY_THRESHOLD_STRONG_ADX,
+                strongAdxThreshold: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.STRONG_ADX_THRESHOLD,
+                longMaxK: TREND_CONTINUATION_PULLBACK_REGIME.STOCHRSI_COOLDOWN.LONG_MAX_K,
+                shortMinK: TREND_CONTINUATION_PULLBACK_REGIME.STOCHRSI_COOLDOWN.SHORT_MIN_K,
+                longMaxMove: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.LONG_MAX_MOVE_FROM_LOW_PERCENT,
+                shortMaxMove: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.SHORT_MAX_MOVE_FROM_HIGH_PERCENT,
+                shallowPullbackMaxMove: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.SHALLOW_PULLBACK_MAX_MOVE_PERCENT,
+                shallowPullbackThreshold: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.SHALLOW_PULLBACK_THRESHOLD,
+                baseMultiplier: TREND_CONTINUATION_PULLBACK_REGIME.BASE_POSITION_MULTIPLIER,
+                momentumAlignedMultiplier: TREND_CONTINUATION_PULLBACK_REGIME.MOMENTUM_ALIGNED_MULTIPLIER,
+                shallowPullbackMultiplier: TREND_CONTINUATION_PULLBACK_REGIME.SHALLOW_PULLBACK_MULTIPLIER,
+                stopLossAtrMultiplier: TREND_CONTINUATION_PULLBACK_REGIME.STOP_LOSS_ATR_MULTIPLIER,
+                emaStopBufferPercent: TREND_CONTINUATION_PULLBACK_REGIME.EMA_STOP_BUFFER_PERCENT,
+                useMaxStop: TREND_CONTINUATION_PULLBACK_REGIME.USE_MAX_STOP,
+                adxSlopeGraduated: graduatedConfig.ENABLED ? {
+                  enabled: true,
+                  flatSlopeMin: graduatedConfig.FLAT_SLOPE_MIN,
+                  flatSlopeMultiplier: graduatedConfig.FLAT_SLOPE_MULTIPLIER,
+                  mildDecelSlopeMin: graduatedConfig.MILD_DECEL_SLOPE_MIN,
+                  mildDecelMultiplier: graduatedConfig.MILD_DECEL_MULTIPLIER,
+                  moderateDecelSlopeMin: graduatedConfig.MODERATE_DECEL_SLOPE_MIN,
+                  moderateDecelMultiplier: graduatedConfig.MODERATE_DECEL_MULTIPLIER,
+                } : undefined,
+              }
+            );
+            
+            if (pullbackResult.eligible && pullbackResult.positionMultiplier > 0) {
+              trendContinuationPullbackMultiplier = pullbackResult.positionMultiplier;
+              trendContinuationPullbackApplied = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ TREND_CONTINUATION_PULLBACK: ${pullbackDirection.toUpperCase()} entry eligible at ${(trendContinuationPullbackMultiplier * 100).toFixed(0)}% — ${pullbackResult.reasons?.join(', ')}`);
+            } else if (pullbackResult.blockReason) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ℹ️ TREND_CONTINUATION_PULLBACK: Not eligible — ${pullbackResult.blockReason}`);
             }
           }
         }
@@ -17983,6 +18062,12 @@ serve(async (req) => {
         if (nearExtremePositionMultiplier < 1.0) {
           unifiedPositionSize *= nearExtremePositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NEAR 24H EXTREME - position size reduced to ${unifiedPositionSize.toFixed(2)}% (near price extreme)`);
+        }
+        
+        // Apply position reduction for Trend Continuation Pullback (graduated ADX slope)
+        if (trendContinuationPullbackApplied && trendContinuationPullbackMultiplier < 1.0) {
+          unifiedPositionSize *= trendContinuationPullbackMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📉 TREND_CONTINUATION_PULLBACK - position size reduced to ${unifiedPositionSize.toFixed(2)}% (EMA pullback with graduated slope)`);
         }
         
         // ===== NEW: BE ANALYSIS GATES =====
