@@ -619,6 +619,14 @@ const logRejectionWithAI = async (
     isTransitioning: trendData?.smartMomentum?.isTransitioning ?? null,
   };
   
+  // Extract regime data centrally — prevents reliance on gate-specific passthrough
+  const regimeData = {
+    effectiveRegime: trendData?.regime?.regime ?? trendData?.effectiveRegime ?? null,
+    regimeConfidence: trendData?.regime?.confidence ?? trendData?.regimeConfidence ?? null,
+    regimePersistence: trendData?.regime?.persistedBars ?? null,
+    regimeCandidate: trendData?.regime?.candidate ?? null,
+  };
+  
   // PHASE FIX: Always include volumeRatio unconditionally in rejection logs
   // Contract: volumeRatio must always be present (null = not computed, number = actual value)
   // This fixes the UI bug where missing volumeRatio defaulted to 1.0 ("100% Normal") incorrectly
