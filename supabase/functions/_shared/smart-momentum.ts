@@ -2469,12 +2469,16 @@ export function detectTrendContinuationPullback(
   defaultResult.positionMultiplier = positionMultiplier;
   
   // REFINED: Stop loss uses MAX of ATR and EMA stops (never inside structure)
-  const atrStop = atr * config.stopLossAtrMultiplier;
+  // SLOPE-BASED: Use tightened ATR multiplier for probe entries
+  const effectiveStopAtrMultiplier = slopeGraduated ? slopeStopAtrMultiplier : config.stopLossAtrMultiplier;
+  const atrStop = atr * effectiveStopAtrMultiplier;
   const emaStop = (direction === 'long' ? ema50 : ema50) * (config.emaStopBufferPercent / 100);
+  
+  defaultResult.stopAtrMultiplier = effectiveStopAtrMultiplier;
   
   if (config.useMaxStop) {
     defaultResult.stopLossAtr = Math.max(atrStop, emaStop);
-    reasons.push(`Stop: max(ATR ${atrStop.toFixed(2)}, EMA ${emaStop.toFixed(2)}) = ${defaultResult.stopLossAtr.toFixed(2)}`);
+    reasons.push(`Stop: max(ATR ${atrStop.toFixed(2)} [${effectiveStopAtrMultiplier.toFixed(2)}x], EMA ${emaStop.toFixed(2)}) = ${defaultResult.stopLossAtr.toFixed(2)}${slopeGraduated ? ' [TIGHTENED]' : ''}`);
   } else {
     defaultResult.stopLossAtr = atrStop;
   }
