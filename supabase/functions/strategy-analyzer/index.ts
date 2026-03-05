@@ -654,12 +654,13 @@ const logRejectionWithAI = async (
   // CRITICAL FIX: filtersStatus takes precedence for explicitly passed values (like adxSlope from gate checks)
   // Spread order: base data first, then filtersStatus last to preserve gate-specific values
   let enrichedFiltersStatus = {
-    ...stochRsiData, // Always include StochRSI K/D values
-    ...bollingerData, // Always include Bollinger %B values
-    ...adxData, // ADX and slope from trendData as fallback
-    ...momentumData, // Momentum score, phase, direction (fixes NULL momentumScore in NEAR_24H_HIGH analysis)
-    ...volumeData, // ALWAYS include volume data (null = unknown, not 1.0)
-    ...filtersStatus, // LAST: Gate-specific values override defaults (e.g., adxSlope from ADX_SLOPE_GRADUATED)
+    ...stochRsiData,
+    ...bollingerData,
+    ...adxData,
+    ...momentumData,
+    ...regimeData, // Centralized regime info (effectiveRegime, confidence, persistence, candidate)
+    ...volumeData,
+    ...filtersStatus, // LAST: Gate-specific values override defaults
   };
   
   // Add Order Flow data if provided
