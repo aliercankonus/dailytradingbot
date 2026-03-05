@@ -10022,96 +10022,119 @@ serve(async (req) => {
         }
         
         // Gate 1b: OVEREXTENSION ATR HARD BLOCK
-        // Block entries when price is too far from EMA (overextension measured in ATR multiples)
-        // This prevents chasing moves that are statistically likely to revert
+        // Gate 1b: OVEREXTENSION ATR GATE (HYBRID GRADUATED)
+        // Prevents chasing moves too far from EMA, with graduated probe zone
+        // Hard block: > 2.5 ATR | Micro-probe: 2.0-2.5 ATR (0.15x) | Reduced-probe: 1.5-2.0 ATR (0.25x)
         const baseMaxOverextensionAtr = riskParams.max_overextension_atr ?? 2.0;
         // BREAKOUT IGNITION: Raise ATR limit during BREAKOUT_SETUP — breakouts naturally extend from EMA
         const maxOverextensionAtr = fourStateRegime.regime === 'BREAKOUT_SETUP'
           ? FOUR_STATE_REGIME.BREAKOUT_SETUP.IGNITION_GATE_BYPASS.OVEREXTENSION_ATR_LIMIT
           : baseMaxOverextensionAtr;
         const currentOverextensionAtr = smartMomentum.overextensionATR;
+        
+        // GRADUATED OVEREXTENSION THRESHOLDS
+        const OVEREXT_HARD_BLOCK = 2.5;    // Absolute block — shadow mode proved 0% win rate above this
+        const OVEREXT_MICRO_PROBE = 2.0;   // 0.15x micro-probe zone
+        const OVEREXT_REDUCED_PROBE = 1.5; // 0.25x reduced-probe zone
+        
+        let overextensionProbeMultiplier = 1.0;
+        let overextensionProbeApplied = false;
+        
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
-          // overextensionATR is always >= 0 (absolute distance), so check moveZone instead
           const isMRDirection = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed;
           if (!isMRDirection) {
-            // ===== SHADOW: REGIME-ADAPTIVE OVEREXTENSION THRESHOLD =====
-            // Test if a regime-aware threshold would have allowed this entry
-            const regimeAdaptiveThresholds: Record<string, number> = {
-              'RANGE_COMPRESSION': 2.5,
-              'BREAKOUT_SETUP': 3.2, // Already applied above
-              'TREND_EXPANSION': 3.8,
-              'TREND_EXHAUSTION': 2.5,
-            };
-            const shadowThreshold = regimeAdaptiveThresholds[fourStateRegime.regime] ?? 3.0;
-            const wouldPassWithAdaptive = currentOverextensionAtr <= shadowThreshold;
             
-            if (wouldPassWithAdaptive && shadowModeEnabled) {
-              try {
-                const _dedupSkipOE = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'OVEREXTENSION_ATR_BLOCK');
-                if (!_dedupSkipOE) {
-                const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
-                await supabase.from('shadow_mode_signals').insert({
-                  user_id: userId,
-                  symbol,
-                  signal_type: derivedDirection,
-                  strategy_name: 'OVEREXTENSION_REGIME_ADAPTIVE',
-                  gate_blocked_by: 'OVEREXTENSION_ATR_BLOCK',
-                  old_gate_result: 'blocked',
-                  new_gate_result: 'passed',
-                  old_position_multiplier: 0,
-                  new_position_multiplier: 0.5, // Conservative shadow sizing
-                  confidence_score: smartMomentum.score,
-                  entry_price: trendData?.currentPrice || null,
-                  stop_loss: _shadowSLTP.stopLoss || null,
-                  take_profit: _shadowSLTP.takeProfit || null,
-                  gate_details: {
-                    gate: 'OVEREXTENSION_ATR_SHADOW',
-                    currentATR: parseFloat(currentOverextensionAtr.toFixed(2)),
-                    currentThreshold: maxOverextensionAtr,
-                    shadowThreshold,
-                    regime: fourStateRegime.regime,
-                    adx: parseFloat(adx.toFixed(1)),
-                    adxSlope: parseFloat(adxSlope.toFixed(3)),
-                    momentumScore: parseFloat(smartMomentum.score.toFixed(1)),
-                    regimeConfidence: fourStateRegime.confidence,
-                  },
-                  trend: trendData?.trend || null,
-                });
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 OVEREXTENSION SHADOW: Would PASS with regime-adaptive threshold ${shadowThreshold}x (regime=${fourStateRegime.regime}, current=${currentOverextensionAtr.toFixed(2)} ATR, blocked at ${maxOverextensionAtr}x)`);
+            if (currentOverextensionAtr > OVEREXT_HARD_BLOCK) {
+              // ===== HARD BLOCK: > 2.5 ATR — shadow mode confirmed 0% win rate =====
+              // Still log shadow for regime-adaptive tracking
+              const regimeAdaptiveThresholds: Record<string, number> = {
+                'RANGE_COMPRESSION': 2.5,
+                'BREAKOUT_SETUP': 3.2,
+                'TREND_EXPANSION': 3.8,
+                'TREND_EXHAUSTION': 2.5,
+              };
+              const shadowThreshold = regimeAdaptiveThresholds[fourStateRegime.regime] ?? 3.0;
+              const wouldPassWithAdaptive = currentOverextensionAtr <= shadowThreshold;
+              
+              if (wouldPassWithAdaptive && shadowModeEnabled) {
+                try {
+                  const _dedupSkipOE = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'OVEREXTENSION_ATR_BLOCK');
+                  if (!_dedupSkipOE) {
+                    const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                    await supabase.from('shadow_mode_signals').insert({
+                      user_id: userId,
+                      symbol,
+                      signal_type: derivedDirection,
+                      strategy_name: 'OVEREXTENSION_REGIME_ADAPTIVE',
+                      gate_blocked_by: 'OVEREXTENSION_ATR_BLOCK',
+                      old_gate_result: 'blocked',
+                      new_gate_result: 'passed',
+                      old_position_multiplier: 0,
+                      new_position_multiplier: 0.5,
+                      confidence_score: smartMomentum.score,
+                      entry_price: trendData?.currentPrice || null,
+                      stop_loss: _shadowSLTP.stopLoss || null,
+                      take_profit: _shadowSLTP.takeProfit || null,
+                      gate_details: {
+                        gate: 'OVEREXTENSION_ATR_SHADOW',
+                        currentATR: parseFloat(currentOverextensionAtr.toFixed(2)),
+                        currentThreshold: maxOverextensionAtr,
+                        shadowThreshold,
+                        regime: fourStateRegime.regime,
+                        adx: parseFloat(adx.toFixed(1)),
+                        adxSlope: parseFloat(adxSlope.toFixed(3)),
+                        momentumScore: parseFloat(smartMomentum.score.toFixed(1)),
+                        regimeConfidence: fourStateRegime.confidence,
+                      },
+                      trend: trendData?.trend || null,
+                    });
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 OVEREXTENSION SHADOW: Would PASS with regime-adaptive threshold ${shadowThreshold}x (regime=${fourStateRegime.regime}, current=${currentOverextensionAtr.toFixed(2)} ATR, blocked at ${OVEREXT_HARD_BLOCK}x)`);
+                  }
+                } catch (shadowErr) {
+                  logger.forSymbol(symbol).warn(`Shadow overextension log failed: ${shadowErr}`);
+                }
               }
-              } catch (shadowErr) {
-                logger.forSymbol(symbol).warn(`Shadow overextension log failed: ${shadowErr}`);
-              }
+              
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'OVEREXTENSION_ATR_BLOCK', 
+                details: `overextATR=${currentOverextensionAtr.toFixed(2)} > hard_block=${OVEREXT_HARD_BLOCK}, ADX=${adx.toFixed(1)}` 
+              });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ OVEREXTENSION ATR HARD BLOCK: ${currentOverextensionAtr.toFixed(2)} ATR > ${OVEREXT_HARD_BLOCK} ATR — structural chasing blocked`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `OVEREXTENSION ATR: ${currentOverextensionAtr.toFixed(2)} ATR from EMA exceeds hard block ${OVEREXT_HARD_BLOCK} ATR — chasing blocked`,
+                {
+                  gate: "OVEREXTENSION_ATR_BLOCK",
+                  derivedDirection,
+                  overextensionATR: currentOverextensionAtr,
+                  maxOverextensionATR: OVEREXT_HARD_BLOCK,
+                  regime: fourStateRegime.regime,
+                  atrLimitSource: 'hybrid_graduated_hard_block_2.5x',
+                  adx: adx.toFixed(1),
+                  momentumScore: smartMomentum.score,
+                  architecture: "Hybrid graduated — hard block at 2.5x ATR",
+                },
+                trendData,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+              
+            } else if (currentOverextensionAtr > OVEREXT_MICRO_PROBE) {
+              // ===== MICRO-PROBE ZONE: 2.0-2.5 ATR — 0.15x position + tight stop =====
+              overextensionProbeMultiplier = 0.15;
+              overextensionProbeApplied = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ OVEREXTENSION_ATR_MICRO_PROBE: ${currentOverextensionAtr.toFixed(2)} ATR (${OVEREXT_MICRO_PROBE}-${OVEREXT_HARD_BLOCK} zone) → 0.15x micro-probe + tight stop`);
+              
+            } else if (currentOverextensionAtr > OVEREXT_REDUCED_PROBE) {
+              // ===== REDUCED-PROBE ZONE: 1.5-2.0 ATR — 0.25x position =====
+              overextensionProbeMultiplier = 0.25;
+              overextensionProbeApplied = true;
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ OVEREXTENSION_ATR_REDUCED_PROBE: ${currentOverextensionAtr.toFixed(2)} ATR (${OVEREXT_REDUCED_PROBE}-${OVEREXT_MICRO_PROBE} zone) → 0.25x reduced-probe`);
             }
-            
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { 
-              gate: 'OVEREXTENSION_ATR_BLOCK', 
-              details: `overextATR=${currentOverextensionAtr.toFixed(2)} > max=${maxOverextensionAtr}, ADX=${adx.toFixed(1)}` 
-            });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ OVEREXTENSION ATR HARD BLOCK: ${currentOverextensionAtr.toFixed(2)} ATR > max ${maxOverextensionAtr} ATR — price too far from EMA for ${derivedDirection.toUpperCase()} entry`);
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `OVEREXTENSION ATR: ${currentOverextensionAtr.toFixed(2)} ATR from EMA exceeds max ${maxOverextensionAtr} ATR — chasing blocked`,
-              {
-                gate: "OVEREXTENSION_ATR_BLOCK",
-                derivedDirection,
-                overextensionATR: currentOverextensionAtr,
-                maxOverextensionATR: maxOverextensionAtr,
-                regime: fourStateRegime.regime,
-                atrLimitSource: fourStateRegime.regime === 'BREAKOUT_SETUP' ? 'ignition_bypass_3.2x' : 'default_2.0x',
-                adx: adx.toFixed(1),
-                momentumScore: smartMomentum.score,
-                architecture: "Hard block — no ADX override",
-                shadowAdaptiveThreshold: shadowThreshold,
-                wouldPassWithAdaptive,
-              },
-              trendData,
-              riskParams.ai_analysis_enabled !== false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
+            // Below 1.5 ATR → normal sizing (no penalty)
           }
         }
         
