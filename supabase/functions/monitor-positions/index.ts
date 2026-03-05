@@ -3290,9 +3290,11 @@ serve(async (req) => {
         const feeExemptReasons = new Set([
           "flash_crash", "extreme_volatility", "volatility_divergence",
           "momentum_divergence_critical", "divergence_volume_spike", "momentum_divergence_exit",
-          "take_profit", "stop_loss", "break_even",
+          "take_profit", "stop_loss", "trailing_stop_loss", "break_even",
           "partial_loss", "circuit_breaker",
           "mean_reversion_adverse", "mean_reversion_early_failure", "mean_reversion_trend_acceleration",
+          "mean_reversion_time_exit", "mean_reversion_trend_continuation", "moderate_exhaustion_momentum_invalidated",
+          "smart_aits_rapid_decay", "smart_aits_prolonged_decay",
         ]);
         
         const isExempt = feeExemptReasons.has(closeReason) || exitPriority >= EXIT_PRIORITY.TAKE_PROFIT_HIT;
