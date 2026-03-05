@@ -2213,6 +2213,7 @@ export interface TrendContinuationPullbackResult {
   moveFromSwingPercent: number;
   positionMultiplier: number;
   stopLossAtr: number;
+  stopAtrMultiplier: number;  // NEW: Slope-based stop tightening (probe → tighter stops)
   reasons: string[];
   blockReason: string | null;
 }
@@ -2272,6 +2273,7 @@ export function detectTrendContinuationPullback(
     moveFromSwingPercent: 0,
     positionMultiplier: config.baseMultiplier,
     stopLossAtr: atr,
+    stopAtrMultiplier: 1.5,  // Default: base stop ATR multiplier
     reasons: [],
     blockReason: null,
   };
@@ -2311,26 +2313,32 @@ export function detectTrendContinuationPullback(
   const slopeAboveMin = adxSlope >= config.minAdxSlope;
   
   // Check graduated slope tiers if enabled
+  // SLOPE-BASED STOP TIGHTENING: Probe entries get tighter stops for faster invalidation
+  // ≥ +0.05: 1.5 ATR (base), 0→-0.5: 1.3 ATR, -0.5→-1.0: 1.1 ATR
   const graduated = config.adxSlopeGraduated;
   let slopeMultiplier = 1.0;
   let slopeGraduated = false;
+  let slopeStopAtrMultiplier = config.stopLossAtrMultiplier; // default 1.0x (base)
   
   if (adxAboveMin && !slopeAboveMin && graduated?.enabled) {
     if (adxSlope >= graduated.flatSlopeMin) {
       // Tier 1: Flat slope (0 to +0.05) — trend plateau
       slopeMultiplier = graduated.flatSlopeMultiplier;
+      slopeStopAtrMultiplier = config.stopLossAtrMultiplier; // Keep base stop
       slopeGraduated = true;
-      reasons.push(`⚠️ ADX slope flat (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%`);
+      reasons.push(`⚠️ ADX slope flat (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%, stop ${slopeStopAtrMultiplier.toFixed(1)} ATR`);
     } else if (adxSlope >= graduated.mildDecelSlopeMin) {
-      // Tier 2: Mild deceleration (0 to -0.5)
+      // Tier 2: Mild deceleration (0 to -0.5) — tighter stop
       slopeMultiplier = graduated.mildDecelMultiplier;
+      slopeStopAtrMultiplier = config.stopLossAtrMultiplier * 0.87; // ~1.3 ATR if base is 1.5
       slopeGraduated = true;
-      reasons.push(`⚠️ ADX slope mild decel (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%`);
+      reasons.push(`⚠️ ADX slope mild decel (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%, stop ${slopeStopAtrMultiplier.toFixed(2)} ATR`);
     } else if (adxSlope >= graduated.moderateDecelSlopeMin) {
-      // Tier 3: Moderate deceleration (-0.5 to -1.0) — probe only
+      // Tier 3: Moderate deceleration (-0.5 to -1.0) — probe + tight stop
       slopeMultiplier = graduated.moderateDecelMultiplier;
+      slopeStopAtrMultiplier = config.stopLossAtrMultiplier * 0.73; // ~1.1 ATR if base is 1.5
       slopeGraduated = true;
-      reasons.push(`⚠️ ADX slope moderate decel (${adxSlope.toFixed(2)}), probe entry ${(slopeMultiplier * 100).toFixed(0)}%`);
+      reasons.push(`⚠️ ADX slope moderate decel (${adxSlope.toFixed(2)}), probe entry ${(slopeMultiplier * 100).toFixed(0)}%, stop ${slopeStopAtrMultiplier.toFixed(2)} ATR`);
     } else {
       // Below hard block threshold — structural collapse
       defaultResult.blockReason = `ADX slope structural collapse: ${adxSlope.toFixed(2)} < ${graduated.moderateDecelSlopeMin}`;
@@ -2461,12 +2469,16 @@ export function detectTrendContinuationPullback(
   defaultResult.positionMultiplier = positionMultiplier;
   
   // REFINED: Stop loss uses MAX of ATR and EMA stops (never inside structure)
-  const atrStop = atr * config.stopLossAtrMultiplier;
+  // SLOPE-BASED: Use tightened ATR multiplier for probe entries
+  const effectiveStopAtrMultiplier = slopeGraduated ? slopeStopAtrMultiplier : config.stopLossAtrMultiplier;
+  const atrStop = atr * effectiveStopAtrMultiplier;
   const emaStop = (direction === 'long' ? ema50 : ema50) * (config.emaStopBufferPercent / 100);
+  
+  defaultResult.stopAtrMultiplier = effectiveStopAtrMultiplier;
   
   if (config.useMaxStop) {
     defaultResult.stopLossAtr = Math.max(atrStop, emaStop);
-    reasons.push(`Stop: max(ATR ${atrStop.toFixed(2)}, EMA ${emaStop.toFixed(2)}) = ${defaultResult.stopLossAtr.toFixed(2)}`);
+    reasons.push(`Stop: max(ATR ${atrStop.toFixed(2)} [${effectiveStopAtrMultiplier.toFixed(2)}x], EMA ${emaStop.toFixed(2)}) = ${defaultResult.stopLossAtr.toFixed(2)}${slopeGraduated ? ' [TIGHTENED]' : ''}`);
   } else {
     defaultResult.stopLossAtr = atrStop;
   }
