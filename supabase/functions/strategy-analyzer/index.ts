@@ -209,6 +209,8 @@ import {
   // NEW: Momentum flip detection and direction alignment
   detectMomentumFlip,
   checkMomentumDirectionAlignment,
+  // NEW: Trend Continuation Pullback (EMA-based re-entry in decelerating trends)
+  detectTrendContinuationPullback,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
@@ -217,7 +219,8 @@ import {
   type ContinuationModeResult,
   type ADXExhaustionResult,
   type BollingerPriceActionResult,
-  type MomentumFlipResult
+  type MomentumFlipResult,
+  type TrendContinuationPullbackResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
@@ -17983,6 +17986,12 @@ serve(async (req) => {
         if (nearExtremePositionMultiplier < 1.0) {
           unifiedPositionSize *= nearExtremePositionMultiplier;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ NEAR 24H EXTREME - position size reduced to ${unifiedPositionSize.toFixed(2)}% (near price extreme)`);
+        }
+        
+        // Apply position reduction for Trend Continuation Pullback (graduated ADX slope)
+        if (trendContinuationPullbackApplied && trendContinuationPullbackMultiplier < 1.0) {
+          unifiedPositionSize *= trendContinuationPullbackMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📉 TREND_CONTINUATION_PULLBACK - position size reduced to ${unifiedPositionSize.toFixed(2)}% (EMA pullback with graduated slope)`);
         }
         
         // ===== NEW: BE ANALYSIS GATES =====
