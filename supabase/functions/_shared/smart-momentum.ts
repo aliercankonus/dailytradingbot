@@ -2213,6 +2213,7 @@ export interface TrendContinuationPullbackResult {
   moveFromSwingPercent: number;
   positionMultiplier: number;
   stopLossAtr: number;
+  stopAtrMultiplier: number;  // NEW: Slope-based stop tightening (probe → tighter stops)
   reasons: string[];
   blockReason: string | null;
 }
