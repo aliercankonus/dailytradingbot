@@ -283,6 +283,7 @@ import {
   compareADXExhaustionGate, 
   compareStochRSIGate,
   deriveShadowSLTP,
+  isShadowSignalDuplicate,
   type ShadowModeSignal 
 } from "../_shared/shadow-mode.ts";
 // NEW: Mean Reversion Strategy Module
