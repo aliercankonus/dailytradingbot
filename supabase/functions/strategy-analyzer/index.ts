@@ -18105,6 +18105,12 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📉 TREND_CONTINUATION_PULLBACK - position size reduced to ${unifiedPositionSize.toFixed(2)}% (EMA pullback with graduated slope)`);
         }
         
+        // Apply position reduction for Overextension ATR Probe (graduated ATR distance)
+        if (overextensionProbeApplied && overextensionProbeMultiplier < 1.0) {
+          unifiedPositionSize *= overextensionProbeMultiplier;
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚠️ OVEREXTENSION_ATR_PROBE - position size reduced to ${unifiedPositionSize.toFixed(2)}% (${currentOverextensionAtr.toFixed(2)} ATR from EMA, probe=${overextensionProbeMultiplier}x)`);
+        }
+        
         // ===== NEW: BE ANALYSIS GATES =====
         // Apply ADX slope graduated gate multiplier (BE trade prevention)
         if (adxSlopeGraduatedMultiplier < 1.0) {
