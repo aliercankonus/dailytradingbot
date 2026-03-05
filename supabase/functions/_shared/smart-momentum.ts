@@ -2273,6 +2273,7 @@ export function detectTrendContinuationPullback(
     moveFromSwingPercent: 0,
     positionMultiplier: config.baseMultiplier,
     stopLossAtr: atr,
+    stopAtrMultiplier: 1.5,  // Default: base stop ATR multiplier
     reasons: [],
     blockReason: null,
   };
