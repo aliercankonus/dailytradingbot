@@ -8663,8 +8663,10 @@ serve(async (req) => {
                       // Shadow mode: log what would have passed but still block
                       logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 👻 NEAR_24H_LOW_EXPANDED BREAKOUT_RELAXATION (SHADOW): SHORT would PASS with relaxed momentum ${smartMomentum.score.toFixed(0)} <= ${breakoutRelax.RELAXED_MIN_MOMENTUM_SCORE_SHORT} (default requires <=${expandedBlock.MIN_MOMENTUM_SCORE_SHORT}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)}`);
                       
-                      // Log shadow signal
+                      // Log shadow signal (with dedup)
                       try {
+                        const _dedupSkip1 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_EXPANDED');
+                        if (_dedupSkip1) { /* skip duplicate */ } else {
                         const _shadowSLTP1 = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
                         await supabase.from('shadow_mode_signals').insert({
                           user_id: userId,
@@ -8693,6 +8695,7 @@ serve(async (req) => {
                           },
                           trend: trendData?.trend || null,
                         });
+                      }
                       } catch (shadowErr) {
                         logger.forSymbol(symbol).warn(`Shadow log failed: ${shadowErr}`);
                       }
@@ -8953,6 +8956,8 @@ serve(async (req) => {
                       logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 👻 NEAR_24H_HIGH_EXPANDED BREAKOUT_RELAXATION (SHADOW): LONG would PASS with relaxed momentum ${smartMomentum.score.toFixed(0)} >= ${breakoutRelaxLong.RELAXED_MIN_MOMENTUM_SCORE_LONG} (default requires >=${expandedBlockLong.MIN_MOMENTUM_SCORE_LONG}), regime=${fourStateRegime.regime}, adxSlope=${adxSlope.toFixed(2)}`);
                       
                       try {
+                        const _dedupSkip2 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_HIGH_EXPANDED');
+                        if (!_dedupSkip2) {
                         const _shadowSLTP2 = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
                         await supabase.from('shadow_mode_signals').insert({
                           user_id: userId,
@@ -8981,6 +8986,7 @@ serve(async (req) => {
                           },
                           trend: trendData?.trend || null,
                         });
+                      }
                       } catch (shadowErr) {
                         logger.forSymbol(symbol).warn(`Shadow log failed: ${shadowErr}`);
                       }
@@ -9028,6 +9034,8 @@ serve(async (req) => {
                       
                       if ((wouldPassTransitionAware || wouldPassAdxOnly) && shadowModeEnabled) {
                         try {
+                          const _dedupSkip3 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_HIGH_EXPANDED');
+                          if (!_dedupSkip3) {
                           const _shadowSLTP3 = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
                           await supabase.from('shadow_mode_signals').insert({
                             user_id: userId,
@@ -9065,6 +9073,7 @@ serve(async (req) => {
                             trend: trendData?.trend || null,
                           });
                           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 NEAR_HIGH SHADOW: Would ${wouldPassTransitionAware ? 'PASS' : 'SOFT_PASS'} with transition-aware model (ADX=${adx.toFixed(1)}, mom=${momScore.toFixed(0)}, regime=${fourStateRegime.regime})`);
+                          }
                         } catch (shadowErr) {
                           logger.forSymbol(symbol).warn(`Shadow near-high log failed: ${shadowErr}`);
                         }
@@ -9928,6 +9937,8 @@ serve(async (req) => {
             
             if (wouldPassWithAdaptive && shadowModeEnabled) {
               try {
+                const _dedupSkipOE = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'OVEREXTENSION_ATR_BLOCK');
+                if (!_dedupSkipOE) {
                 const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
                 await supabase.from('shadow_mode_signals').insert({
                   user_id: userId,
@@ -9957,6 +9968,7 @@ serve(async (req) => {
                   trend: trendData?.trend || null,
                 });
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 OVEREXTENSION SHADOW: Would PASS with regime-adaptive threshold ${shadowThreshold}x (regime=${fourStateRegime.regime}, current=${currentOverextensionAtr.toFixed(2)} ATR, blocked at ${maxOverextensionAtr}x)`);
+              }
               } catch (shadowErr) {
                 logger.forSymbol(symbol).warn(`Shadow overextension log failed: ${shadowErr}`);
               }
@@ -18283,6 +18295,8 @@ serve(async (req) => {
         if ((trendData as any).microProbeShadowOnly === true) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 MICRO_PROBE SHADOW_ONLY: Signal routed to shadow_mode_signals instead of live execution`);
           try {
+            const _dedupSkipMP = await isShadowSignalDuplicate(supabase as any, userId, symbol, signalType, 'MICRO_PROBE_SHADOW_ONLY');
+            if (!_dedupSkipMP) {
             const shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, signalType as 'long' | 'short');
             await supabase.from('shadow_mode_signals').insert({
               user_id: userId,
@@ -18306,6 +18320,7 @@ serve(async (req) => {
               },
               indicators: signal.indicators,
             });
+          }
           } catch (shadowErr) {
             logger.forSymbol(symbol).warn(`Shadow insert failed for MICRO_PROBE: ${shadowErr}`);
           }
