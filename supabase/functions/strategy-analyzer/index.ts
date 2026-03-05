@@ -609,6 +609,16 @@ const logRejectionWithAI = async (
     adx4h: trendData?.volatility?.adx4h ?? null,
   };
   
+  // Extract momentum score and phase for gate analysis (fixes NEAR_24H_HIGH shadow condition NULL issue)
+  const momentumData = {
+    momentumScore: trendData?.smartMomentum?.score ?? trendData?.momentum?.momentumScore ?? null,
+    momentumPhase: trendData?.smartMomentum?.phase ?? null,
+    momentumDirection: trendData?.smartMomentum?.direction ?? null,
+    isAccelerating: trendData?.smartMomentum?.isAccelerating ?? null,
+    isWeakening: trendData?.smartMomentum?.isWeakening ?? null,
+    isTransitioning: trendData?.smartMomentum?.isTransitioning ?? null,
+  };
+  
   // PHASE FIX: Always include volumeRatio unconditionally in rejection logs
   // Contract: volumeRatio must always be present (null = not computed, number = actual value)
   // This fixes the UI bug where missing volumeRatio defaulted to 1.0 ("100% Normal") incorrectly
