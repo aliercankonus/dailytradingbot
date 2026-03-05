@@ -8564,11 +8564,13 @@ serve(async (req) => {
             
             const graduatedConfig = TREND_CONTINUATION_PULLBACK_REGIME.ADX_SLOPE_GRADUATED;
             
+            const pullbackAdxSlope = fullAdxResult.adxSlope ?? 0;
+            
             const pullbackResult = detectTrendContinuationPullback(
               prices15m,
               pullbackDirection,
               adx,
-              adxSlope,
+              pullbackAdxSlope,
               pullbackStochK4h,
               pullbackStochK1h,
               pullbackHigh24h,
