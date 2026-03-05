@@ -2245,6 +2245,15 @@ export function detectTrendContinuationPullback(
     stopLossAtrMultiplier: number;
     emaStopBufferPercent: number;
     useMaxStop: boolean;                   // NEW: use max of ATR and EMA stops
+    adxSlopeGraduated?: {                  // NEW: graduated slope tiers
+      enabled: boolean;
+      flatSlopeMin: number;
+      flatSlopeMultiplier: number;
+      mildDecelSlopeMin: number;
+      mildDecelMultiplier: number;
+      moderateDecelSlopeMin: number;
+      moderateDecelMultiplier: number;
+    };
   }
 ): TrendContinuationPullbackResult {
   const defaultResult: TrendContinuationPullbackResult = {
