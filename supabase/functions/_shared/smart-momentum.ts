@@ -2435,13 +2435,19 @@ export function detectTrendContinuationPullback(
   defaultResult.direction = direction;
   defaultResult.pullbackType = pullbackType;
   
-  // REFINED: Apply appropriate position multiplier
+  // REFINED: Apply appropriate position multiplier with slope graduation
   let positionMultiplier = config.baseMultiplier;
   if (isShallowPullback) {
     positionMultiplier = config.shallowPullbackMultiplier;
     reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (shallow pullback)`);
   } else {
     reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (base)`);
+  }
+  
+  // Apply slope graduation multiplier (stack with base/shallow multiplier)
+  if (slopeGraduated) {
+    positionMultiplier = Math.min(positionMultiplier, slopeMultiplier);
+    reasons.push(`Position size capped to ${(positionMultiplier * 100).toFixed(0)}% (ADX slope graduated)`);
   }
   defaultResult.positionMultiplier = positionMultiplier;
   
