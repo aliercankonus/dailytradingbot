@@ -234,7 +234,61 @@ export function compareStochRSIGate(
 }
 
 /**
- * Log shadow mode signal to database
+ * In-memory dedup cache for shadow signals within a single execution cycle.
+ * Key format: `${symbol}|${signalType}|${gate}`
+ * Prevents the same setup from being logged multiple times per cycle.
+ */
+const _shadowDedupCache = new Map<string, number>();
+
+/** 4-hour cooldown window for shadow signal deduplication (ms) */
+const SHADOW_DEDUP_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * Check if a shadow signal should be deduplicated (skipped).
+ * Uses in-memory cache for same-cycle dedup + DB check for cross-cycle dedup.
+ * Returns true if the signal is a duplicate and should be SKIPPED.
+ */
+export async function isShadowSignalDuplicate(
+  supabaseClient: ReturnType<typeof import('https://esm.sh/@supabase/supabase-js@2.49.1').createClient>,
+  userId: string,
+  symbol: string,
+  signalType: string,
+  gate: string
+): Promise<boolean> {
+  const dedupKey = `${symbol}|${signalType}|${gate}`;
+  const now = Date.now();
+  
+  // 1. In-memory check (same execution cycle)
+  const lastLogged = _shadowDedupCache.get(dedupKey);
+  if (lastLogged && (now - lastLogged) < SHADOW_DEDUP_COOLDOWN_MS) {
+    return true; // Duplicate within same cycle
+  }
+  
+  // 2. DB check (cross-cycle dedup)
+  const cutoff = new Date(now - SHADOW_DEDUP_COOLDOWN_MS).toISOString();
+  const { data, error } = await supabaseClient
+    .from('shadow_mode_signals')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('symbol', symbol)
+    .eq('signal_type', signalType)
+    .eq('gate_blocked_by', gate)
+    .gte('created_at', cutoff)
+    .limit(1);
+  
+  if (!error && data && data.length > 0) {
+    _shadowDedupCache.set(dedupKey, now); // Cache for future in-memory checks
+    return true; // Duplicate in DB
+  }
+  
+  // Not a duplicate — mark in cache
+  _shadowDedupCache.set(dedupKey, now);
+  return false;
+}
+
+/**
+ * Log shadow mode signal to database with built-in deduplication.
+ * Skips insert if the same symbol+signalType+gate was logged within 4 hours.
  */
 export async function logShadowSignal(
   supabaseClient: ReturnType<typeof import('https://esm.sh/@supabase/supabase-js@2.49.1').createClient>,
@@ -243,6 +297,19 @@ export async function logShadowSignal(
   const logger = createLogger('shadow-mode');
   
   try {
+    // Dedup check
+    const isDuplicate = await isShadowSignalDuplicate(
+      supabaseClient,
+      signal.userId,
+      signal.symbol,
+      signal.signalType,
+      signal.gateBlockedBy
+    );
+    if (isDuplicate) {
+      logger.info(`🔮 Shadow dedup: Skipping ${signal.symbol} ${signal.signalType} ${signal.gateBlockedBy} (logged within 4h)`);
+      return;
+    }
+
     // Auto-derive SL/TP from ATR when not explicitly provided
     let { stopLoss, takeProfit } = signal;
     if ((!stopLoss || !takeProfit) && signal.atr && signal.entryPrice) {
