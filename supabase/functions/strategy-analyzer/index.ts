@@ -3694,6 +3694,15 @@ serve(async (req) => {
                 logger.forSymbol(symbol).info(`   → Position size reduced to ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
                 
                 // Continue processing instead of blocking
+              } else if (adx >= 30 && earlyAdxSlope >= 0.8) {
+                // ============= TREND ACCELERATION PROBE =============
+                // When Strong Trend Override fails (usually due to momentum lag),
+                // but ADX > 30 and slope > 0.8 confirms structural trend acceleration,
+                // allow a micro probe instead of hard block.
+                strongTrendTier0OverrideApplied = true;
+                strongTrendTier0PositionMultiplier = 0.25;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔬 TREND ACCELERATION PROBE: SHORT at K=${earlyStochRsiK4h.toFixed(1)} — ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)} confirms acceleration`);
+                logger.forSymbol(symbol).info(`   → Override failed (${overrideCheck.reason}), but structural acceleration allows 25% probe`);
               } else {
                 // Standard block - no override allowed
                 rejectedByHardGates++;
@@ -3720,6 +3729,8 @@ serve(async (req) => {
                     momentumDirection: earlyMomentumDirection,
                     strongTrendOverrideAttempted: true,
                     strongTrendOverrideReason: overrideCheck.reason,
+                    trendAccelerationProbeChecked: true,
+                    trendAccelerationProbeFailed: `ADX=${adx.toFixed(1)} (need>=30), slope=${earlyAdxSlope.toFixed(2)} (need>=0.8)`,
                     // Add Capitulation Bounce Probe near-miss data
                     capitulationProbeChecked: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
                     capitulationProbeFailed: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
