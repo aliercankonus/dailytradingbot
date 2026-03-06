@@ -240,7 +240,43 @@ export function calculateMomentumScore(
 
   // v2.0: 5-PHASE STATE CLASSIFICATION
   // More granular than 3-way direction — captures transition zones
-  const finalScore = Math.min(100, Math.max(-100, Math.round(totalScore)));
+  let adjustedScore = Math.round(totalScore);
+  
+  // ============= STRUCTURAL MOMENTUM LAG OVERRIDE =============
+  // When price impulse direction strongly contradicts the momentum score direction,
+  // and ADX confirms structural trend acceleration, the lagging indicators (EMA RoC,
+  // MACD smoothing) are dragging the score in the wrong direction.
+  // Fix: Clamp the score toward the price direction when structural confirmation exists.
+  const SLO = MSC.STRUCTURAL_LAG_OVERRIDE;
+  if (SLO?.ENABLED && currentATR > 0) {
+    const priceChangePct = lookback > 0 
+      ? ((prices[prices.length - 1] - prices[prices.length - 1 - lookback]) / prices[prices.length - 1 - lookback]) * 100 
+      : 0;
+    const absPriceMove = Math.abs(priceChangePct);
+    const absPriceImpulse = Math.abs(priceImpulse);
+    
+    if (absPriceMove >= SLO.MIN_PRICE_MOVE_PERCENT && 
+        adx >= SLO.MIN_ADX && 
+        Math.abs(adxSlope) >= SLO.MIN_ADX_SLOPE &&
+        absPriceImpulse >= SLO.MIN_PRICE_IMPULSE_ABS) {
+      
+      const priceDirectionBearish = priceChangePct < 0;
+      const priceDirectionBullish = priceChangePct > 0;
+      const scoreContradictsPrice = (priceDirectionBearish && adjustedScore > 0) || 
+                                     (priceDirectionBullish && adjustedScore < 0);
+      
+      if (scoreContradictsPrice) {
+        const targetScore = priceDirectionBearish ? -SLO.OVERRIDE_SCORE : SLO.OVERRIDE_SCORE;
+        const prevScore = adjustedScore;
+        adjustedScore = priceDirectionBearish 
+          ? Math.min(adjustedScore, targetScore) 
+          : Math.max(adjustedScore, targetScore);
+        reasons.push(`🔧 STRUCTURAL_LAG_OVERRIDE: price=${priceChangePct.toFixed(1)}%, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)} → score clamped ${prevScore} → ${adjustedScore}`);
+      }
+    }
+  }
+  
+  const finalScore = Math.min(100, Math.max(-100, adjustedScore));
   let phase: MomentumPhase = "neutral";
   if (finalScore >= MSC.STRONG_BULLISH_THRESHOLD) {
     phase = "strong_bullish";
