@@ -1388,7 +1388,14 @@ const analyzePullbackEntry = (trendData: any, trend: string, smartPullback: Pull
   // UNIFIED: Use structural pullback + Bollinger for entry scoring
   // detectPullback handles RSI dip/recovery/bounce — we layer Bollinger and momentum on top
   
-  // FIX: has30mPullbackConfirm was never declared — derive from 30m data
+  // Extract structural pullback properties from smartPullback (PullbackResult)
+  const hasStructuralPullback = smartPullback.isValidPullback;
+  const structuralDepth = smartPullback.pullbackDepth;
+  const rsiDipped = smartPullback.rsiDipped;
+  const isRsiRecovering = smartPullback.rsiRecovering;
+  const hasBounceConfirmation = smartPullback.hasBounceConfirmation;
+  
+  // Derive 30m pullback confirmation from 30m data
   const has30mPullbackConfirm = (() => {
     const trend30m = timeframes['30m']?.trend || timeframes['30m']?.indicators?.emaSignal || 'neutral';
     if (trend === 'bullish') {
