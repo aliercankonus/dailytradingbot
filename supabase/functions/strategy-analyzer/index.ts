@@ -7085,6 +7085,16 @@ serve(async (req) => {
                 stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER);
                 stochRsiRunwayGateApplied = true;
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ DEEP_EXHAUSTION_COMPOUND: ${moveStr} but ADX=${adx.toFixed(1)} >= ${deepExhaustion.HIGH_ADX_PROBE_THRESHOLD} — micro probe at ${(deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
+              } else if (deepExhaustion.ACCELERATION_PROBE_ENABLED && 
+                         adx >= deepExhaustion.ACCELERATION_PROBE_MIN_ADX && 
+                         Math.abs(fullAdxResult.adxSlope ?? 0) >= deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE) {
+                // ============= TREND ACCELERATION MICRO PROBE =============
+                // ADX slope confirms strong trend acceleration despite deep exhaustion.
+                // Allow micro probe instead of hard block.
+                const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
+                stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.ACCELERATION_PROBE_MULTIPLIER);
+                stochRsiRunwayGateApplied = true;
+                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
               } else {
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
                 
@@ -7099,6 +7109,12 @@ serve(async (req) => {
                     moveFromHigh,
                     moveFromLow,
                     adx,
+                    adxSlope: fullAdxResult.adxSlope ?? 0,
+                    accelerationProbeChecked: deepExhaustion.ACCELERATION_PROBE_ENABLED,
+                    accelerationProbeThresholds: {
+                      minAdx: deepExhaustion.ACCELERATION_PROBE_MIN_ADX,
+                      minSlope: deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE,
+                    },
                   },
                 });
                 continue;
