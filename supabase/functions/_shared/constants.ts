@@ -5651,7 +5651,7 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // ===== ADDITIONAL SAFETY CHECKS =====
     // Even with relaxation, require StochRSI runway
     REQUIRE_STOCHRSI_RUNWAY: true,
-    STOCHRSI_RUNWAY_MIN_K_FOR_SHORT: 15,  // K must be >= 15 for continued short
+    STOCHRSI_RUNWAY_MIN_K_FOR_SHORT: 10,  // LOWERED: Was 15 → 10 (synced with K floor fix v2)
     STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 85,   // K must be <= 85 for continued long
     
     // Graduated relaxation slope check (matches ADX_SLOPE_GRADUATED philosophy)
@@ -5661,10 +5661,15 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // Graduated relaxation tiers based on slope
     GRADUATED_SLOPE_RELAXATION: {
       ENABLED: true,
-      // FIX: Added ACCELERATING tier for strongly rising ADX slope (>= 0.5)
-      // When ADX slope is positive and strong, the trend is accelerating — 10% threshold
+      // FIX v2: Added STRONG_ACCELERATING tier for slope >= 1.0 (catch-22 fix)
+      // When ADX slope > 1.0, the trend is IGNITING, not exhausting — the move just started
+      // This breaks the catch-22 where low ADX delays entry, then MOVE_EXHAUSTED blocks it
+      STRONG_ACCELERATING_SLOPE: 1.0,
+      STRONG_ACCELERATING_HARD_THRESHOLD: 15.0,  // NEW: Highest tier — slope > 1.0 means fresh ignition
+      STRONG_ACCELERATING_POSITION_SIZE: 0.35,   // Conservative size for ignition entries
+      // ACCELERATING tier for rising ADX slope (>= 0.5)
       ACCELERATING_SLOPE: 0.5,
-      ACCELERATING_HARD_THRESHOLD: 12.0,  // RAISED: Was 10% — crypto rallies routinely move 10%+ during acceleration
+      ACCELERATING_HARD_THRESHOLD: 15.0,  // RAISED: Was 12% → 15% — prevents catch-22 during fast moves
       ACCELERATING_POSITION_SIZE: 0.40,
       // RISING tier for positive but not accelerating slope (0.0 to 0.5)
       RISING_SLOPE: 0.0,
@@ -5728,13 +5733,16 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
   // Tier 2 (SOFT): K >= 75 → reduce position to 25% (late but possible)
   // Tier 3 (ALLOW): K < 75 → allow with normal soft zone sizing (trend continuation zone)
   REQUIRE_STOCHRSI_ALIGNMENT: true,
-  STOCHRSI_MIN_FOR_SHORT: 20,           // K must be >= 20 for late short (avoid extreme oversold only)
+  // FIX v2: K floor lowered from 20 → 10 to break catch-22
+  // K=10-20 during fast drops is NOT exhaustion — it's momentum confirmation
+  // Only K < 10 = true extreme where bounce is imminent
+  STOCHRSI_MIN_FOR_SHORT: 10,           // LOWERED: Was 20 → 10. K must be >= 10 for late short
   STOCHRSI_NOT_OVERBOUGHT_FOR_LONG: 85, // TIER 1 HARD: K >= 85 = true overbought exhaustion (was 75)
   STOCHRSI_SOFT_OVERBOUGHT_FOR_LONG: 75, // TIER 2 SOFT: K 75-85 = late entry, reduce position
   STOCHRSI_SOFT_OVERBOUGHT_MULTIPLIER: 0.25, // Position size for K 75-85 zone
   
   // Legacy alias (backward compatibility)
-  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 20,  // Renamed - now means MIN K for short entry
+  STOCHRSI_NOT_OVERSOLD_FOR_SHORT: 10,  // LOWERED: Was 20 → 10 (synced with STOCHRSI_MIN_FOR_SHORT)
   
   // ===== STRONG TREND CONTINUATION OVERRIDE =====
   // Allow entry despite exhaustion ONLY if ADX is VERY strong (>=40) and clearly rising
