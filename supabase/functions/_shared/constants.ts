@@ -7366,6 +7366,14 @@ export const STOCHRSI_RUNWAY_GATE = {
     // FIX: Lowered from 45 to 40 — STRONG_TREND tier1 (ADX>=40) should get probe, not hard block
     HIGH_ADX_PROBE_MULTIPLIER: 0.15,
     HIGH_ADX_PROBE_THRESHOLD: 40,
+    // ===== TREND ACCELERATION MICRO PROBE =====
+    // When DEEP_EXHAUSTION triggers but ADX slope indicates strong acceleration,
+    // allow a micro probe instead of hard block. This captures trend continuation dips.
+    // Conditions: ADX > 35 AND slope > 1.2 → 0.20x position
+    ACCELERATION_PROBE_ENABLED: true,
+    ACCELERATION_PROBE_MIN_ADX: 35,
+    ACCELERATION_PROBE_MIN_SLOPE: 1.2,
+    ACCELERATION_PROBE_MULTIPLIER: 0.20,
   },
   
   LOG_GATE_CHECKS: true,
@@ -8495,6 +8503,25 @@ export const MOMENTUM_SCORE_COMPONENTS = {
   EMA_SPREAD_WIDENING: 0.1,
   EMA_SPREAD_NARROWING: -0.1,
   EMA_SPREAD_SCORE_MULTIPLIER: 10,
+  // ============= STRUCTURAL MOMENTUM LAG OVERRIDE =============
+  // When price action (impulse) strongly contradicts momentum score direction,
+  // and ADX confirms structural trend acceleration, override the lagging score.
+  // This fixes the paradox: price -4.4%, ADX 45, slope +1.8, but momentum = +22 (bullish).
+  STRUCTURAL_LAG_OVERRIDE: {
+    ENABLED: true,
+    // Price move threshold (absolute %) to trigger override
+    MIN_PRICE_MOVE_PERCENT: 3.0,
+    // ADX must confirm strong trend
+    MIN_ADX: 25,
+    // ADX slope must confirm acceleration
+    MIN_ADX_SLOPE: 0.8,
+    // Override clamps momentum to this value toward the price direction
+    // For bearish price move: clamp momentum to max -20
+    // For bullish price move: clamp momentum to min +20
+    OVERRIDE_SCORE: 20,
+    // Minimum impulse component to confirm the override (prevents stale override)
+    MIN_PRICE_IMPULSE_ABS: 3,
+  },
 } as const;
 
 // ============= DYNAMIC TRAILING R-MULTIPLE PARAMS (smart-momentum.ts) =============
