@@ -2195,8 +2195,8 @@ export function checkMomentumDirectionAlignment(
 }
 
 // ============= TREND CONTINUATION PULLBACK DETECTION =============
-// NEW: Detects EMA-based pullbacks for trend continuation re-entries
-// Philosophy: "If you can't enter at the start, wait for the first pullback"
+// v2.0: ATR-normalized pullback detection with momentum recovery
+// Upgrade: Uses ATR distance instead of % proximity, StochRSI cross-up instead of static threshold
 export interface TrendContinuationPullbackResult {
   detected: boolean;
   eligible: boolean;
@@ -2205,6 +2205,9 @@ export interface TrendContinuationPullbackResult {
   priceToEmaMidpoint: number;
   priceToEma20: number;
   priceToEma50: number;
+  atrDistanceToEma: number;           // NEW: ATR-normalized distance
+  momentumRecoveryDetected: boolean;   // NEW: Cross-up/down detected
+  momentumRecoveryType: string;        // NEW: 'cross_up' | 'k_rising' | 'static_fallback'
   stochRsiCooled: boolean;
   stochRsiK: number;
   adxSufficient: boolean;
@@ -2213,7 +2216,7 @@ export interface TrendContinuationPullbackResult {
   moveFromSwingPercent: number;
   positionMultiplier: number;
   stopLossAtr: number;
-  stopAtrMultiplier: number;  // NEW: Slope-based stop tightening (probe → tighter stops)
+  stopAtrMultiplier: number;
   reasons: string[];
   blockReason: string | null;
 }
@@ -2231,22 +2234,36 @@ export function detectTrendContinuationPullback(
   config: {
     minAdx: number;
     minAdxSlope: number;
+    // v2.0: ATR-normalized distance config
+    atrDistanceMin: number;
+    atrDistanceMax: number;
+    atrDistanceOptimal: number;
+    atrDistanceMaxStrongAdx: number;
+    strongAdxThreshold: number;
+    // v2.0: Momentum recovery config
+    momentumRecovery: {
+      enabled: boolean;
+      requireCross: boolean;
+      fallbackStaticCheck: boolean;
+      longMaxK: number;
+      shortMinK: number;
+      requireKRising: boolean;
+      minKDelta: number;
+    };
+    // Fallback legacy % proximity (if ATR unavailable)
     emaProximityThreshold: number;
-    emaProximityThresholdStrong: number;  // NEW: tighter threshold for strong ADX
-    strongAdxThreshold: number;            // NEW: ADX level to use tighter threshold
-    longMaxK: number;
-    shortMinK: number;
+    emaProximityThresholdStrong: number;
     longMaxMove: number;
     shortMaxMove: number;
-    shallowPullbackMaxMove: number;        // NEW: tighter exhaustion for shallow pullbacks
-    shallowPullbackThreshold: number;      // NEW: what defines "shallow"
+    shallowPullbackMaxMove: number;
+    shallowPullbackThreshold: number;
     baseMultiplier: number;
     momentumAlignedMultiplier: number;
-    shallowPullbackMultiplier: number;     // NEW: reduced size for shallow pullbacks
+    shallowPullbackMultiplier: number;
     stopLossAtrMultiplier: number;
     emaStopBufferPercent: number;
-    useMaxStop: boolean;                   // NEW: use max of ATR and EMA stops
-    adxSlopeGraduated?: {                  // NEW: graduated slope tiers
+    useMaxStop: boolean;
+    adxSlopeGraduated?: {
       enabled: boolean;
       flatSlopeMin: number;
       flatSlopeMultiplier: number;
@@ -2255,6 +2272,11 @@ export function detectTrendContinuationPullback(
       moderateDecelSlopeMin: number;
       moderateDecelMultiplier: number;
     };
+    // v2.0: StochRSI previous values for cross detection
+    stochRsiPrevK4h?: number;
+    stochRsiD4h?: number;
+    stochRsiPrevK1h?: number;
+    stochRsiD1h?: number;
   }
 ): TrendContinuationPullbackResult {
   const defaultResult: TrendContinuationPullbackResult = {
@@ -2265,6 +2287,9 @@ export function detectTrendContinuationPullback(
     priceToEmaMidpoint: 0,
     priceToEma20: 0,
     priceToEma50: 0,
+    atrDistanceToEma: 0,
+    momentumRecoveryDetected: false,
+    momentumRecoveryType: 'none',
     stochRsiCooled: false,
     stochRsiK: stochRsiK4h,
     adxSufficient: false,
@@ -2273,7 +2298,7 @@ export function detectTrendContinuationPullback(
     moveFromSwingPercent: 0,
     positionMultiplier: config.baseMultiplier,
     stopLossAtr: atr,
-    stopAtrMultiplier: 1.5,  // Default: base stop ATR multiplier
+    stopAtrMultiplier: 1.5,
     reasons: [],
     blockReason: null,
   };
@@ -2299,7 +2324,7 @@ export function detectTrendContinuationPullback(
   const ema50 = ema50Array[ema50Array.length - 1];
   const emaMidpoint = (ema20 + ema50) / 2;
 
-  // Calculate distances
+  // Calculate distances (both % and ATR-normalized)
   const priceToEma20 = Math.abs((currentPrice - ema20) / ema20 * 100);
   const priceToEma50 = Math.abs((currentPrice - ema50) / ema50 * 100);
   const priceToEmaMidpoint = Math.abs((currentPrice - emaMidpoint) / emaMidpoint * 100);
@@ -2308,39 +2333,40 @@ export function detectTrendContinuationPullback(
   defaultResult.priceToEma50 = priceToEma50;
   defaultResult.priceToEmaMidpoint = priceToEmaMidpoint;
 
+  // v2.0: ATR-normalized distance to closest EMA
+  const absDistToMid = Math.abs(currentPrice - emaMidpoint);
+  const absDistToEma20 = Math.abs(currentPrice - ema20);
+  const absDistToEma50 = Math.abs(currentPrice - ema50);
+  const minAbsDist = Math.min(absDistToMid, absDistToEma20, absDistToEma50);
+  const atrDistanceToEma = atr > 0 ? minAbsDist / atr : 999;
+  defaultResult.atrDistanceToEma = atrDistanceToEma;
+
   // Check ADX requirement — GRADUATED slope tiers replace binary block
   const adxAboveMin = adx >= config.minAdx;
   const slopeAboveMin = adxSlope >= config.minAdxSlope;
   
-  // Check graduated slope tiers if enabled
-  // SLOPE-BASED STOP TIGHTENING: Probe entries get tighter stops for faster invalidation
-  // ≥ +0.05: 1.5 ATR (base), 0→-0.5: 1.3 ATR, -0.5→-1.0: 1.1 ATR
   const graduated = config.adxSlopeGraduated;
   let slopeMultiplier = 1.0;
   let slopeGraduated = false;
-  let slopeStopAtrMultiplier = config.stopLossAtrMultiplier; // default 1.0x (base)
+  let slopeStopAtrMultiplier = config.stopLossAtrMultiplier;
   
   if (adxAboveMin && !slopeAboveMin && graduated?.enabled) {
     if (adxSlope >= graduated.flatSlopeMin) {
-      // Tier 1: Flat slope (0 to +0.05) — trend plateau
       slopeMultiplier = graduated.flatSlopeMultiplier;
-      slopeStopAtrMultiplier = config.stopLossAtrMultiplier; // Keep base stop
+      slopeStopAtrMultiplier = config.stopLossAtrMultiplier;
       slopeGraduated = true;
       reasons.push(`⚠️ ADX slope flat (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%, stop ${slopeStopAtrMultiplier.toFixed(1)} ATR`);
     } else if (adxSlope >= graduated.mildDecelSlopeMin) {
-      // Tier 2: Mild deceleration (0 to -0.5) — tighter stop
       slopeMultiplier = graduated.mildDecelMultiplier;
-      slopeStopAtrMultiplier = config.stopLossAtrMultiplier * 0.87; // ~1.3 ATR if base is 1.5
+      slopeStopAtrMultiplier = config.stopLossAtrMultiplier * 0.87;
       slopeGraduated = true;
       reasons.push(`⚠️ ADX slope mild decel (${adxSlope.toFixed(2)}), graduated entry ${(slopeMultiplier * 100).toFixed(0)}%, stop ${slopeStopAtrMultiplier.toFixed(2)} ATR`);
     } else if (adxSlope >= graduated.moderateDecelSlopeMin) {
-      // Tier 3: Moderate deceleration (-0.5 to -1.0) — probe + tight stop
       slopeMultiplier = graduated.moderateDecelMultiplier;
-      slopeStopAtrMultiplier = config.stopLossAtrMultiplier * 0.73; // ~1.1 ATR if base is 1.5
+      slopeStopAtrMultiplier = config.stopLossAtrMultiplier * 0.73;
       slopeGraduated = true;
       reasons.push(`⚠️ ADX slope moderate decel (${adxSlope.toFixed(2)}), probe entry ${(slopeMultiplier * 100).toFixed(0)}%, stop ${slopeStopAtrMultiplier.toFixed(2)} ATR`);
     } else {
-      // Below hard block threshold — structural collapse
       defaultResult.blockReason = `ADX slope structural collapse: ${adxSlope.toFixed(2)} < ${graduated.moderateDecelSlopeMin}`;
       return defaultResult;
     }
@@ -2357,43 +2383,98 @@ export function detectTrendContinuationPullback(
   defaultResult.adxSufficient = true;
   reasons.push(`ADX ${adx.toFixed(1)} (slope: ${adxSlope >= 0 ? '+' : ''}${adxSlope.toFixed(2)}${slopeGraduated ? ' [GRADUATED]' : ''})`);
 
-  // Check StochRSI cooldown
-  if (direction === 'long') {
-    defaultResult.stochRsiCooled = stochRsiK4h <= config.longMaxK;
-    if (!defaultResult.stochRsiCooled) {
-      defaultResult.blockReason = `StochRSI K ${stochRsiK4h.toFixed(1)} > ${config.longMaxK} (not cooled from overbought)`;
-      return defaultResult;
+  // ===== v2.0: MOMENTUM RECOVERY DETECTION =====
+  // Replaces static StochRSI threshold check with momentum recovery (cross-up/down)
+  const mr = config.momentumRecovery;
+  let momentumRecovered = false;
+  let momentumRecoveryType = 'none';
+  
+  if (mr.enabled) {
+    const prevK = config.stochRsiPrevK4h ?? stochRsiK4h;
+    const dValue = config.stochRsiD4h ?? stochRsiK4h;
+    const kDelta = stochRsiK4h - prevK;
+    const kRising = kDelta >= mr.minKDelta;
+    
+    if (direction === 'long') {
+      // Check K crossed above D (bullish cross-up)
+      const crossedAboveD = mr.requireCross && prevK <= dValue && stochRsiK4h > dValue;
+      
+      if (crossedAboveD && stochRsiK4h <= mr.longMaxK) {
+        momentumRecovered = true;
+        momentumRecoveryType = 'cross_up';
+        reasons.push(`✅ Momentum recovery: StochRSI K crossed above D (K=${stochRsiK4h.toFixed(1)}, D=${dValue.toFixed(1)}, prevK=${prevK.toFixed(1)})`);
+      } else if (mr.requireKRising && kRising && stochRsiK4h <= mr.longMaxK) {
+        momentumRecovered = true;
+        momentumRecoveryType = 'k_rising';
+        reasons.push(`✅ Momentum recovery: K rising (K=${stochRsiK4h.toFixed(1)}, Δ=${kDelta.toFixed(1)} >= ${mr.minKDelta})`);
+      } else if (mr.fallbackStaticCheck && stochRsiK4h <= mr.longMaxK) {
+        momentumRecovered = true;
+        momentumRecoveryType = 'static_fallback';
+        reasons.push(`ℹ️ Momentum: static fallback (K=${stochRsiK4h.toFixed(1)} <= ${mr.longMaxK})`);
+      }
+      
+      if (!momentumRecovered) {
+        defaultResult.blockReason = `Momentum recovery not detected for LONG: K=${stochRsiK4h.toFixed(1)}, D=${dValue.toFixed(1)}, prevK=${prevK.toFixed(1)}, Δ=${kDelta.toFixed(1)}`;
+        return defaultResult;
+      }
+    } else {
+      // SHORT: K crosses below D (bearish cross-down)
+      const crossedBelowD = mr.requireCross && prevK >= dValue && stochRsiK4h < dValue;
+      
+      if (crossedBelowD && stochRsiK4h >= mr.shortMinK) {
+        momentumRecovered = true;
+        momentumRecoveryType = 'cross_down';
+        reasons.push(`✅ Momentum recovery: StochRSI K crossed below D (K=${stochRsiK4h.toFixed(1)}, D=${dValue.toFixed(1)}, prevK=${prevK.toFixed(1)})`);
+      } else if (mr.requireKRising && stochRsiK4h - prevK <= -mr.minKDelta && stochRsiK4h >= mr.shortMinK) {
+        momentumRecovered = true;
+        momentumRecoveryType = 'k_falling';
+        reasons.push(`✅ Momentum recovery: K falling for SHORT (K=${stochRsiK4h.toFixed(1)}, Δ=${kDelta.toFixed(1)})`);
+      } else if (mr.fallbackStaticCheck && stochRsiK4h >= mr.shortMinK) {
+        momentumRecovered = true;
+        momentumRecoveryType = 'static_fallback';
+        reasons.push(`ℹ️ Momentum: static fallback (K=${stochRsiK4h.toFixed(1)} >= ${mr.shortMinK})`);
+      }
+      
+      if (!momentumRecovered) {
+        defaultResult.blockReason = `Momentum recovery not detected for SHORT: K=${stochRsiK4h.toFixed(1)}, D=${dValue.toFixed(1)}, prevK=${prevK.toFixed(1)}, Δ=${kDelta.toFixed(1)}`;
+        return defaultResult;
+      }
     }
-    reasons.push(`StochRSI cooled: K=${stochRsiK4h.toFixed(1)} <= ${config.longMaxK}`);
   } else {
-    defaultResult.stochRsiCooled = stochRsiK4h >= config.shortMinK;
-    if (!defaultResult.stochRsiCooled) {
-      defaultResult.blockReason = `StochRSI K ${stochRsiK4h.toFixed(1)} < ${config.shortMinK} (not cooled from oversold)`;
-      return defaultResult;
+    // Legacy: static StochRSI check
+    if (direction === 'long') {
+      momentumRecovered = stochRsiK4h <= mr.longMaxK;
+      momentumRecoveryType = 'legacy_static';
+      if (!momentumRecovered) {
+        defaultResult.blockReason = `StochRSI K ${stochRsiK4h.toFixed(1)} > ${mr.longMaxK} (legacy static)`;
+        return defaultResult;
+      }
+    } else {
+      momentumRecovered = stochRsiK4h >= mr.shortMinK;
+      momentumRecoveryType = 'legacy_static';
+      if (!momentumRecovered) {
+        defaultResult.blockReason = `StochRSI K ${stochRsiK4h.toFixed(1)} < ${mr.shortMinK} (legacy static)`;
+        return defaultResult;
+      }
     }
-    reasons.push(`StochRSI cooled: K=${stochRsiK4h.toFixed(1)} >= ${config.shortMinK}`);
   }
-
-  // REFINED: Dynamic EMA proximity based on ADX strength
-  const effectiveProximityThreshold = adx >= config.strongAdxThreshold 
-    ? config.emaProximityThresholdStrong 
-    : config.emaProximityThreshold;
-  reasons.push(`EMA proximity threshold: ${effectiveProximityThreshold.toFixed(2)}% (ADX ${adx >= config.strongAdxThreshold ? '>=' : '<'} ${config.strongAdxThreshold})`);
+  
+  defaultResult.stochRsiCooled = momentumRecovered;
+  defaultResult.momentumRecoveryDetected = momentumRecovered;
+  defaultResult.momentumRecoveryType = momentumRecoveryType;
 
   // Check move exhaustion
   const moveFromLow = ((currentPrice - low24h) / low24h) * 100;
   const moveFromHigh = ((high24h - currentPrice) / high24h) * 100;
   defaultResult.moveFromSwingPercent = direction === 'long' ? moveFromLow : moveFromHigh;
 
-  // REFINED: Determine if pullback is shallow (use tighter exhaustion limits)
-  const minDistance = Math.min(priceToEmaMidpoint, priceToEma20, priceToEma50);
-  const isShallowPullback = minDistance < config.shallowPullbackThreshold;
+  // Determine shallow pullback (using ATR distance now)
+  const isShallowPullback = atrDistanceToEma < config.atrDistanceMin;
   
-  // Apply appropriate exhaustion limit
   let maxMove = direction === 'long' ? config.longMaxMove : config.shortMaxMove;
   if (isShallowPullback) {
-    maxMove = config.shallowPullbackMaxMove;  // Tighter limit for shallow pullbacks
-    reasons.push(`⚠️ Shallow pullback (${minDistance.toFixed(2)}% < ${config.shallowPullbackThreshold}%): max move reduced to ${maxMove}%`);
+    maxMove = config.shallowPullbackMaxMove;
+    reasons.push(`⚠️ Shallow pullback (${atrDistanceToEma.toFixed(2)} ATR < ${config.atrDistanceMin} ATR): max move reduced to ${maxMove}%`);
   }
   
   if (defaultResult.moveFromSwingPercent > maxMove) {
@@ -2402,26 +2483,39 @@ export function detectTrendContinuationPullback(
   }
   reasons.push(`Move from swing: ${defaultResult.moveFromSwingPercent.toFixed(1)}% <= ${maxMove}%`);
 
-  // Detect pullback type based on EMA proximity (using dynamic threshold)
+  // ===== v2.0: ATR-NORMALIZED PULLBACK DETECTION =====
+  // Replaces fixed % proximity with ATR-normalized distance
+  const effectiveAtrMax = adx >= config.strongAdxThreshold 
+    ? config.atrDistanceMaxStrongAdx 
+    : config.atrDistanceMax;
+
   let pullbackDetected = false;
   let pullbackType: 'ema20' | 'ema50' | 'midpoint' | null = null;
+  
+  // Check ATR distance to each EMA level
+  const atrDistToMid = atr > 0 ? absDistToMid / atr : 999;
+  const atrDistToEma20 = atr > 0 ? absDistToEma20 / atr : 999;
+  const atrDistToEma50 = atr > 0 ? absDistToEma50 / atr : 999;
 
-  if (priceToEmaMidpoint <= effectiveProximityThreshold) {
+  if (atr > 0 && atrDistToMid <= effectiveAtrMax) {
     pullbackDetected = true;
     pullbackType = 'midpoint';
-    reasons.push(`✅ Pullback to EMA midpoint (${priceToEmaMidpoint.toFixed(2)}% away)`);
-  } else if (priceToEma20 <= effectiveProximityThreshold) {
+    const zoneLabel = atrDistToMid <= config.atrDistanceOptimal ? 'OPTIMAL' : 'VALID';
+    reasons.push(`✅ Pullback to EMA midpoint (${atrDistToMid.toFixed(2)} ATR — ${zoneLabel} zone [${config.atrDistanceMin}-${effectiveAtrMax} ATR])`);
+  } else if (atr > 0 && atrDistToEma20 <= effectiveAtrMax) {
     pullbackDetected = true;
     pullbackType = 'ema20';
-    reasons.push(`✅ Pullback to EMA20 (${priceToEma20.toFixed(2)}% away)`);
-  } else if (priceToEma50 <= effectiveProximityThreshold) {
+    const zoneLabel = atrDistToEma20 <= config.atrDistanceOptimal ? 'OPTIMAL' : 'VALID';
+    reasons.push(`✅ Pullback to EMA20 (${atrDistToEma20.toFixed(2)} ATR — ${zoneLabel} zone)`);
+  } else if (atr > 0 && atrDistToEma50 <= effectiveAtrMax) {
     pullbackDetected = true;
     pullbackType = 'ema50';
-    reasons.push(`✅ Pullback to EMA50 (${priceToEma50.toFixed(2)}% away)`);
+    const zoneLabel = atrDistToEma50 <= config.atrDistanceOptimal ? 'OPTIMAL' : 'VALID';
+    reasons.push(`✅ Pullback to EMA50 (${atrDistToEma50.toFixed(2)} ATR — ${zoneLabel} zone)`);
   }
 
   if (!pullbackDetected) {
-    // Check if price touched EMA recently (last 3 candles)
+    // Fallback: check if price touched EMA recently (last 3 candles)
     const recentPrices = prices.slice(-3);
     const recentEma20 = ema20Array.slice(-3);
     const recentEma50 = ema50Array.slice(-3);
@@ -2431,18 +2525,19 @@ export function detectTrendContinuationPullback(
       const e20 = recentEma20[i];
       const e50 = recentEma50[i];
       const mid = (e20 + e50) / 2;
+      const recentAtrDist = atr > 0 ? Math.abs(p - mid) / atr : 999;
       
-      if (Math.abs((p - mid) / mid * 100) <= effectiveProximityThreshold) {
+      if (recentAtrDist <= effectiveAtrMax) {
         pullbackDetected = true;
         pullbackType = 'midpoint';
-        reasons.push(`Recent touch of EMA midpoint (${3 - i} candles ago)`);
+        reasons.push(`Recent touch of EMA midpoint (${3 - i} candles ago, ${recentAtrDist.toFixed(2)} ATR)`);
         break;
       }
     }
   }
 
   if (!pullbackDetected) {
-    defaultResult.blockReason = `Price not near EMA zone (EMA20: ${priceToEma20.toFixed(2)}%, EMA50: ${priceToEma50.toFixed(2)}%, Mid: ${priceToEmaMidpoint.toFixed(2)}%; threshold: ${effectiveProximityThreshold.toFixed(2)}%)`;
+    defaultResult.blockReason = `Price not in ATR pullback zone (EMA20: ${atrDistToEma20.toFixed(2)} ATR, EMA50: ${atrDistToEma50.toFixed(2)} ATR, Mid: ${atrDistToMid.toFixed(2)} ATR; max: ${effectiveAtrMax.toFixed(2)} ATR)`;
     return defaultResult;
   }
 
@@ -2452,24 +2547,39 @@ export function detectTrendContinuationPullback(
   defaultResult.direction = direction;
   defaultResult.pullbackType = pullbackType;
   
-  // REFINED: Apply appropriate position multiplier with slope graduation
+  // Position sizing: optimal zone gets better sizing
   let positionMultiplier = config.baseMultiplier;
-  if (isShallowPullback) {
+  const bestAtrDist = Math.min(atrDistToMid, atrDistToEma20, atrDistToEma50);
+  
+  if (bestAtrDist >= config.atrDistanceMin && bestAtrDist <= config.atrDistanceOptimal) {
+    // Optimal zone: use momentum-aligned (higher) multiplier
+    positionMultiplier = config.momentumAlignedMultiplier;
+    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (optimal ATR zone ${bestAtrDist.toFixed(2)} ATR)`);
+  } else if (isShallowPullback) {
     positionMultiplier = config.shallowPullbackMultiplier;
-    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (shallow pullback)`);
+    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (shallow pullback ${bestAtrDist.toFixed(2)} ATR)`);
   } else {
-    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (base)`);
+    reasons.push(`Position size: ${(positionMultiplier * 100).toFixed(0)}% (base, ${bestAtrDist.toFixed(2)} ATR)`);
   }
   
-  // Apply slope graduation multiplier (stack with base/shallow multiplier)
+  // Momentum recovery type bonus
+  if (momentumRecoveryType === 'cross_up' || momentumRecoveryType === 'cross_down') {
+    // Cross-up/down is strongest confirmation — keep or boost size
+    reasons.push(`Momentum type: ${momentumRecoveryType} (strongest confirmation)`);
+  } else if (momentumRecoveryType === 'static_fallback') {
+    // Static fallback is weakest — reduce size
+    positionMultiplier = Math.min(positionMultiplier, config.shallowPullbackMultiplier);
+    reasons.push(`Momentum type: static_fallback (size capped to ${(positionMultiplier * 100).toFixed(0)}%)`);
+  }
+  
+  // Apply slope graduation multiplier
   if (slopeGraduated) {
     positionMultiplier = Math.min(positionMultiplier, slopeMultiplier);
     reasons.push(`Position size capped to ${(positionMultiplier * 100).toFixed(0)}% (ADX slope graduated)`);
   }
   defaultResult.positionMultiplier = positionMultiplier;
   
-  // REFINED: Stop loss uses MAX of ATR and EMA stops (never inside structure)
-  // SLOPE-BASED: Use tightened ATR multiplier for probe entries
+  // Stop loss: MAX of ATR and EMA stops
   const effectiveStopAtrMultiplier = slopeGraduated ? slopeStopAtrMultiplier : config.stopLossAtrMultiplier;
   const atrStop = atr * effectiveStopAtrMultiplier;
   const emaStop = (direction === 'long' ? ema50 : ema50) * (config.emaStopBufferPercent / 100);
@@ -2484,7 +2594,7 @@ export function detectTrendContinuationPullback(
   }
   
   defaultResult.reasons = reasons;
-  reasons.push(`TREND_CONTINUATION_PULLBACK eligible for ${direction.toUpperCase()}`);
+  reasons.push(`TREND_CONTINUATION_PULLBACK eligible for ${direction.toUpperCase()} (v2.0 ATR-normalized + momentum recovery: ${momentumRecoveryType})`);
 
   return defaultResult;
 }

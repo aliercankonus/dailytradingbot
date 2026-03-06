@@ -7401,33 +7401,56 @@ export const TREND_CONTINUATION_PULLBACK_REGIME = {
   // 1H trend should align or be neutral
   REQUIRE_1H_NOT_OPPOSING: true,
   
-  // ===== PULLBACK DETECTION (EMA-based) =====
-  // Price must have pulled back to EMA zone
+  // ===== PULLBACK DETECTION (ATR-normalized distance) =====
+  // v2.0: Uses ATR-normalized distance instead of fixed percentage proximity
+  // This adapts to volatility: high vol → wider zone, low vol → tighter zone
   EMA_PULLBACK: {
-    // Check if price is near EMA20/EMA50 midline
     ENABLED: true,
-    // REFINED: Dynamic proximity based on ADX strength
-    // ADX < 35: use looser 0.8% (moderate trends need larger pullback zone)
-    // ADX >= 35: use tighter 0.5% (strong trends have tighter structure)
-    PROXIMITY_THRESHOLD_PERCENT: 0.8,  // Default/base value
-    PROXIMITY_THRESHOLD_STRONG_ADX: 0.5,  // For ADX >= 35
-    STRONG_ADX_THRESHOLD: 35,  // ADX level to switch to tighter proximity
+    // ATR-normalized optimal entry zone (replaces fixed % proximity)
+    // 0.4–1.2 ATR = optimal pullback zone
+    // < 0.4 ATR = too close (insufficient pullback)
+    // > 1.2 ATR = too far (not a pullback, still chasing)
+    ATR_DISTANCE_MIN: 0.4,        // Minimum ATR distance (too early if closer)
+    ATR_DISTANCE_MAX: 1.2,        // Maximum ATR distance (chasing if further)
+    ATR_DISTANCE_OPTIMAL: 0.8,    // Optimal entry point (best sizing)
+    // ADX-based tightening: strong trends have tighter structure
+    STRONG_ADX_THRESHOLD: 35,
+    ATR_DISTANCE_MAX_STRONG_ADX: 1.0,  // Tighter max for ADX >= 35
     // Which EMA to use: 'EMA20', 'EMA50', or 'MIDPOINT'
     EMA_TYPE: 'MIDPOINT' as 'EMA20' | 'EMA50' | 'MIDPOINT',
     // Alternative: check if price touched EMA in last N candles
     RECENT_TOUCH_CANDLES: 3,
+    // LEGACY: Keep % thresholds for fallback if ATR is unavailable
+    PROXIMITY_THRESHOLD_PERCENT: 0.8,
+    PROXIMITY_THRESHOLD_STRONG_ADX: 0.5,
   },
   
-  // ===== STOCHRSI COOLDOWN =====
-  // Must have cooled down from overbought (for LONG) or oversold (for SHORT)
-  // This ensures we're not re-entering at the same extreme
-  STOCHRSI_COOLDOWN: {
+  // ===== MOMENTUM RECOVERY DETECTION (replaces static StochRSI check) =====
+  // v2.0: Detects momentum recovery (cross-up/cross-down) instead of static threshold
+  // Philosophy: Don't just check "K < 80", check "K crossed above D" = momentum returning
+  MOMENTUM_RECOVERY: {
     ENABLED: true,
-    // For LONG: 4H StochRSI K must be below this (cooled from overbought)
+    // Primary: StochRSI K crosses above D (for LONG) or below D (for SHORT)
+    REQUIRE_STOCHRSI_CROSS: true,
+    // Fallback: If cross not detected, allow if K is rising and below threshold
+    FALLBACK_STATIC_CHECK: true,
+    // Static thresholds (used as fallback or ceiling check)
     LONG_MAX_K: 80,
-    // For SHORT: 4H StochRSI K must be above this (cooled from oversold)
     SHORT_MIN_K: 20,
-    // 1H StochRSI can have more tolerance (it moves faster)
+    // K must be rising (current K > previous K)
+    REQUIRE_K_RISING: true,
+    // Minimum K delta to consider "rising" (prevents noise)
+    MIN_K_DELTA: 2.0,
+    // 1H StochRSI tolerance (faster timeframe)
+    LONG_1H_MAX_K: 85,
+    SHORT_1H_MIN_K: 15,
+  },
+  
+  // DEPRECATED: Old static StochRSI cooldown — kept for reference
+  STOCHRSI_COOLDOWN: {
+    ENABLED: false,  // Disabled in favor of MOMENTUM_RECOVERY
+    LONG_MAX_K: 80,
+    SHORT_MIN_K: 20,
     LONG_1H_MAX_K: 85,
     SHORT_1H_MIN_K: 15,
   },

@@ -1,10 +1,21 @@
-# REGIME: Trend Continuation Pullback
+# REGIME: Trend Continuation Pullback (v2.0)
 
 ## Overview
 
 This regime addresses the "Too strong to fade, too extended to buy" deadlock by allowing **pullback re-entries** during strong trends after missing the initial entry.
 
 **Philosophy**: "If you can't enter at the start, wait for the first pullback to EMA"
+
+## v2.0 Upgrades
+
+### 1. ATR-Normalized Distance (replaces fixed % proximity)
+- Old: Fixed 0.5–0.8% proximity threshold
+- New: **0.4–1.2 ATR** optimal entry zone (adapts to volatility)
+
+### 2. Momentum Recovery Detection (replaces static StochRSI threshold)
+- Old: Static `K <= 80` check
+- New: **StochRSI K cross-up above D** = momentum returning
+- Fallback: K rising with Δ >= 2.0, or static threshold
 
 ## Problem It Solves
 
@@ -15,8 +26,8 @@ During strong rallies, the system correctly:
 But this creates a deadlock where the system can't participate at all.
 
 **This regime** allows re-entry when:
-1. Price pulls back to the EMA20/50 zone
-2. StochRSI cools down from extreme (K drops below 80)
+1. Price pulls back to the EMA20/50 zone (**0.4–1.2 ATR distance**)
+2. Momentum recovers (K crosses above D, or K rising)
 3. Trend is still strong (ADX ≥ 30, slope ≥ 0)
 
 ## Detection Logic
@@ -24,39 +35,50 @@ But this creates a deadlock where the system can't participate at all.
 ```typescript
 TREND_CONTINUATION_PULLBACK triggers when:
   - ADX >= 30 (strong trend)
-  - ADX slope >= 0.05 (trend not dying, REFINED from 0.0)
-  - 4H StochRSI K <= 80 (cooled from overbought for LONG)
-  - Price is within dynamic threshold of EMA20/50 midpoint:
-    - ADX < 35: 0.8% threshold (looser for moderate trends)
-    - ADX >= 35: 0.5% threshold (tighter for strong trends)
+  - ADX slope >= 0.05 (trend not dying)
+  - Momentum recovery detected:
+    - PRIMARY: StochRSI K crosses above D (LONG) or below D (SHORT)
+    - SECONDARY: K rising with Δ >= 2.0 and K <= 80
+    - FALLBACK: K <= 80 (static, weakest confirmation)
+  - ATR-normalized distance to EMA in valid zone:
+    - ADX < 35: 0.4–1.2 ATR
+    - ADX >= 35: 0.4–1.0 ATR (tighter for strong trends)
   - Move from swing low <= 8% (6% if shallow pullback)
 ```
 
-## EMA Pullback Detection
+## ATR-Normalized Pullback Detection
 
-The regime checks proximity to three EMA levels:
+| ATR Distance | Zone | Interpretation |
+|-------------|------|----------------|
+| < 0.4 ATR | Too close | Insufficient pullback |
+| 0.4–0.8 ATR | Optimal | Best entry zone, higher sizing |
+| 0.8–1.2 ATR | Valid | Acceptable entry, base sizing |
+| > 1.2 ATR | Chasing | Not a pullback, blocked |
 
-| Level | Description | Priority |
-|-------|-------------|----------|
-| EMA Midpoint | (EMA20 + EMA50) / 2 | Highest |
-| EMA20 | Fast EMA | Medium |
-| EMA50 | Slow EMA | Lowest |
+**ADX-based tightening:**
+- ADX < 35: max 1.2 ATR
+- ADX >= 35: max 1.0 ATR (strong trends have tighter structure)
 
-**Dynamic Proximity Threshold** (REFINED):
-- ADX < 35: 0.8% (moderate trends need larger pullback zone)
-- ADX >= 35: 0.5% (strong trends have tighter structure)
+## Momentum Recovery Detection
 
-If price is not currently near an EMA, the regime also checks if price **touched** the EMA in the last 3 candles.
+| Type | Detection | Strength |
+|------|-----------|----------|
+| `cross_up` | K crosses above D (LONG) | Strongest ✅ |
+| `cross_down` | K crosses below D (SHORT) | Strongest ✅ |
+| `k_rising` | K delta >= 2.0, K <= threshold | Medium |
+| `k_falling` | K delta <= -2.0, K >= threshold (SHORT) | Medium |
+| `static_fallback` | K <= 80 (LONG) or K >= 20 (SHORT) | Weakest (size capped) |
 
 ## Position Sizing
 
 | Condition | Multiplier |
 |-----------|------------|
-| Base (pullback detected) | 0.50x |
-| Momentum aligned | 0.70x |
-| Shallow pullback (< 1.5%) | 0.40x |
+| Optimal ATR zone (0.4–0.8 ATR) + cross confirmation | 0.70x |
+| Base (valid ATR zone) | 0.50x |
+| Shallow pullback (< 0.4 ATR) | 0.40x |
+| Static fallback momentum | Capped to 0.40x |
 
-## Stop Loss (REFINED: Max Hierarchy)
+## Stop Loss (Max Hierarchy)
 
 ```
 STOP = max(ATR_stop, EMA_stop)
@@ -64,19 +86,17 @@ STOP = max(ATR_stop, EMA_stop)
 
 - **ATR-based**: 1.0x ATR (tight)
 - **EMA-based**: Entry EMA + 0.3% buffer
-- **Rule**: Never allow stop inside structure (use whichever is wider)
+- **Rule**: Never allow stop inside structure
 
 ## Gate Bypass Behavior
 
 | Gate | Bypassed? |
 |------|-----------|
-| MOVE_EXHAUSTION | ✅ Yes (can enter > 5% moves) |
-| NEAR_EXTREME_PROTECTION | ❌ No (still respects 24h proximity) |
-| TIER_0_STOCHRSI | ❌ No (never bypasses deep overbought) |
+| MOVE_EXHAUSTION | ✅ Yes |
+| NEAR_EXTREME_PROTECTION | ❌ No |
+| TIER_0_STOCHRSI | ❌ No |
 
-## Continuation Cooldown (REFINED: Anti-Overtrade)
-
-To prevent "death-by-a-thousand-pullbacks":
+## Continuation Cooldown
 
 | Parameter | Value |
 |-----------|-------|
@@ -84,18 +104,6 @@ To prevent "death-by-a-thousand-pullbacks":
 | Max Entries Per Leg | 1 |
 | Block After Loss | Yes (same regime) |
 | Leg Reset | ADX drops below 25 |
-
-## Logging
-
-```
-TREND_CONTINUATION_PULLBACK eligible for LONG
-✅ Pullback to EMA midpoint (0.52% away)
-ADX 32.1 (slope: +0.15)
-EMA proximity threshold: 0.50% (ADX >= 35)
-StochRSI cooled: K=72.3 <= 80
-Move from swing: 6.2% <= 8%
-Stop: max(ATR 245.00, EMA 180.00) = 245.00
-```
 
 ## Configuration
 
@@ -105,20 +113,22 @@ Located in `constants.ts` under `TREND_CONTINUATION_PULLBACK_REGIME`:
 TREND_CONTINUATION_PULLBACK_REGIME = {
   ENABLED: true,
   MIN_ADX: 30,
-  MIN_ADX_SLOPE: 0.05,  // REFINED from 0.0
+  MIN_ADX_SLOPE: 0.05,
   EMA_PULLBACK: {
-    PROXIMITY_THRESHOLD_PERCENT: 0.8,      // For ADX < 35
-    PROXIMITY_THRESHOLD_STRONG_ADX: 0.5,   // For ADX >= 35
+    ATR_DISTANCE_MIN: 0.4,
+    ATR_DISTANCE_MAX: 1.2,
+    ATR_DISTANCE_OPTIMAL: 0.8,
+    ATR_DISTANCE_MAX_STRONG_ADX: 1.0,
     STRONG_ADX_THRESHOLD: 35,
   },
-  STOCHRSI_COOLDOWN: {
+  MOMENTUM_RECOVERY: {
+    ENABLED: true,
+    REQUIRE_STOCHRSI_CROSS: true,
+    FALLBACK_STATIC_CHECK: true,
     LONG_MAX_K: 80,
     SHORT_MIN_K: 20,
-  },
-  RELAXED_MOVE_EXHAUSTION: {
-    LONG_MAX_MOVE_FROM_LOW_PERCENT: 8.0,
-    SHALLOW_PULLBACK_MAX_MOVE_PERCENT: 6.0,
-    SHALLOW_PULLBACK_THRESHOLD: 1.5,
+    REQUIRE_K_RISING: true,
+    MIN_K_DELTA: 2.0,
   },
   COOLDOWN: {
     ENABLED: true,
@@ -131,22 +141,24 @@ TREND_CONTINUATION_PULLBACK_REGIME = {
 }
 ```
 
-## Related
-
-- `BOT_HEARTBEAT_CONFIG`: Monitors bot activity
-- `NO_TRADE_ZONE_STATE`: Classifies "no trade" periods
-- `MOVE_EXHAUSTION_FILTER_PARAMS`: Standard exhaustion thresholds
-
 ## Changelog
+
+### v2.0 (2026-03-06) - ATR Pullback Engine Upgrade
+- **ATR-normalized distance** replaces fixed % proximity (0.4–1.2 ATR optimal zone)
+- **Momentum recovery detection** replaces static StochRSI threshold
+  - Primary: K crosses above D (cross-up)
+  - Secondary: K rising with Δ >= 2.0
+  - Fallback: Static K threshold (size capped)
+- ADX-based tightening (ADX >= 35 → max 1.0 ATR)
+- Optimal zone sizing (0.4–0.8 ATR → 0.70x multiplier)
+- Static fallback momentum caps position size to 0.40x
 
 ### v1.1 (2026-02-06) - Refinements
 - Dynamic EMA proximity (ADX < 35 → 0.8%, ADX ≥ 35 → 0.5%)
 - ADX slope increased from 0.0 to 0.05
-- Shallow pullback exhaustion tightening (6% max move if pullback < 1.5%)
-- Stop hierarchy: max(ATR, EMA) to never allow stop inside structure
-- Continuation cooldown (4h, max 1 per leg, block after loss)
+- Shallow pullback exhaustion tightening
+- Stop hierarchy: max(ATR, EMA)
+- Continuation cooldown
 
 ### v1.0 (2026-02-06)
 - Initial implementation
-- EMA-based pullback detection
-- Integrated with heartbeat monitoring
