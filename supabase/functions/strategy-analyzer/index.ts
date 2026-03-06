@@ -7288,9 +7288,15 @@ serve(async (req) => {
               const regimeBonus = (fourStateRegime?.regime === 'TREND_EXPANSION' && gradSlope.TREND_EXPANSION_REGIME_BONUS) 
                 ? gradSlope.TREND_EXPANSION_REGIME_BONUS : 0;
               
-              if (adxSlope >= (gradSlope.ACCELERATING_SLOPE ?? 0.5)) {
+              if (adxSlope >= (gradSlope.STRONG_ACCELERATING_SLOPE ?? 1.0)) {
+                // NEW: Strong accelerating tier — ADX slope > 1.0 means fresh ignition, not exhaustion
+                relaxationTier = 'STRONG_ACCELERATING';
+                effectiveHardThreshold = (gradSlope.STRONG_ACCELERATING_HARD_THRESHOLD ?? 15.0) + regimeBonus;
+                effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT + regimeBonus;
+                relaxedPositionSize = gradSlope.STRONG_ACCELERATING_POSITION_SIZE ?? 0.35;
+              } else if (adxSlope >= (gradSlope.ACCELERATING_SLOPE ?? 0.5)) {
                 relaxationTier = 'ACCELERATING';
-                effectiveHardThreshold = (gradSlope.ACCELERATING_HARD_THRESHOLD ?? 12.0) + regimeBonus;
+                effectiveHardThreshold = (gradSlope.ACCELERATING_HARD_THRESHOLD ?? 15.0) + regimeBonus;
                 effectiveSoftThreshold = relaxation.RELAXED_SOFT_THRESHOLD_PERCENT + regimeBonus;
                 relaxedPositionSize = gradSlope.ACCELERATING_POSITION_SIZE ?? 0.40;
               } else if (adxSlope >= (gradSlope.RISING_SLOPE ?? 0.0)) {
