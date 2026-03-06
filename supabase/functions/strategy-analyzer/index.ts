@@ -8578,6 +8578,16 @@ serve(async (req) => {
             
             const pullbackAdxSlope = fullAdxResult.adxSlope ?? 0;
             
+            // v2.0: Extract StochRSI prev/D values for momentum recovery detection
+            const stochRsi4h = trendData?.stochasticRsi?.['4h'];
+            const pullbackPrevK4h = stochRsi4h?.prevK ?? stochRsi4h?.k ?? pullbackStochK4h;
+            const pullbackD4h = stochRsi4h?.d ?? pullbackStochK4h;
+            const stochRsi1h = trendData?.stochasticRsi?.['1h'];
+            const pullbackPrevK1h = stochRsi1h?.prevK ?? stochRsi1h?.k ?? pullbackStochK1h;
+            const pullbackD1h = stochRsi1h?.d ?? pullbackStochK1h;
+            
+            const mrConfig = TREND_CONTINUATION_PULLBACK_REGIME.MOMENTUM_RECOVERY;
+            
             const pullbackResult = detectTrendContinuationPullback(
               prices15m,
               pullbackDirection,
@@ -8591,11 +8601,25 @@ serve(async (req) => {
               {
                 minAdx: TREND_CONTINUATION_PULLBACK_REGIME.MIN_ADX,
                 minAdxSlope: TREND_CONTINUATION_PULLBACK_REGIME.MIN_ADX_SLOPE,
+                // v2.0: ATR-normalized distance
+                atrDistanceMin: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.ATR_DISTANCE_MIN,
+                atrDistanceMax: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.ATR_DISTANCE_MAX,
+                atrDistanceOptimal: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.ATR_DISTANCE_OPTIMAL,
+                atrDistanceMaxStrongAdx: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.ATR_DISTANCE_MAX_STRONG_ADX,
+                strongAdxThreshold: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.STRONG_ADX_THRESHOLD,
+                // v2.0: Momentum recovery
+                momentumRecovery: {
+                  enabled: mrConfig.ENABLED,
+                  requireCross: mrConfig.REQUIRE_STOCHRSI_CROSS,
+                  fallbackStaticCheck: mrConfig.FALLBACK_STATIC_CHECK,
+                  longMaxK: mrConfig.LONG_MAX_K,
+                  shortMinK: mrConfig.SHORT_MIN_K,
+                  requireKRising: mrConfig.REQUIRE_K_RISING,
+                  minKDelta: mrConfig.MIN_K_DELTA,
+                },
+                // Legacy fallback
                 emaProximityThreshold: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.PROXIMITY_THRESHOLD_PERCENT,
                 emaProximityThresholdStrong: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.PROXIMITY_THRESHOLD_STRONG_ADX,
-                strongAdxThreshold: TREND_CONTINUATION_PULLBACK_REGIME.EMA_PULLBACK.STRONG_ADX_THRESHOLD,
-                longMaxK: TREND_CONTINUATION_PULLBACK_REGIME.STOCHRSI_COOLDOWN.LONG_MAX_K,
-                shortMinK: TREND_CONTINUATION_PULLBACK_REGIME.STOCHRSI_COOLDOWN.SHORT_MIN_K,
                 longMaxMove: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.LONG_MAX_MOVE_FROM_LOW_PERCENT,
                 shortMaxMove: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.SHORT_MAX_MOVE_FROM_HIGH_PERCENT,
                 shallowPullbackMaxMove: TREND_CONTINUATION_PULLBACK_REGIME.RELAXED_MOVE_EXHAUSTION.SHALLOW_PULLBACK_MAX_MOVE_PERCENT,
@@ -8606,6 +8630,11 @@ serve(async (req) => {
                 stopLossAtrMultiplier: TREND_CONTINUATION_PULLBACK_REGIME.STOP_LOSS_ATR_MULTIPLIER,
                 emaStopBufferPercent: TREND_CONTINUATION_PULLBACK_REGIME.EMA_STOP_BUFFER_PERCENT,
                 useMaxStop: TREND_CONTINUATION_PULLBACK_REGIME.USE_MAX_STOP,
+                // v2.0: StochRSI prev/D values
+                stochRsiPrevK4h: pullbackPrevK4h,
+                stochRsiD4h: pullbackD4h,
+                stochRsiPrevK1h: pullbackPrevK1h,
+                stochRsiD1h: pullbackD1h,
                 adxSlopeGraduated: graduatedConfig.ENABLED ? {
                   enabled: true,
                   flatSlopeMin: graduatedConfig.FLAT_SLOPE_MIN,
