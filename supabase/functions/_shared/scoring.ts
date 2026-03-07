@@ -3089,6 +3089,25 @@ export const deriveTradeDirection = (
       reasons.push(`   ⚠️ Counter-momentum score |${momentumScore.toFixed(0)}| prevented ${baseDirection?.toUpperCase() || 'unknown'} derivation`);
     }
     
+    // ============= STRUCTURAL DIRECTION RESCUE =============
+    // When momentum penalty nullifies direction but price impulse + ADX structurally confirm it,
+    // rescue the direction with reduced position. This prevents "No Clear Direction" during
+    // strong trending markets where lagging indicators oppose price action.
+    // Conditions: directionNullified + baseWeightedSum had valid direction + ADX >= 25 + |priceImpulse| >= 2
+    let structuralDirectionRescued = false;
+    if (directionNullified && baseDirection) {
+      const smartMomentum = trendData.smartMomentum;
+      const rescueAdx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 0;
+      const rescuePriceImpulse = Math.abs(smartMomentum?.components?.priceImpulse ?? 0);
+      const rescueAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      
+      if (rescueAdx >= 25 && rescuePriceImpulse >= 2 && rescueAdxSlope >= 0) {
+        // Price impulse confirms direction, ADX confirms energy — rescue with micro position
+        structuralDirectionRescued = true;
+        reasons.push(`🔧 STRUCTURAL_DIRECTION_RESCUE: ADX=${rescueAdx.toFixed(1)}, impulse=${rescuePriceImpulse.toFixed(1)}, slope=${rescueAdxSlope.toFixed(2)} → rescuing ${baseDirection.toUpperCase()} at 0.35x`);
+      }
+    }
+    
     // ============= STORE GRADUATED MOMENTUM EFFECT FOR OUTER SCOPE =============
     // This enables NO_CLEAR_DIRECTION returns to include momentum penalty diagnostics
     outerGraduatedMomentumEffect = {
@@ -3102,6 +3121,35 @@ export const deriveTradeDirection = (
     };
     outerMomentumImpact = momentumImpact;
     outerMomentumScore = momentumScore;
+    
+    // If structural rescue activated, return direction with reduced position
+    if (structuralDirectionRescued && baseDirection) {
+      const rescueConf = Math.min(55, 45 + Math.abs(baseWeightedSum) * 15);
+      reasons.push(`STRUCTURAL RESCUE DIRECTION: base=${baseWeightedSum.toFixed(2)} (nullified by momentum), rescued by price impulse + ADX`);
+      return {
+        direction: baseDirection,
+        confidence: rescueConf,
+        source: "structural-direction-rescue",
+        reasons,
+        isWeightedDerivation: true,
+        positionSizeMultiplier: 0.35,
+        regime,
+        momentumImpact,
+        momentumScore,
+        graduatedMomentumEffect: outerGraduatedMomentumEffect,
+        directionContext: createDirectionContext(baseDirection, {
+          evidenceType: 'STRUCTURAL_RESCUE',
+          tier: 0.75,
+          tierSource: 'TIER_0.75_STRUCTURAL_DIRECTION_RESCUE',
+          confidence: rescueConf,
+          positionMultiplier: 0.35,
+          isCounterTrend: false,
+          riskClass: 'MEDIUM',
+          evidenceStrength: 'MODERATE',
+          weightedScore: baseWeightedSum,
+        }),
+      };
+    }
     
     // If weighted sum exceeds threshold, derive direction
     if (Math.abs(weightedSum) >= effectiveThreshold) {
