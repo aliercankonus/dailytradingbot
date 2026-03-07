@@ -3110,6 +3110,18 @@ serve(async (req) => {
         // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
         trendData.smartMomentum = earlySmartMomentum;
         
+        // UPDATE snapshot with smartMomentum (was unavailable at initial build)
+        (mfs as any).smartMomentum = {
+          score: earlySmartMomentum.score ?? 0,
+          direction: earlySmartMomentum.direction ?? "neutral",
+          phase: earlySmartMomentum.phase ?? "unknown",
+          isAccelerating: earlySmartMomentum.isAccelerating ?? false,
+          isExhausted: earlySmartMomentum.isExhausted ?? false,
+          isWeakening: earlySmartMomentum.isWeakening ?? false,
+          isTransitioning: earlySmartMomentum.isTransitioning ?? false,
+          overextensionATR: earlySmartMomentum.overextensionATR ?? 0,
+        };
+        
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
         const _mc = earlySmartMomentum.components;
         logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning}`);
