@@ -3067,7 +3067,8 @@ serve(async (req) => {
         const earlySmartAdxRising = earlyAdxSlope > 0 || (trendData.volatility?.adxRising === true);
         
         // Calculate momentum score (-100 to +100) EARLY in pipeline
-        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR);
+        // FIX: Pass adxSlope so STRUCTURAL_LAG_OVERRIDE can actually fire
+        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR, earlyAdxSlope);
         
         // INJECT into trendData so deriveTradeDirection can access it
         // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score

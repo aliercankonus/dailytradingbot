@@ -40,7 +40,8 @@ export function calculateMomentumScore(
   prices: number[],
   adx: number,
   adxRising: boolean,
-  currentATR: number
+  currentATR: number,
+  adxSlope: number = 0
 ): MomentumScoreResult {
   const defaultResult: MomentumScoreResult = {
     score: 0,

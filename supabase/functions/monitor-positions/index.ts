@@ -1437,8 +1437,9 @@ serve(async (req) => {
       const klinesForMomentum = atrData?.klines || [];
       
       // Calculate momentum score with real ADX values
+      // FIX: Pass adxSlope so STRUCTURAL_LAG_OVERRIDE can fire during position monitoring
       const momentumData = klinesForMomentum.length > 0 && closesForMomentum.length > 0
-        ? calculateMomentumScore(klinesForMomentum, closesForMomentum, adxForMomentum, adxRisingForMomentum, currentAtrForMomentum)
+        ? calculateMomentumScore(klinesForMomentum, closesForMomentum, adxForMomentum, adxRisingForMomentum, currentAtrForMomentum, momentumAdxSlope)
         : null;
       const swingData = atrData?.swingPoints as SwingPointResult | null;
       let phase3TrailingApplied = false;

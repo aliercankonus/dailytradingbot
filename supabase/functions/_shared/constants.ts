@@ -8517,11 +8517,12 @@ export const MOMENTUM_SCORE_COMPONENTS = {
   STRUCTURAL_LAG_OVERRIDE: {
     ENABLED: true,
     // Price move threshold (absolute %) to trigger override
-    MIN_PRICE_MOVE_PERCENT: 3.0,
+    // Lowered from 3.0 to 2.0: captures more moderate trend-price divergences
+    MIN_PRICE_MOVE_PERCENT: 2.0,
     // ADX must confirm strong trend
     MIN_ADX: 25,
-    // ADX slope must confirm acceleration (was 0.8 — too high for 4H, typical strong trends are 0.3-0.7)
-    MIN_ADX_SLOPE: 0.5,
+    // ADX slope must confirm acceleration (was 0.8→0.5→0.4: 4H slope distribution peaks at 0.2-0.5)
+    MIN_ADX_SLOPE: 0.4,
     // Override clamps momentum to this value toward the price direction
     // For bearish price move: clamp momentum to max -20
     // For bullish price move: clamp momentum to min +20
