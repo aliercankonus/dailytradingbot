@@ -2121,6 +2121,7 @@ serve(async (req) => {
     // ============= PROBE CASCADE PROTECTION =============
     // Track recent probe entries per symbol to prevent over-probing
     const probeCountPerSymbol6h = new Map<string, number>();
+    const lastProbeTimestampPerSymbol = new Map<string, string>();
     {
       const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
       const { data: recentProbes } = await supabase
@@ -2128,14 +2129,29 @@ serve(async (req) => {
         .select("symbol, entry_exception_type, opened_at")
         .eq("user_id", userId)
         .gte("opened_at", sixHoursAgo)
-        .in("entry_exception_type", ['TREND_ACCELERATION_PROBE', 'DEEP_EXHAUSTION_ACCEL_PROBE', 'OVEREXTENSION_ACCEL_BYPASS']);
+        .in("entry_exception_type", ['TREND_ACCELERATION_PROBE', 'DEEP_EXHAUSTION_ACCEL_PROBE', 'OVEREXTENSION_ACCEL_BYPASS', 'ADX_SLOPE_DECAY_MR_PROBE', 'CAPITULATION_OVERRIDE'])
+        .order("opened_at", { ascending: false });
       
       recentProbes?.forEach((p: any) => {
         probeCountPerSymbol6h.set(p.symbol, (probeCountPerSymbol6h.get(p.symbol) || 0) + 1);
+        // Track most recent probe timestamp per symbol
+        if (!lastProbeTimestampPerSymbol.has(p.symbol)) {
+          lastProbeTimestampPerSymbol.set(p.symbol, p.opened_at);
+        }
       });
       if (probeCountPerSymbol6h.size > 0) {
         logger.info(`${LOG_CATEGORIES.GATE} Probe cascade protection: ${[...probeCountPerSymbol6h.entries()].map(([s, c]) => `${s}=${c}`).join(', ')}`);
       }
+    }
+    
+    // Helper: Check if enough bars have passed since last probe for a symbol
+    // MIN_BARS_BETWEEN_PROBES = 3, using 15m bars → 45 minutes minimum gap
+    const MIN_BARS_MS = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MIN_BARS_BETWEEN_PROBES * 15 * 60 * 1000;
+    function isProbeBarCooldownActive(sym: string): boolean {
+      const lastTs = lastProbeTimestampPerSymbol.get(sym);
+      if (!lastTs) return false;
+      const elapsed = Date.now() - new Date(lastTs).getTime();
+      return elapsed < MIN_BARS_MS;
     }
 
     // ============= DYNAMIC ENTRY WINDOW HELPER =============
@@ -3751,8 +3767,9 @@ serve(async (req) => {
                 // Probe cascade check: max 2 probes per symbol per 6h
                 const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
                 const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
-                if (symbolProbeCount >= maxProbes6h) {
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to hard block`);
+                if (symbolProbeCount >= maxProbes6h || isProbeBarCooldownActive(symbol)) {
+                  const cooldownActive = isProbeBarCooldownActive(symbol);
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${cooldownActive ? ', bar cooldown active' : ''} — falling through to hard block`);
                   // FIX: Properly reject instead of silently continuing through pipeline
                   rejectedByHardGates++;
                   perSymbolGateAttribution.set(symbol, { 
@@ -4212,6 +4229,16 @@ serve(async (req) => {
             
             const canRelaxAdmission = microAdm.ENABLED && isSlopeRelatedBlock && isDeeplyExtremeForAdm && slopeNearZero;
             
+            // ===== ADX SLOPE DECAY MR PROBE CHECK =====
+            // When ADX slope < -0.3 (trend weakening), allow 0.25x MR probe
+            // Best MR setup: strong trend → momentum breaking → mean reversion
+            const slopeDecayMR = COUNTER_TREND_ADMISSION.ADX_SLOPE_DECAY_MR;
+            const isSlopeDecaying = admAdxSlope < slopeDecayMR.MAX_SLOPE_THRESHOLD;
+            const isDeeplyExtremeForDecay = (directionResult.direction === 'long' && admStochK < slopeDecayMR.STOCH_K_EXTREME_THRESHOLD) ||
+                                             (directionResult.direction === 'short' && admStochK > (100 - slopeDecayMR.STOCH_K_EXTREME_THRESHOLD));
+            const adxStrongEnough = adx >= slopeDecayMR.MIN_ADX;
+            const canDecayMRProbe = slopeDecayMR.ENABLED && isSlopeDecaying && isDeeplyExtremeForDecay && adxStrongEnough;
+            
             if (canRelaxAdmission) {
               // Allow micro probe with reduced position
               counterTrendAdmissionMultiplier = microAdm.MICRO_POSITION_MULTIPLIER;
@@ -4224,6 +4251,24 @@ serve(async (req) => {
                   `   → Relaxation: slope-related block bypassed for micro probe`
                 );
               }
+              // DON'T continue - let probe proceed through remaining gates
+            } else if (canDecayMRProbe) {
+              // ADX slope is decaying (negative) — trend is weakening, MR probe opportunity
+              counterTrendAdmissionMultiplier = slopeDecayMR.POSITION_MULTIPLIER;
+              
+              if (slopeDecayMR.LOG_ENABLED) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} 🔄 ADX_SLOPE_DECAY_MR_PROBE: ${directionResult.direction.toUpperCase()} allowed at ${(slopeDecayMR.POSITION_MULTIPLIER * 100).toFixed(0)}% probe\n` +
+                  `   → ADX=${adx.toFixed(1)} (≥${slopeDecayMR.MIN_ADX}), slope=${admAdxSlope.toFixed(2)} (<${slopeDecayMR.MAX_SLOPE_THRESHOLD})\n` +
+                  `   → StochK=${admStochK.toFixed(1)} (deeply extreme)\n` +
+                  `   → Original block: ${counterTrendAdmissionResult.reason}\n` +
+                  `   → Trend weakening = MR opportunity`
+                );
+              }
+              perSymbolGateAttribution.set(symbol, {
+                gate: 'ADX_SLOPE_DECAY_MR_PROBE',
+                details: `MR probe: ADX=${adx.toFixed(1)}, slope=${admAdxSlope.toFixed(2)}, StochK=${admStochK.toFixed(1)}`
+              });
               // DON'T continue - let probe proceed through remaining gates
             } else {
             // Counter-trend entry blocked by admission layer
@@ -7290,8 +7335,8 @@ serve(async (req) => {
                 // Probe cascade check: max 2 probes per symbol per 6h
                 const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
                 const maxProbes6h = deepExhaustion.MAX_PROBES_PER_SYMBOL_6H;
-                if (symbolProbeCount >= maxProbes6h) {
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
+                if (symbolProbeCount >= maxProbes6h || isProbeBarCooldownActive(symbol)) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${isProbeBarCooldownActive(symbol) ? ', bar cooldown active' : ''}`);
                   // Fall through to hard block below
                 } else {
                   const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
@@ -10503,8 +10548,8 @@ serve(async (req) => {
             // Probe cascade check
             const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
             const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
-            if (symbolProbeCount >= maxProbes6h) {
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to standard block`);
+            if (symbolProbeCount >= maxProbes6h || isProbeBarCooldownActive(symbol)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${isProbeBarCooldownActive(symbol) ? ', bar cooldown active' : ''} — falling through to standard block`);
               // Fall through to standard block below
             } else {
               positionMultiplier = Math.min(positionMultiplier, 0.20);
