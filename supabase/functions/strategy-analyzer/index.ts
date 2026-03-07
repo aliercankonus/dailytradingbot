@@ -3067,7 +3067,8 @@ serve(async (req) => {
         const earlySmartAdxRising = earlyAdxSlope > 0 || (trendData.volatility?.adxRising === true);
         
         // Calculate momentum score (-100 to +100) EARLY in pipeline
-        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR);
+        // FIX: Pass adxSlope so STRUCTURAL_LAG_OVERRIDE can actually fire
+        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR, earlyAdxSlope);
         
         // INJECT into trendData so deriveTradeDirection can access it
         // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
@@ -7176,8 +7177,12 @@ serve(async (req) => {
                 ? `K=${stochK4hDeep.toFixed(0)} < ${deepExhaustion.SHORT_MAX_K}, moveFromHigh=${moveFromHigh.toFixed(1)}%`
                 : `K=${stochK4hDeep.toFixed(0)} > ${deepExhaustion.LONG_MIN_K}, moveFromLow=${moveFromLow.toFixed(1)}%`;
               
+              // FIX #5: OVERLAPPING GATE CHAIN — If EARLY_TIER_0 probe already applied, don't double-block
+              // The symbol already passed a structural acceleration check; DEEP_EXHAUSTION shouldn't re-penalize
+              if (strongTrendTier0OverrideApplied) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ✅ DEEP_EXHAUSTION_COMPOUND skipped: EARLY_TIER_0 probe already active at ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
               // FIX: Rally override bypasses DEEP_EXHAUSTION_COMPOUND entirely
-              if (rallyOverrideActive && RALLY_OVERRIDE.BYPASSES_DEEP_EXHAUSTION_COMPOUND) {
+              } else if (rallyOverrideActive && RALLY_OVERRIDE.BYPASSES_DEEP_EXHAUSTION_COMPOUND) {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚀 DEEP_EXHAUSTION_COMPOUND bypassed by RALLY OVERRIDE: ${moveStr}, rally at ${(rallyOverrideMultiplier * 100).toFixed(0)}%`);
               } else if (adx >= deepExhaustion.HIGH_ADX_PROBE_THRESHOLD) {
                 stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.HIGH_ADX_PROBE_MULTIPLIER);

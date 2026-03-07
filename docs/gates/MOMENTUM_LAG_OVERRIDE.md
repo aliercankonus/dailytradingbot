@@ -40,11 +40,11 @@ THEN
 ```typescript
 STRUCTURAL_LAG_OVERRIDE = {
   ENABLED: true,
-  MIN_PRICE_MOVE_PERCENT: 3.0,
+  MIN_PRICE_MOVE_PERCENT: 2.0,  // was 3.0 — captures moderate divergences
   MIN_ADX: 25,
-  MIN_ADX_SLOPE: 0.5,        // was 0.8 — too high for 4H (typical strong trends: 0.3-0.7)
+  MIN_ADX_SLOPE: 0.4,          // was 0.5 — 4H slope distribution: 0.2-0.5 very common
   OVERRIDE_SCORE: 20,
-  MIN_PRICE_IMPULSE_ABS: 2,  // was 3 — 4H impulse rarely reaches 3 during lag window
+  MIN_PRICE_IMPULSE_ABS: 2,    // was 3 — 4H impulse rarely reaches 3 during lag window
 }
 ```
 
@@ -77,6 +77,17 @@ With momentum clamped to -20 (for bearish price):
 - Applied to all three probe types: EARLY_TIER_0, DEEP_EXHAUSTION, OVEREXTENSION bypass
 
 ## Changelog
+
+### v1.2 (2026-03-07)
+- **CRITICAL BUG FIX**: `adxSlope` was undefined in `calculateMomentumScore` — override NEVER fired
+  - Added `adxSlope` parameter to function signature (default 0 for backward compat)
+  - Updated strategy-analyzer and monitor-positions callers to pass `adxSlope`
+- MIN_ADX_SLOPE: 0.5 → 0.4 (broadens activation window)
+- MIN_PRICE_MOVE_PERCENT: 3.0 → 2.0 (captures moderate trend-price divergences)
+- Added STRUCTURAL_DIRECTION_RESCUE in scoring.ts direction engine
+  - When momentum penalty nullifies direction but ADX≥25 + priceImpulse≥2 + slope≥0 confirm it
+  - Rescues direction at 0.35x position instead of NO_CLEAR_DIRECTION
+- Added overlapping gate chain fix: EARLY_TIER_0 probe bypasses DEEP_EXHAUSTION double-block
 
 ### v1.1 (2026-03-07)
 - MIN_ADX_SLOPE: 0.8 → 0.5 (staggered adjustment, production-safe)
