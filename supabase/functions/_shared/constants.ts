@@ -6105,6 +6105,22 @@ export const COUNTER_TREND_ADMISSION = {
     LOG_RELAXATION: true,
   },
   
+  // ===== ADX SLOPE DECAY MEAN REVERSION PROBE =====
+  // When ADX slope is negative (trend weakening), allow MR probe
+  // This captures the best mean reversion setup: strong trend + momentum breaking
+  ADX_SLOPE_DECAY_MR: {
+    ENABLED: true,
+    // ADX slope must be below this (negative = trend weakening)
+    MAX_SLOPE_THRESHOLD: -0.3,
+    // StochRSI extreme required (same as micro admission)
+    STOCH_K_EXTREME_THRESHOLD: 15,     // K < 15 for LONG, K > 85 for SHORT
+    // Position multiplier — conservative MR probe
+    POSITION_MULTIPLIER: 0.25,
+    // Minimum ADX for the setup to be valid (trend must have been strong)
+    MIN_ADX: 22,
+    LOG_ENABLED: true,
+  },
+  
   // ===== VOLATILITY CONTRACTION REQUIREMENTS =====
   // Confirms impulse is dying, not just oscillators resetting
   REQUIRE_VOLATILITY_CONTRACTION: true,

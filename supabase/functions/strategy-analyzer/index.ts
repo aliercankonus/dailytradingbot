@@ -4212,6 +4212,16 @@ serve(async (req) => {
             
             const canRelaxAdmission = microAdm.ENABLED && isSlopeRelatedBlock && isDeeplyExtremeForAdm && slopeNearZero;
             
+            // ===== ADX SLOPE DECAY MR PROBE CHECK =====
+            // When ADX slope < -0.3 (trend weakening), allow 0.25x MR probe
+            // Best MR setup: strong trend → momentum breaking → mean reversion
+            const slopeDecayMR = COUNTER_TREND_ADMISSION.ADX_SLOPE_DECAY_MR;
+            const isSlopeDecaying = admAdxSlope < slopeDecayMR.MAX_SLOPE_THRESHOLD;
+            const isDeeplyExtremeForDecay = (directionResult.direction === 'long' && admStochK < slopeDecayMR.STOCH_K_EXTREME_THRESHOLD) ||
+                                             (directionResult.direction === 'short' && admStochK > (100 - slopeDecayMR.STOCH_K_EXTREME_THRESHOLD));
+            const adxStrongEnough = adx >= slopeDecayMR.MIN_ADX;
+            const canDecayMRProbe = slopeDecayMR.ENABLED && isSlopeDecaying && isDeeplyExtremeForDecay && adxStrongEnough;
+            
             if (canRelaxAdmission) {
               // Allow micro probe with reduced position
               counterTrendAdmissionMultiplier = microAdm.MICRO_POSITION_MULTIPLIER;
@@ -4224,6 +4234,24 @@ serve(async (req) => {
                   `   → Relaxation: slope-related block bypassed for micro probe`
                 );
               }
+              // DON'T continue - let probe proceed through remaining gates
+            } else if (canDecayMRProbe) {
+              // ADX slope is decaying (negative) — trend is weakening, MR probe opportunity
+              counterTrendAdmissionMultiplier = slopeDecayMR.POSITION_MULTIPLIER;
+              
+              if (slopeDecayMR.LOG_ENABLED) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} 🔄 ADX_SLOPE_DECAY_MR_PROBE: ${directionResult.direction.toUpperCase()} allowed at ${(slopeDecayMR.POSITION_MULTIPLIER * 100).toFixed(0)}% probe\n` +
+                  `   → ADX=${adx.toFixed(1)} (≥${slopeDecayMR.MIN_ADX}), slope=${admAdxSlope.toFixed(2)} (<${slopeDecayMR.MAX_SLOPE_THRESHOLD})\n` +
+                  `   → StochK=${admStochK.toFixed(1)} (deeply extreme)\n` +
+                  `   → Original block: ${counterTrendAdmissionResult.reason}\n` +
+                  `   → Trend weakening = MR opportunity`
+                );
+              }
+              perSymbolGateAttribution.set(symbol, {
+                gate: 'ADX_SLOPE_DECAY_MR_PROBE',
+                details: `MR probe: ADX=${adx.toFixed(1)}, slope=${admAdxSlope.toFixed(2)}, StochK=${admStochK.toFixed(1)}`
+              });
               // DON'T continue - let probe proceed through remaining gates
             } else {
             // Counter-trend entry blocked by admission layer
