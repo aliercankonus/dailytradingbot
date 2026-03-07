@@ -3016,29 +3016,28 @@ serve(async (req) => {
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
-        // AUTHORITATIVE ADX SOURCE: trendData (calculated from 1h CLOSED candles in calculate-trend)
-        // DO NOT override with local klines — strategy-analyzer's klines are 15m candles.
-        // ADX(14) on 15m covers ~3.5h vs ADX(14) on 1h covers ~14h — completely different windows.
-        const adx = extractADX(trendData);
-        const adxSlope = extractADXSlope(trendData).slope;
-        const adxRising = extractADXSlope(trendData).isRising;
-        const momentum = trendData.momentum;
         
         // ============= MARKET FEATURE SNAPSHOT (SINGLE EXTRACTION POINT) =============
-        // Build once per symbol — all gates should progressively migrate to reading from this.
-        // NOTE: smartMomentum is injected into trendData later (line ~3105), so snapshot.smartMomentum
+        // Build once per symbol — all gates read from this snapshot.
+        // NOTE: smartMomentum is injected into trendData later, so snapshot.smartMomentum
         // will be undefined at this point. It gets populated after earlySmartMomentum calculation.
         const mfs = buildMarketFeatureSnapshot(symbol, trendData);
         
+        // AUTHORITATIVE ADX SOURCE: Read from snapshot (1h CLOSED candles via calculate-trend)
+        const adx = mfs.adx;
+        const adxSlope = mfs.adxSlope;
+        const adxRising = mfs.adxRising;
+        const momentum = trendData.momentum;
+        
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
-        // Extract weighted components for smarter quality scoring and gate decisions
-        const tf4hConfidence = trueAlignment?.tf4hConfidence ?? 0;
-        const tf1hConfidence = trueAlignment?.tf1hConfidence ?? 0;
-        const adxContribution = trueAlignment?.adxContribution ?? 0;
-        const totalWeightedConfidence = trueAlignment?.totalWeightedConfidence ?? 0;
-        const weightedComponents = trueAlignment?.weightedComponents || {};
-        const neutralCapped = trueAlignment?.neutralCapped === true;
-        const alignmentBreakdown = trueAlignment?.breakdown || {};
+        // Read from snapshot for consistency
+        const tf4hConfidence = mfs.trueAlignment.tf4hConfidence;
+        const tf1hConfidence = mfs.trueAlignment.tf1hConfidence;
+        const adxContribution = mfs.trueAlignment.adxContribution;
+        const totalWeightedConfidence = mfs.trueAlignment.totalWeightedConfidence;
+        const weightedComponents = mfs.trueAlignment.weightedComponents;
+        const neutralCapped = mfs.trueAlignment.neutralCapped;
+        const alignmentBreakdown = mfs.trueAlignment.breakdown;
         
         // Log enhanced alignment data for visibility
         if (Object.keys(weightedComponents).length > 0) {
@@ -3046,16 +3045,10 @@ serve(async (req) => {
         }
         
         // ============= NEUTRAL PERSISTENCE BONUS =============
-        // Extract neutral persistence data for confidence bonuses on stealth/grind entries
-        const neutralPersistence = trendData.neutralPersistence || {
-          isCurrentlyNeutral: false,
-          durationMinutes: 0,
-          confidenceBonus: 0,
-          reason: "No neutral persistence data"
-        };
-        // Derive higher timeframe data from correct paths
-        const htfTrend4h = timeframes?.['4h']?.trend || timeframes?.['4h']?.indicators?.emaSignal || "neutral";
-        const htfTrend1h = timeframes?.['1h']?.trend || timeframes?.['1h']?.indicators?.emaSignal || "neutral";
+        const neutralPersistence = mfs.neutralPersistence;
+        // Derive higher timeframe data from snapshot
+        const htfTrend4h = mfs.timeframes["4h"].trend || mfs.timeframes["4h"].emaSignal || "neutral";
+        const htfTrend1h = mfs.timeframes["1h"].trend || mfs.timeframes["1h"].emaSignal || "neutral";
 
         // ============= EARLY ORDER FLOW ANALYSIS =============
         // Calculate Order Flow data BEFORE rejection gates so it's available for rejection logs
