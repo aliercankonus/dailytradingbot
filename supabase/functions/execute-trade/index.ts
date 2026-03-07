@@ -339,9 +339,14 @@ serve(async (req) => {
     // ============================================================
     let strategyPerformanceBonus = 0; // Quality score bonus for high performers
     
+    // Fetch with close_reason and peak_pnl_percent for fair win rate (aligned with strategy-analyzer)
+    const BREAK_EVEN_CLOSE_REASONS = ['break_even', 'break_even_stop'];
+    const PARTIAL_WIN_WEIGHT = 0.5;
+    const PARTIAL_WIN_PEAK_THRESHOLD = 0.3; // % peak P&L to qualify as partial win
+    
     const { data: strategyTrades } = await supabase
       .from('positions')
-      .select('realized_pnl')
+      .select('realized_pnl, close_reason, peak_pnl_percent')
       .eq('user_id', user.id)
       .eq('status', 'closed')
       .eq('strategy_name', signal.strategy_name || '')
@@ -349,20 +354,47 @@ serve(async (req) => {
       .limit(20);
     
     if (strategyTrades && strategyTrades.length >= STRATEGY_PARAMS.MIN_TRADES_FOR_FILTER) {
-      const wins = strategyTrades.filter(t => (t.realized_pnl || 0) > 0).length;
-      const winRate = (wins / strategyTrades.length) * 100;
+      // Improved win rate: exclude break-even, credit partial wins (aligned with strategy-analyzer)
+      let effectiveWins = 0;
+      let countedTrades = 0;
+      let breakEvenCount = 0;
+      let partialWinCount = 0;
+      
+      for (const t of strategyTrades) {
+        const pnl = t.realized_pnl || 0;
+        const closeReason = t.close_reason || '';
+        const peakPnl = t.peak_pnl_percent || 0;
+        
+        // Skip break-even trades entirely (capital preserved, not win or loss)
+        if (BREAK_EVEN_CLOSE_REASONS.includes(closeReason)) {
+          breakEvenCount++;
+          continue;
+        }
+        
+        countedTrades++;
+        
+        if (pnl > 0) {
+          effectiveWins += 1;
+        } else if (peakPnl >= PARTIAL_WIN_PEAK_THRESHOLD) {
+          // Trade reached profit but closed at loss → partial win credit
+          effectiveWins += PARTIAL_WIN_WEIGHT;
+          partialWinCount++;
+        }
+      }
+      
+      const winRate = countedTrades > 0 ? (effectiveWins / countedTrades) * 100 : 0;
       
       if (winRate < STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD) {
-        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}%`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD });
+        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}% (${effectiveWins.toFixed(1)}W/${countedTrades}T, ${breakEvenCount}BE, ${partialWinCount} partial)`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD, breakEvenExcluded: breakEvenCount, partialWins: partialWinCount });
         throw new Error(`Strategy "${signal.strategy_name}" underperforming (${winRate.toFixed(0)}% win rate) - trade cancelled`);
       }
       
       if (winRate >= STRATEGY_PARAMS.WIN_RATE_HIGH_PERFORMER) {
-        strategyPerformanceBonus = STRATEGY_PARAMS.MAX_PERFORMANCE_BONUS; // +5 quality bonus for high performers (aligned with strategy-analyzer)
-        logger.info(`⭐ Strategy high performer bonus: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% → +${strategyPerformanceBonus} quality`);
+        strategyPerformanceBonus = STRATEGY_PARAMS.MAX_PERFORMANCE_BONUS;
+        logger.info(`⭐ Strategy high performer bonus: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% (${breakEvenCount}BE excluded, ${partialWinCount} partial) → +${strategyPerformanceBonus} quality`);
       } else {
-        logger.validation(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}%`, true);
+        logger.validation(`✓ Strategy performance check: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% >= ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}% (${breakEvenCount}BE excluded, ${partialWinCount} partial)`, true);
       }
     }
 
