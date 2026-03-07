@@ -3015,14 +3015,12 @@ serve(async (req) => {
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
-        // CENTRALIZED: Use shared extractors as initial values
-        // These will be overridden by fullAdxResult (local klines calculation) after line ~3082
-        // to ensure all gates use the same ADX source
-        let adx = extractADX(trendData);
-        let adxSlope = extractADXSlope(trendData).slope;
-        let adxRising = extractADXSlope(trendData).isRising;
-        const adxFromTrendData = adx; // Preserve for diagnostic logging
-        const adxSlopeFromTrendData = adxSlope;
+        // AUTHORITATIVE ADX SOURCE: trendData (calculated from 1h CLOSED candles in calculate-trend)
+        // DO NOT override with local klines — strategy-analyzer's klines are 15m candles.
+        // ADX(14) on 15m covers ~3.5h vs ADX(14) on 1h covers ~14h — completely different windows.
+        const adx = extractADX(trendData);
+        const adxSlope = extractADXSlope(trendData).slope;
+        const adxRising = extractADXSlope(trendData).isRising;
         const momentum = trendData.momentum;
         
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
