@@ -4938,22 +4938,21 @@ serve(async (req) => {
         const primaryTrendForRegime = mfs.primaryTrend || 'neutral';
         const isBBSqueeze = mfs.bollinger.squeezeActive || mfs.bollinger["4h"].squeeze;
         
-        // Count aligned timeframes for breakout confirmation
+        // Count aligned timeframes for breakout confirmation (from snapshot)
         let alignedTFCount = 0;
-        const tfTrends = trendData.timeframes || {};
-        for (const tf of ['15m', '30m', '1h', '4h']) {
-          const tfTrend = tfTrends[tf]?.trend;
+        for (const tf of ['15m', '30m', '1h', '4h'] as const) {
+          const tfTrend = mfs.timeframes[tf].trend;
           if ((derivedDirection === 'long' && tfTrend === 'bullish') || 
               (derivedDirection === 'short' && tfTrend === 'bearish')) {
             alignedTFCount++;
           }
         }
         
-        // Extract DI separation for transition buffer confidence scoring
-        const diPlus = trendData?.volatility?.diPlus ?? 0;
-        const diMinus = trendData?.volatility?.diMinus ?? 0;
-        const diSeparation = Math.abs(diPlus - diMinus);
-        const relativeATR = trendData?.volatility?.relativeATR ?? 1.0;
+        // DI separation and relative ATR from snapshot
+        const diPlus = mfs.diPlus;
+        const diMinus = mfs.diMinus;
+        const diSeparation = mfs.diSeparation;
+        const relativeATR = mfs.relativeATR;
         
         const fourStateRegime = classify4StateRegime(
           adx,
