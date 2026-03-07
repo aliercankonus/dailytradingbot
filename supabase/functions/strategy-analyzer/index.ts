@@ -3759,7 +3759,7 @@ serve(async (req) => {
                 if (bearishCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${bearishCount} bearish TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
                 
                 // Weighted StochRSI: 70% 4H + 30% 1H (symmetric with LONG side)
-                const stochRsiK1h = trendData?.stochasticRsi?.['1h']?.k ?? earlyStochRsiK4h;
+                const stochRsiK1h = mfs.stochRsi["1h"].k;
                 const effectiveK = (earlyStochRsiK4h * (TEE.WEIGHT_4H_STOCHRSI ?? 0.70)) + 
                                    (stochRsiK1h * (TEE.WEIGHT_1H_STOCHRSI ?? 0.30));
                 
