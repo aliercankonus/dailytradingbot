@@ -8172,6 +8172,26 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price rallied too far already =====
             if (distanceFromLow >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
+              
+              // ===== GATE COLLISION BYPASS: DEEP_EXHAUSTION already handled this signal =====
+              if (deepExhaustionOverrideApplied) {
+                moveZone = 'EXCEPTION';
+                moveExhaustionPositionMultiplier = stochRsiRunwayMultiplier;
+                moveZoneDetails = {
+                  zone: 'EXCEPTION',
+                  distancePercent: distanceFromLow,
+                  direction: 'long',
+                  stochRsiK: stochRsiK4h,
+                  adx,
+                  adxSlope,
+                  outcome: 'EXCEPTION_ALLOWED',
+                  positionMultiplier: moveExhaustionPositionMultiplier,
+                  overrideReason: `GATE_COLLISION_BYPASS: DEEP_EXHAUSTION override active at ${(stochRsiRunwayMultiplier * 100).toFixed(0)}%`,
+                  relaxationApplied: useRelaxedThresholds,
+                  relaxationCondition
+                };
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔗 MOVE_EXHAUSTED bypassed by DEEP_EXHAUSTION override: distance=${distanceFromLow.toFixed(1)}%, using DEEP_EXHAUSTION sizing at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              } else {
               // Check for strong trend continuation override
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX &&
