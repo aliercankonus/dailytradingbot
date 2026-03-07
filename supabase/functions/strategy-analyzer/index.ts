@@ -5039,8 +5039,8 @@ serve(async (req) => {
           const diagMomState = earlySmartMomentum?.direction || 'unknown';
           const diagMomScore = earlySmartMomentum?.score ?? 0;
           const diagDirConf = directionResult?.confidence ?? 0;
-          const diagStochK1h = extractStochRsiK(trendData, '1h')?.toFixed(1) ?? '?';
-          const diagStochK4h = stochK4hForRegime?.toFixed(1) ?? '?';
+          const diagStochK1h = mfs.stochRsi["1h"].k.toFixed(1);
+          const diagStochK4h = mfs.stochRsi["4h"].k.toFixed(1);
           const diagRegimeAge = regimeAgeBySymbol.get(symbol) || 0;
           const diagPersisted = persistenceResult.reason.includes('PERSISTED') ? 'YES' : 'NO';
           
