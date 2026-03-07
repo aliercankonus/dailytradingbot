@@ -3216,7 +3216,12 @@ serve(async (req) => {
             // EXCEPTION 1: Mean reversion strategies targeting bounce (LONG) are allowed at K < 5
             // EXCEPTION 2: Strong Trend Override allows SHORT if ADX>40 and momentum confirms
             // EXCEPTION 3: Capitulation Bounce Probe - flip to LONG if probe conditions met
-            if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+            // DYNAMIC ENTRY WINDOW: Adaptive threshold based on ADX slope
+            const dynamicOversoldK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.TIER_0_OVERSOLD, adx, earlyAdxSlope);
+            if (DYNAMIC_ENTRY_WINDOW.ENABLED && dynamicOversoldK !== DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 DYNAMIC_ENTRY_WINDOW: Tier 0 oversold threshold ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} → ${dynamicOversoldK} (ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)})`);
+            }
+            if (earlyDirection === 'short' && earlyStochRsiK4h < dynamicOversoldK) {
               const overrideCheck = checkStrongTrendOverride('short');
               
               // ===== CAPITULATION BOUNCE PROBE CHECK (before blocking) =====
@@ -7145,10 +7150,18 @@ serve(async (req) => {
             const moveFromHigh = priceDistForRunway?.distanceFromHighPercent ?? 0;
             const moveFromLow = priceDistForRunway?.distanceFromLowPercent ?? 0;
             
+            // DYNAMIC ENTRY WINDOW: Adaptive K thresholds for deep exhaustion
+            const dynamicDeepShortK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.DEEP_EXHAUSTION_SHORT, adx, fullAdxResult.adxSlope ?? 0);
+            const dynamicDeepLongK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.DEEP_EXHAUSTION_LONG, adx, fullAdxResult.adxSlope ?? 0);
+            
             const shortDeepExhausted = derivedDirection === 'short' && 
-              stochK4hDeep < deepExhaustion.SHORT_MAX_K && moveFromHigh > deepExhaustion.SHORT_MIN_MOVE_PERCENT;
+              stochK4hDeep < dynamicDeepShortK && moveFromHigh > deepExhaustion.SHORT_MIN_MOVE_PERCENT;
             const longDeepExhausted = derivedDirection === 'long' && 
-              stochK4hDeep > deepExhaustion.LONG_MIN_K && moveFromLow > deepExhaustion.LONG_MIN_MOVE_PERCENT;
+              stochK4hDeep > dynamicDeepLongK && moveFromLow > deepExhaustion.LONG_MIN_MOVE_PERCENT;
+            
+            if (DYNAMIC_ENTRY_WINDOW.LOG_ADAPTIVE_THRESHOLDS && (dynamicDeepShortK !== deepExhaustion.SHORT_MAX_K || dynamicDeepLongK !== deepExhaustion.LONG_MIN_K)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 DYNAMIC_ENTRY_WINDOW: Deep exhaustion thresholds SHORT K<${dynamicDeepShortK} (was ${deepExhaustion.SHORT_MAX_K}), LONG K>${dynamicDeepLongK} (was ${deepExhaustion.LONG_MIN_K})`);
+            }
             
             if (shortDeepExhausted || longDeepExhausted) {
               const moveStr = shortDeepExhausted 
