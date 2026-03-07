@@ -3015,14 +3015,12 @@ serve(async (req) => {
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
-        // CENTRALIZED: Use shared extractors as initial values
-        // These will be overridden by fullAdxResult (local klines calculation) after line ~3082
-        // to ensure all gates use the same ADX source
-        let adx = extractADX(trendData);
-        let adxSlope = extractADXSlope(trendData).slope;
-        let adxRising = extractADXSlope(trendData).isRising;
-        const adxFromTrendData = adx; // Preserve for diagnostic logging
-        const adxSlopeFromTrendData = adxSlope;
+        // AUTHORITATIVE ADX SOURCE: trendData (calculated from 1h CLOSED candles in calculate-trend)
+        // DO NOT override with local klines — strategy-analyzer's klines are 15m candles.
+        // ADX(14) on 15m covers ~3.5h vs ADX(14) on 1h covers ~14h — completely different windows.
+        const adx = extractADX(trendData);
+        const adxSlope = extractADXSlope(trendData).slope;
+        const adxRising = extractADXSlope(trendData).isRising;
         const momentum = trendData.momentum;
         
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
@@ -3083,36 +3081,23 @@ serve(async (req) => {
         const earlyPriceData = symbolHistoricalData?.prices || [];
         const earlyATR = calculateATR(klines, 14);
         
-        // Calculate full ADX result for accurate slope (from raw klines — authoritative source)
+        // Calculate 15m ADX for momentum score (local context only, NOT for gate decisions)
+        // Gate decisions use trendData ADX (1h closed candles) — set above as const.
         const earlyFullAdxResult = calculateADXWithDirection(klines, 14);
         const earlyAdxSlope = earlyFullAdxResult.adxSlope ?? 0;
         const earlySmartAdxRising = earlyAdxSlope > 0 || (trendData.volatility?.adxRising === true);
         
-        // ============= ADX SOURCE UNIFICATION =============
-        // Override trendData ADX with local klines calculation to ensure all gates
-        // use the same ADX source. This eliminates decision inconsistency where
-        // PARABOLIC MODE sees ADX=53.3 (trendData) but ADX BEHAVIORAL sees ADX=45.8 (local).
+        // Log if 15m and 1h ADX diverge significantly (diagnostic only)
         const adxDrift = Math.abs(adx - earlyFullAdxResult.adx);
-        if (adxDrift > 1.0) {
+        if (adxDrift > 5.0) {
           logger.forSymbol(symbol).info(
-            `${LOG_CATEGORIES.GATE} ⚠️ ADX_SOURCE_DRIFT: trendData=${adxFromTrendData.toFixed(1)} vs local=${earlyFullAdxResult.adx.toFixed(1)} (Δ=${adxDrift.toFixed(1)}, slope: ${adxSlopeFromTrendData.toFixed(2)} vs ${earlyAdxSlope.toFixed(2)}) — using local as authoritative`
+            `${LOG_CATEGORIES.GATE} 📊 ADX_TIMEFRAME_DELTA: 1h=${adx.toFixed(1)} vs 15m=${earlyFullAdxResult.adx.toFixed(1)} (Δ=${adxDrift.toFixed(1)}) — 1h is authoritative for gates`
           );
-        }
-        // Authoritative: local klines calculation (same data all gates see)
-        adx = earlyFullAdxResult.adx;
-        adxSlope = earlyAdxSlope;
-        adxRising = earlySmartAdxRising;
-        
-        // INJECT unified ADX back into trendData so any downstream reads are consistent
-        if (trendData.volatility) {
-          trendData.volatility.adx = adx;
-          trendData.volatility.adxSlope = adxSlope;
-          trendData.volatility.adxRising = adxRising;
         }
         
         // Calculate momentum score (-100 to +100) EARLY in pipeline
-        // FIX: Pass adxSlope so STRUCTURAL_LAG_OVERRIDE can actually fire
-        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR, earlyAdxSlope);
+        // Uses 15m klines for momentum granularity, but ADX gate values remain from 1h
+        const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, adxRising, earlyATR, adxSlope);
         
         // INJECT into trendData so deriveTradeDirection can access it
         // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
