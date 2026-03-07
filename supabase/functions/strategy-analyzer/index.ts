@@ -4370,12 +4370,12 @@ serve(async (req) => {
         let lateGrindDirection: "long" | "short" | null = null;
         
         if (LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED && !directionResult.direction) {
-          const stealthTrend = trendData.stealthTrend || { detected: false, driftPercent: 0, direction: "neutral", stealthScore: 0 };
-          const stealthDrift = Math.abs(stealthTrend.driftPercent || 0);
+          const stealthTrend = mfs.stealthTrend;
+          const stealthDrift = Math.abs(stealthTrend.driftPercent);
           const driftDirection = stealthTrend.direction;
-          const adxSlope = trendData.volatility?.adxSlope ?? 0;
-          const stochK4h = extractStochRsiK(trendData, '4h');
-          const htf4hConfidence = timeframes?.['4h']?.confidence ?? 0;
+          const adxSlope = mfs.adxSlope;
+          const stochK4h = mfs.stochRsi["4h"].k;
+          const htf4hConfidence = mfs.timeframes["4h"].confidence;
           
           // Check if sufficient drift has occurred
           // Apply neutral persistence bonus to relax Late Grind thresholds
