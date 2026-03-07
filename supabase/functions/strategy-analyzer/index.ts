@@ -3015,9 +3015,14 @@ serve(async (req) => {
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
-        // CENTRALIZED: Use shared extractors for consistency across edge functions
-        const adx = extractADX(trendData);
-        const { slope: adxSlope, isRising: adxRising } = extractADXSlope(trendData);
+        // CENTRALIZED: Use shared extractors as initial values
+        // These will be overridden by fullAdxResult (local klines calculation) after line ~3082
+        // to ensure all gates use the same ADX source
+        let adx = extractADX(trendData);
+        let adxSlope = extractADXSlope(trendData).slope;
+        let adxRising = extractADXSlope(trendData).isRising;
+        const adxFromTrendData = adx; // Preserve for diagnostic logging
+        const adxSlopeFromTrendData = adxSlope;
         const momentum = trendData.momentum;
         
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
