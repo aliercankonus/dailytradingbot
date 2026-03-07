@@ -8362,6 +8362,7 @@ serve(async (req) => {
                   };
                 }
               }
+              } // close deepExhaustionOverrideApplied else block
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
             else if (distanceFromLow >= effectiveSoftThreshold) {
