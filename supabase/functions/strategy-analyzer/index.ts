@@ -7987,68 +7987,109 @@ serve(async (req) => {
                   (!capConfig.REQUIRE_DIRECTION_ALIGNMENT || derivedDirection === 'short') &&
                   adxSlope >= capConfig.MIN_ADX_SLOPE;
                 
-                if (capSoftShortTriggered && capConfig.SHADOW_MODE) {
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 CAPITULATION_ACCELERATION [SHADOW SHORT SOFT]: Would override SOFT block | acceleration=${momentumAcceleration!.toFixed(1)} (<= -${capConfig.MIN_ACCELERATION_MAGNITUDE}), distance=${distanceFromHigh.toFixed(1)}%, K=${stochRsiK4h.toFixed(0)}, ADX_slope=${adxSlope.toFixed(2)}`);
-                  
-                  try {
-                    await logShadowSignal(supabase, {
-                      userId,
-                      symbol,
-                      signalType: 'short',
-                      strategyName: 'CAPITULATION_ACCELERATION',
-                      gateBlockedBy: 'volume_filter',
-                      oldGateResult: 'blocked',
-                      newGateResult: 'passed',
-                      gateDetails: {
-                        gate: 'CAPITULATION_ACCELERATION',
-                        subZone: 'SOFT',
-                        shadowMode: true,
-                        direction: 'short',
-                        momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
-                        currentScore: momentumAccelerationData?.current,
-                        oldestScore: momentumAccelerationData?.oldest,
-                        historyRecords: momentumAccelerationData?.records,
-                        distanceFromHigh: Number(distanceFromHigh.toFixed(2)),
-                        stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
-                        softZoneThreshold: stochRsiMinForShort,
-                        adx: Number(adx.toFixed(1)),
-                        adxSlope: Number(adxSlope.toFixed(2)),
-                        regime: fourStateRegime.regime,
-                        wouldUsePositionMultiplier: capConfig.POSITION_MULTIPLIER,
-                      },
-                      confidenceScore: undefined,
-                      entryPrice: trendData?.currentPrice,
-                      atr: trendData?.volatility?.atr,
-                      indicators: {
-                        momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
-                        adx: Number(adx.toFixed(1)),
-                        adxSlope: Number(adxSlope.toFixed(2)),
-                        stochRsiK: Number(stochRsiK4h.toFixed(1)),
-                        regime: fourStateRegime.regime,
-                      },
-                    });
-                  } catch (shadowErr) {
-                    logger.forSymbol(symbol).warn(`Shadow log error (CAPITULATION_ACCELERATION SOFT SHORT): ${shadowErr}`);
+                if (capSoftShortTriggered) {
+                  if (capConfig.SHADOW_MODE) {
+                    // SHADOW MODE: Log what WOULD happen but still block
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 CAPITULATION_ACCELERATION [SHADOW SHORT SOFT]: Would override SOFT block | acceleration=${momentumAcceleration!.toFixed(1)} (<= -${capConfig.MIN_ACCELERATION_MAGNITUDE}), distance=${distanceFromHigh.toFixed(1)}%, K=${stochRsiK4h.toFixed(0)}, ADX_slope=${adxSlope.toFixed(2)}`);
+                    
+                    try {
+                      await logShadowSignal(supabase, {
+                        userId,
+                        symbol,
+                        signalType: 'short',
+                        strategyName: 'CAPITULATION_ACCELERATION',
+                        gateBlockedBy: 'volume_filter',
+                        oldGateResult: 'blocked',
+                        newGateResult: 'passed',
+                        gateDetails: {
+                          gate: 'CAPITULATION_ACCELERATION',
+                          subZone: 'SOFT',
+                          shadowMode: true,
+                          direction: 'short',
+                          momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                          currentScore: momentumAccelerationData?.current,
+                          oldestScore: momentumAccelerationData?.oldest,
+                          historyRecords: momentumAccelerationData?.records,
+                          distanceFromHigh: Number(distanceFromHigh.toFixed(2)),
+                          stochRsiK4h: Number(stochRsiK4h.toFixed(1)),
+                          softZoneThreshold: stochRsiMinForShort,
+                          adx: Number(adx.toFixed(1)),
+                          adxSlope: Number(adxSlope.toFixed(2)),
+                          regime: fourStateRegime.regime,
+                          wouldUsePositionMultiplier: capConfig.POSITION_MULTIPLIER,
+                        },
+                        confidenceScore: undefined,
+                        entryPrice: trendData?.currentPrice,
+                        atr: trendData?.volatility?.atr,
+                        indicators: {
+                          momentumAcceleration: Number(momentumAcceleration!.toFixed(1)),
+                          adx: Number(adx.toFixed(1)),
+                          adxSlope: Number(adxSlope.toFixed(2)),
+                          stochRsiK: Number(stochRsiK4h.toFixed(1)),
+                          regime: fourStateRegime.regime,
+                        },
+                      });
+                    } catch (shadowErr) {
+                      logger.forSymbol(symbol).warn(`Shadow log error (CAPITULATION_ACCELERATION SOFT SHORT): ${shadowErr}`);
+                    }
+                    
+                    // Still block in shadow mode
+                    moveExhaustionBlocked = true;
+                    moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold), too late to SHORT [CAPITULATION_SHADOW: accel=${momentumAcceleration!.toFixed(1)}]`;
+                    moveZoneDetails = {
+                      zone: moveZone,
+                      distancePercent: distanceFromHigh,
+                      direction: 'short',
+                      stochRsiK: stochRsiK4h,
+                      adx,
+                      adxSlope,
+                      outcome: 'BLOCKED',
+                      positionMultiplier: 0,
+                      overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold)`,
+                      capitulationAcceleration: momentumAcceleration,
+                      capitulationShadowWouldOverride: true,
+                      relaxationApplied: useRelaxedThresholds,
+                      relaxationCondition
+                    };
+                  } else {
+                    // LIVE MODE: Override the soft block — capitulation acceleration confirms continuation
+                    moveExhaustionSoftGate = true;
+                    moveExhaustionPositionMultiplier = capConfig.POSITION_MULTIPLIER;
+                    moveZoneDetails = {
+                      zone: 'CAPITULATION',
+                      distancePercent: distanceFromHigh,
+                      direction: 'short',
+                      stochRsiK: stochRsiK4h,
+                      adx,
+                      adxSlope,
+                      outcome: 'CAPITULATION_OVERRIDE',
+                      positionMultiplier: moveExhaustionPositionMultiplier,
+                      overrideReason: `Capitulation SOFT: acceleration=${momentumAcceleration!.toFixed(1)} <= -${capConfig.MIN_ACCELERATION_MAGNITUDE}, K=${stochRsiK4h.toFixed(0)}, slope=${adxSlope.toFixed(2)}`,
+                      capitulationAcceleration: momentumAcceleration,
+                      relaxationApplied: useRelaxedThresholds,
+                      relaxationCondition
+                    };
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🌊 CAPITULATION_ACCELERATION [LIVE SHORT SOFT]: Override SOFT block | accel=${momentumAcceleration!.toFixed(1)}, distance=${distanceFromHigh.toFixed(1)}%, K=${stochRsiK4h.toFixed(0)}, size=${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
                   }
+                } else {
+                  moveExhaustionBlocked = true;
+                  moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold), too late to SHORT`;
+                  moveZoneDetails = {
+                    zone: moveZone,
+                    distancePercent: distanceFromHigh,
+                    direction: 'short',
+                    stochRsiK: stochRsiK4h,
+                    adx,
+                    adxSlope,
+                    outcome: 'BLOCKED',
+                    positionMultiplier: 0,
+                    overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold)`,
+                    capitulationAcceleration: momentumAcceleration,
+                    capitulationShadowWouldOverride: false,
+                    relaxationApplied: useRelaxedThresholds,
+                    relaxationCondition
+                  };
                 }
-                
-                moveExhaustionBlocked = true;
-                moveExhaustionReason = `MOVE_EXHAUSTED: Price dropped ${distanceFromHigh.toFixed(1)}% + StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold), too late to SHORT${capSoftShortTriggered ? ' [CAPITULATION_SHADOW: accel=' + momentumAcceleration!.toFixed(1) + ']' : ''}`;
-                moveZoneDetails = {
-                  zone: moveZone,
-                  distancePercent: distanceFromHigh,
-                  direction: 'short',
-                  stochRsiK: stochRsiK4h,
-                  adx,
-                  adxSlope,
-                  outcome: 'BLOCKED',
-                  positionMultiplier: 0,
-                  overrideReason: `StochRSI K=${stochRsiK4h.toFixed(0)} < ${stochRsiMinForShort} (extreme oversold)`,
-                  capitulationAcceleration: momentumAcceleration,
-                  capitulationShadowWouldOverride: capSoftShortTriggered,
-                  relaxationApplied: useRelaxedThresholds,
-                  relaxationCondition
-                };
               } else {
                 // Allow with reduced position - use appropriate sizing based on zone
                 moveExhaustionSoftGate = true;
