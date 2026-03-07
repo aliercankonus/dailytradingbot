@@ -3016,29 +3016,28 @@ serve(async (req) => {
       try {
         const { primaryTrend: trend, confidence, trueAlignment, isAligned, timeframes } = trendData;
         const trendConsistency = trueAlignment?.score || 0;
-        // AUTHORITATIVE ADX SOURCE: trendData (calculated from 1h CLOSED candles in calculate-trend)
-        // DO NOT override with local klines — strategy-analyzer's klines are 15m candles.
-        // ADX(14) on 15m covers ~3.5h vs ADX(14) on 1h covers ~14h — completely different windows.
-        const adx = extractADX(trendData);
-        const adxSlope = extractADXSlope(trendData).slope;
-        const adxRising = extractADXSlope(trendData).isRising;
-        const momentum = trendData.momentum;
         
         // ============= MARKET FEATURE SNAPSHOT (SINGLE EXTRACTION POINT) =============
-        // Build once per symbol — all gates should progressively migrate to reading from this.
-        // NOTE: smartMomentum is injected into trendData later (line ~3105), so snapshot.smartMomentum
+        // Build once per symbol — all gates read from this snapshot.
+        // NOTE: smartMomentum is injected into trendData later, so snapshot.smartMomentum
         // will be undefined at this point. It gets populated after earlySmartMomentum calculation.
         const mfs = buildMarketFeatureSnapshot(symbol, trendData);
         
+        // AUTHORITATIVE ADX SOURCE: Read from snapshot (1h CLOSED candles via calculate-trend)
+        const adx = mfs.adx;
+        const adxSlope = mfs.adxSlope;
+        const adxRising = mfs.adxRising;
+        const momentum = trendData.momentum;
+        
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
-        // Extract weighted components for smarter quality scoring and gate decisions
-        const tf4hConfidence = trueAlignment?.tf4hConfidence ?? 0;
-        const tf1hConfidence = trueAlignment?.tf1hConfidence ?? 0;
-        const adxContribution = trueAlignment?.adxContribution ?? 0;
-        const totalWeightedConfidence = trueAlignment?.totalWeightedConfidence ?? 0;
-        const weightedComponents = trueAlignment?.weightedComponents || {};
-        const neutralCapped = trueAlignment?.neutralCapped === true;
-        const alignmentBreakdown = trueAlignment?.breakdown || {};
+        // Read from snapshot for consistency
+        const tf4hConfidence = mfs.trueAlignment.tf4hConfidence;
+        const tf1hConfidence = mfs.trueAlignment.tf1hConfidence;
+        const adxContribution = mfs.trueAlignment.adxContribution;
+        const totalWeightedConfidence = mfs.trueAlignment.totalWeightedConfidence;
+        const weightedComponents = mfs.trueAlignment.weightedComponents;
+        const neutralCapped = mfs.trueAlignment.neutralCapped;
+        const alignmentBreakdown = mfs.trueAlignment.breakdown;
         
         // Log enhanced alignment data for visibility
         if (Object.keys(weightedComponents).length > 0) {
@@ -3046,16 +3045,10 @@ serve(async (req) => {
         }
         
         // ============= NEUTRAL PERSISTENCE BONUS =============
-        // Extract neutral persistence data for confidence bonuses on stealth/grind entries
-        const neutralPersistence = trendData.neutralPersistence || {
-          isCurrentlyNeutral: false,
-          durationMinutes: 0,
-          confidenceBonus: 0,
-          reason: "No neutral persistence data"
-        };
-        // Derive higher timeframe data from correct paths
-        const htfTrend4h = timeframes?.['4h']?.trend || timeframes?.['4h']?.indicators?.emaSignal || "neutral";
-        const htfTrend1h = timeframes?.['1h']?.trend || timeframes?.['1h']?.indicators?.emaSignal || "neutral";
+        const neutralPersistence = mfs.neutralPersistence;
+        // Derive higher timeframe data from snapshot
+        const htfTrend4h = mfs.timeframes["4h"].trend || mfs.timeframes["4h"].emaSignal || "neutral";
+        const htfTrend1h = mfs.timeframes["1h"].trend || mfs.timeframes["1h"].emaSignal || "neutral";
 
         // ============= EARLY ORDER FLOW ANALYSIS =============
         // Calculate Order Flow data BEFORE rejection gates so it's available for rejection logs
@@ -6339,9 +6332,9 @@ serve(async (req) => {
         // ROOT CAUSE FIX: SHORTs have no equivalent gate to block entries during rallies
         // LONGs are blocked by "MOVE_EXHAUSTED: Price rallied 5%" but SHORTs were missing this
         if (MOVE_EXHAUSTED_REVERSAL_GATE.ENABLED && derivedDirection === 'short') {
-          // CENTRALIZED: Use shared extractors
-          const priceChange4h = extractPriceChange(trendData, '4h');
-          const stochRsiK4h = extractStochRsiK(trendData, '4h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const priceChange4h = mfs.priceChange4h;
+          const stochRsiK4h = mfs.stochRsi["4h"].k;
           
           // Block SHORT if price ROSE significantly in last hours
           if (priceChange4h > MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT) {
@@ -6395,12 +6388,12 @@ serve(async (req) => {
         // ============= CRITICAL: TREND REVERSAL DETECTION GATE =============
         // Detects when indicators show a trend is reversing and blocks entries in OLD direction
         if (TREND_REVERSAL_DETECTION_GATE.ENABLED) {
-          // CENTRALIZED: Use shared extractors for StochRSI K values
-          const stochK = extractStochRsiK(trendData, '4h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const stochK = mfs.stochRsi["4h"].k;
           const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK;
-          const macdHist = trendData.momentum?.macdHistogram ?? 0;
+          const macdHist = mfs.macdHistogram;
           const macdHistPrev = trendData.momentum?.macdHistogramPrevious ?? macdHist;
-          const priceChange4h = trendData.priceChange?.percent4h ?? 0;
+          const priceChange4h = mfs.priceChange4h;
           
           // Detect BULLISH reversal (blocks SHORT)
           const stochCrossingUp = stochKPrev < TREND_REVERSAL_DETECTION_GATE.STOCH_CROSSING_UP_MIN_K && 
@@ -6964,7 +6957,7 @@ serve(async (req) => {
         // Prevents entering at momentum climax candles (15m StochRSI extremes)
         // At K=98.3 with bullish momentum - this is a spike TOP, not early exhaustion
         if (LTF_SPIKE_PROTECTION_GATE.ENABLED) {
-          const stochRsiK15m = extractStochRsiK(trendData, '15m');
+          const stochRsiK15m = mfs.stochRsi["15m"].k;
           const adxSlope = fullAdxResult.adxSlope ?? 0;
           const momentumScore = smartMomentum.score;
           
@@ -7268,10 +7261,10 @@ serve(async (req) => {
         let stochRsiRunwayGateApplied = false;
         
         if (STOCHRSI_RUNWAY_GATE.ENABLED) {
-          const stochRsiK4h = extractStochRsiK(trendData, '4h');
+          const stochRsiK4h = mfs.stochRsi["4h"].k;
           const adxSlope = fullAdxResult.adxSlope ?? 0;
-          const tf1hDir = trendData.timeframes?.['1h']?.direction?.toLowerCase() || 'neutral';
-          const tf30mDir = trendData.timeframes?.['30m']?.direction?.toLowerCase() || 'neutral';
+          const tf1hDir = (mfs.timeframes["1h"].trend || 'neutral').toLowerCase();
+          const tf30mDir = (mfs.timeframes["30m"].trend || 'neutral').toLowerCase();
           const bothLtfNeutral = tf1hDir === 'neutral' && tf30mDir === 'neutral';
           
           // Conditional application: only when ADX slope declining OR both LTF neutral
@@ -7319,10 +7312,9 @@ serve(async (req) => {
           // Prevents shorting after 3% drops at K<15, or longing after 3% rallies at K>85
           const deepExhaustion = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND;
           if (deepExhaustion.ENABLED) {
-            const stochK4hDeep = extractStochRsiK(trendData, '4h');
-            const priceDistForRunway = trendData?.priceDistanceFromSwing;
-            const moveFromHigh = priceDistForRunway?.distanceFromHighPercent ?? 0;
-            const moveFromLow = priceDistForRunway?.distanceFromLowPercent ?? 0;
+            const stochK4hDeep = mfs.stochRsi["4h"].k;
+            const moveFromHigh = mfs.distanceFromHighPercent;
+            const moveFromLow = mfs.distanceFromLowPercent;
             
             // DYNAMIC ENTRY WINDOW: Adaptive K thresholds for deep exhaustion
             const dynamicDeepShortK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.DEEP_EXHAUSTION_SHORT, adx, fullAdxResult.adxSlope ?? 0);
@@ -7443,7 +7435,7 @@ serve(async (req) => {
         if (ADX_GATE.TRANSITION_EXPANSION.ENABLED && shadowModeEnabled) {
           const teConfig = ADX_GATE.TRANSITION_EXPANSION;
           const earlyAdxSlope = fullAdxResult.adxSlope ?? 0;
-          const earlyPriceChange4h = extractPriceChange(trendData, '4h');
+          const earlyPriceChange4h = mfs.priceChange4h;
           const earlyAbsPriceMove = Math.abs(earlyPriceChange4h);
           const earlyMomentumDir = smartMomentum?.direction ?? 'neutral';
           const earlyMomentumAligned = (
@@ -7539,8 +7531,8 @@ serve(async (req) => {
         
         if (MOVE_EXHAUSTION_FILTER_PARAMS.ENABLED) {
           const priceDistance = trendData.priceDistanceFromSwing;
-          // CENTRALIZED: Use shared extractor for StochRSI K
-          const stochRsiK4h = extractStochRsiK(trendData, '4h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const stochRsiK4h = mfs.stochRsi["4h"].k;
           const adxSlope = fullAdxResult.adxSlope ?? 0;
           // FIX: Regime-consistent slope for RISING_TREND_EXCEPTION (Fix #2 slope mismatch)
           // The 4-State regime classifier uses trendData.volatility.adxSlope (e.g., 1.06 for BTC)
@@ -9028,12 +9020,12 @@ serve(async (req) => {
           const prices15m = klines15mForPullback.map((k: any) => parseFloat(k[4])).filter(Number.isFinite);
           
           if (prices15m.length >= 50) {
-            const pullbackCurrentPrice = trendData?.currentPrice || 0;
-            const pullbackATR = trendData?.volatility?.atr ?? 0;
-            const pullbackStochK4h = extractStochRsiK(trendData, '4h');
-            const pullbackStochK1h = extractStochRsiK(trendData, '1h');
-            const pullbackHigh24h = trendData?.priceDistanceFromSwing?.high24h ?? 0;
-            const pullbackLow24h = trendData?.priceDistanceFromSwing?.low24h ?? 0;
+            const pullbackCurrentPrice = mfs.currentPrice;
+            const pullbackATR = mfs.atr;
+            const pullbackStochK4h = mfs.stochRsi["4h"].k;
+            const pullbackStochK1h = mfs.stochRsi["1h"].k;
+            const pullbackHigh24h = mfs.high24h;
+            const pullbackLow24h = mfs.low24h;
             const pullbackDirection = derivedDirection === 'long' ? 'long' as const : 'short' as const;
             
             const graduatedConfig = TREND_CONTINUATION_PULLBACK_REGIME.ADX_SLOPE_GRADUATED;
@@ -10470,8 +10462,8 @@ serve(async (req) => {
           const candleSize = lastCandle ? Math.abs(parseFloat(lastCandle[4]) - parseFloat(lastCandle[1])) : 0;
           const candleSizeATR = currentATR > 0 ? candleSize / currentATR : 0;
           
-          // CENTRALIZED: Use shared extractor for StochRSI K
-          const stochRsiK = extractStochRsiK(trendData, '1h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const stochRsiK = mfs.stochRsi["1h"].k;
           
           continuationModeResult = detectContinuationMode(
             adx,
@@ -10768,9 +10760,9 @@ serve(async (req) => {
           
           if (overrideParams.ENABLED) {
             const adxValue = adx || 0;
-            const momentumState = trendData.momentum?.state || "none";
-            // CENTRALIZED: Use shared extractor for StochRSI K
-            const stoch4h = extractStochRsiK(trendData, '4h');
+            const momentumState = mfs.momentumState || "none";
+            // PHASE 3 MIGRATION: Read from snapshot
+            const stoch4h = mfs.stochRsi["4h"].k;
             const trend1h = trendData.timeframes?.['1h'];
             const trend30m = trendData.timeframes?.['30m'];
             
@@ -10890,10 +10882,10 @@ serve(async (req) => {
         let preRecoveryMRPositionMultiplier = 1.0;
         
         // DIAGNOSTIC: Always log raw MR detection values for debugging
-        // CENTRALIZED: Use shared extractor for StochRSI K
-        const stochK4h = extractStochRsiK(trendData, '4h');
-        const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 
-                      trendData?.rsi?.['4h'] ?? null;
+        // PHASE 3 MIGRATION: Read from snapshot
+        const stochK4h = mfs.stochRsi["4h"].k;
+        const rsi4h = mfs.timeframes["4h"].rsi !== 50 ? mfs.timeframes["4h"].rsi : 
+                      (trendData?.rsi?.['4h'] ?? null);
         logger.forSymbol(symbol).debug(
           `[MEAN_REVERSION] Raw detection: detected=${earlyMeanReversionSignal?.detected ?? 'N/A'}, ` +
           `allowed=${earlyMeanReversionSignal?.allowed ?? 'N/A'}, ` +
@@ -11130,11 +11122,11 @@ serve(async (req) => {
         if (skipStochRSIGate) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ADAPTIVE FULL MODE: Skipping StochRSI gate - adaptive engine will handle extremes`);
         }
-        // CENTRALIZED: Use shared extractors for StochRSI K/D values
-        const stochRsiK4h = extractStochRsiK(trendData, '4h');
-        const stochRsiD4h = extractStochRsiD(trendData, '4h');
-        const stochRsiK1h = extractStochRsiK(trendData, '1h');
-        const stochRsiD1h = extractStochRsiD(trendData, '1h');  // Added for pullback K/D turn detection
+        // PHASE 3 MIGRATION: Read from snapshot
+        const stochRsiK4h = mfs.stochRsi["4h"].k;
+        const stochRsiD4h = mfs.stochRsi["4h"].d;
+        const stochRsiK1h = mfs.stochRsi["1h"].k;
+        const stochRsiD1h = mfs.stochRsi["1h"].d;
         // Keep raw object reference for signal property access (bullish_cross, bearish_cross)
         const stochRsi1h = trendData.stochasticRsi?.["1h"];
         // CRITICAL FIX: Using shared thresholds for consistency across all edge functions
@@ -13877,7 +13869,7 @@ serve(async (req) => {
         let transitionExpansionShadowTriggered = false;
         if (ADX_GATE.TRANSITION_EXPANSION.ENABLED) {
           const teConfig = ADX_GATE.TRANSITION_EXPANSION;
-          const priceChange4hForTE = extractPriceChange(trendData, '4h');
+          const priceChange4hForTE = mfs.priceChange4h;
           const absPriceMove = Math.abs(priceChange4hForTE);
           const momentumDir = smartMomentum?.direction ?? 'neutral';
           const momentumAligned = (
@@ -15049,9 +15041,9 @@ serve(async (req) => {
           const squeezeDirection: "long" | "short" = (momentum?.macdHistogram || 0) > 0 ? "long" : "short";
           
           // StochRSI loading zone check - extended zones for extreme conditions
-          // CENTRALIZED: Use shared extractors for StochRSI K values
-          const stochRsiK1hForSqueeze = extractStochRsiK(trendData, '1h');
-          const stochRsiK4h = extractStochRsiK(trendData, '4h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const stochRsiK1hForSqueeze = mfs.stochRsi["1h"].k;
+          const stochRsiK4h = mfs.stochRsi["4h"].k;
           
           // Standard loading zone check
           const stochRsiInStandardLoadingZone = squeezeDirection === "long"
@@ -15511,7 +15503,7 @@ serve(async (req) => {
           moveFromLowPercent,
           moveFromHighPercent,
           adx,
-          adxSlope: extractADXSlope(trendData).slope,
+          adxSlope: mfs.adxSlope,
           qualityScore: 0, // Will be calculated later, use 0 for initial check
         };
         
