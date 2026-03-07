@@ -7193,28 +7193,56 @@ serve(async (req) => {
                   logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
                 }
               } else {
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
-                
-                rejectionBuffer.add({
-                  user_id: userId,
-                  symbol,
-                  rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
-                  filters_status: {
-                    gate: 'DEEP_EXHAUSTION_COMPOUND',
-                    direction: derivedDirection,
-                    stochK4h: stochK4hDeep,
-                    moveFromHigh,
-                    moveFromLow,
-                    adx,
-                    adxSlope: fullAdxResult.adxSlope ?? 0,
-                    accelerationProbeChecked: deepExhaustion.ACCELERATION_PROBE_ENABLED,
-                    accelerationProbeThresholds: {
-                      minAdx: deepExhaustion.ACCELERATION_PROBE_MIN_ADX,
-                      minSlope: deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE,
+                // ============= RISK SCORE SCALING: Convert hard block to graduated sizing =============
+                // Instead of hard-blocking, accumulate risk score and scale position
+                if (RISK_SCORE_SCALING.ENABLED) {
+                  let riskScore = RISK_SCORE_SCALING.RISK_POINTS.DEEP_EXHAUSTION; // +2
+                  // Apply risk reductions
+                  if (adx >= 35) riskScore += RISK_SCORE_SCALING.RISK_REDUCTIONS.STRONG_TREND_ADX_35; // -1
+                  const htfAlignedForRisk = (derivedDirection === 'long' && htfTrend4h === 'bullish') ||
+                                             (derivedDirection === 'short' && htfTrend4h === 'bearish');
+                  if (htfAlignedForRisk) riskScore += RISK_SCORE_SCALING.RISK_REDUCTIONS.HTF_4H_ALIGNED; // -1
+                  if ((fullAdxResult.adxSlope ?? 0) >= 0.5) riskScore += RISK_SCORE_SCALING.RISK_REDUCTIONS.ADX_SLOPE_POSITIVE; // -1
+                  
+                  const riskMultiplier = riskScoreToMultiplier(riskScore);
+                  
+                  if (riskMultiplier !== null) {
+                    // Allow with reduced position instead of blocking
+                    stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, riskMultiplier);
+                    stochRsiRunwayGateApplied = true;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 RISK_SCORE_SCALING: DEEP_EXHAUSTION converted from block → ${(riskMultiplier * 100).toFixed(0)}% position (riskScore=${riskScore}, ADX=${adx.toFixed(1)}, 4hAligned=${htfAlignedForRisk})`);
+                    if (RISK_SCORE_SCALING.LOG_RISK_SCORES) {
+                      logger.forSymbol(symbol).info(`   → Risk breakdown: base=${RISK_SCORE_SCALING.RISK_POINTS.DEEP_EXHAUSTION}, adx35=${adx >= 35 ? -1 : 0}, htfAligned=${htfAlignedForRisk ? -1 : 0}, slopePositive=${(fullAdxResult.adxSlope ?? 0) >= 0.5 ? -1 : 0} → net=${riskScore}`);
+                    }
+                  } else {
+                    // Risk score too high — still reject
+                    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND RISK_REJECT: riskScore=${riskScore} >= ${RISK_SCORE_SCALING.REJECTION_THRESHOLD} — ${moveStr}, ADX=${adx.toFixed(1)}`);
+                    rejectionBuffer.add({
+                      user_id: userId, symbol,
+                      rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
+                      filters_status: {
+                        gate: 'DEEP_EXHAUSTION_COMPOUND', direction: derivedDirection,
+                        stochK4h: stochK4hDeep, moveFromHigh, moveFromLow, adx,
+                        adxSlope: fullAdxResult.adxSlope ?? 0, riskScore,
+                        riskScalingApplied: true,
+                      },
+                    });
+                    continue;
+                  }
+                } else {
+                  // Legacy hard block (RISK_SCORE_SCALING disabled)
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
+                  rejectionBuffer.add({
+                    user_id: userId, symbol,
+                    rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
+                    filters_status: {
+                      gate: 'DEEP_EXHAUSTION_COMPOUND', direction: derivedDirection,
+                      stochK4h: stochK4hDeep, moveFromHigh, moveFromLow, adx,
+                      adxSlope: fullAdxResult.adxSlope ?? 0,
                     },
-                  },
-                });
-                continue;
+                  });
+                  continue;
+                }
               }
             }
           }
