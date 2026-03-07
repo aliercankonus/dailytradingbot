@@ -3716,14 +3716,18 @@ serve(async (req) => {
                 // Continue processing instead of blocking
               } else if (adx >= 30 && earlyAdxSlope >= 0.5) {
                 // ============= TREND ACCELERATION PROBE =============
-                // When Strong Trend Override fails (usually due to momentum lag),
-                // but ADX > 30 and slope > 0.5 confirms structural trend acceleration,
-                // allow a micro probe instead of hard block.
-                // (was slope >= 0.8 — too restrictive for 4H; typical strong trends show 0.3-0.7 slope)
-                strongTrendTier0OverrideApplied = true;
-                strongTrendTier0PositionMultiplier = 0.25;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔬 TREND ACCELERATION PROBE: SHORT at K=${earlyStochRsiK4h.toFixed(1)} — ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)} confirms acceleration`);
-                logger.forSymbol(symbol).info(`   → Override failed (${overrideCheck.reason}), but structural acceleration allows 25% probe`);
+                // Probe cascade check: max 2 probes per symbol per 6h
+                const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
+                const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
+                if (symbolProbeCount >= maxProbes6h) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
+                  // Fall through to standard block
+                } else {
+                  strongTrendTier0OverrideApplied = true;
+                  strongTrendTier0PositionMultiplier = 0.25;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔬 TREND ACCELERATION PROBE: SHORT at K=${earlyStochRsiK4h.toFixed(1)} — ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)} confirms acceleration`);
+                  logger.forSymbol(symbol).info(`   → Override failed (${overrideCheck.reason}), but structural acceleration allows 25% probe`);
+                }
               } else {
                 // Standard block - no override allowed
                 rejectedByHardGates++;
