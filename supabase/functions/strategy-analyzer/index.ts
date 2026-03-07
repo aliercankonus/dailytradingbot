@@ -7115,11 +7115,18 @@ serve(async (req) => {
                          Math.abs(fullAdxResult.adxSlope ?? 0) >= deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE) {
                 // ============= TREND ACCELERATION MICRO PROBE =============
                 // ADX slope confirms strong trend acceleration despite deep exhaustion.
-                // Allow micro probe instead of hard block.
-                const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
-                stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.ACCELERATION_PROBE_MULTIPLIER);
-                stochRsiRunwayGateApplied = true;
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
+                // Probe cascade check: max 2 probes per symbol per 6h
+                const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
+                const maxProbes6h = deepExhaustion.MAX_PROBES_PER_SYMBOL_6H;
+                if (symbolProbeCount >= maxProbes6h) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
+                  // Fall through to hard block below
+                } else {
+                  const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
+                  stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.ACCELERATION_PROBE_MULTIPLIER);
+                  stochRsiRunwayGateApplied = true;
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
+                }
               } else {
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
                 
