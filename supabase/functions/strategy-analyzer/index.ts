@@ -3103,6 +3103,13 @@ serve(async (req) => {
         adxSlope = earlyAdxSlope;
         adxRising = earlySmartAdxRising;
         
+        // INJECT unified ADX back into trendData so any downstream reads are consistent
+        if (trendData.volatility) {
+          trendData.volatility.adx = adx;
+          trendData.volatility.adxSlope = adxSlope;
+          trendData.volatility.adxRising = adxRising;
+        }
+        
         // Calculate momentum score (-100 to +100) EARLY in pipeline
         // FIX: Pass adxSlope so STRUCTURAL_LAG_OVERRIDE can actually fire
         const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, earlySmartAdxRising, earlyATR, earlyAdxSlope);
