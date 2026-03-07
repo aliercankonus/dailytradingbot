@@ -7114,10 +7114,18 @@ serve(async (req) => {
             : true;
           
           if (shouldApplyRunwayGate) {
-            // Check runway for direction
+            // DYNAMIC ENTRY WINDOW: Adaptive runway thresholds
+            const dynamicRunwayShortK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.RUNWAY_SHORT, adx, adxSlope);
+            const dynamicRunwayLongK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.RUNWAY_LONG, adx, adxSlope);
+            
+            if (DYNAMIC_ENTRY_WINDOW.LOG_ADAPTIVE_THRESHOLDS && (dynamicRunwayShortK !== STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY || dynamicRunwayLongK !== STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 DYNAMIC_ENTRY_WINDOW: Runway thresholds SHORT K>${dynamicRunwayShortK} (was ${STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY}), LONG K<${dynamicRunwayLongK} (was ${STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY})`);
+            }
+            
+            // Check runway for direction using dynamic thresholds
             const limitedRunway = 
-              (derivedDirection === 'short' && stochRsiK4h < STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY) ||
-              (derivedDirection === 'long' && stochRsiK4h > STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY);
+              (derivedDirection === 'short' && stochRsiK4h < dynamicRunwayShortK) ||
+              (derivedDirection === 'long' && stochRsiK4h > dynamicRunwayLongK);
             
             if (limitedRunway) {
               // Exception: Very high ADX can override
