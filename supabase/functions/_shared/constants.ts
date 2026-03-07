@@ -7363,17 +7363,19 @@ export const STOCHRSI_RUNWAY_GATE = {
     LONG_MIN_K: 85,
     LONG_MIN_MOVE_PERCENT: 2.0,
     // Position multiplier if ADX is very high (probe instead of block)
-    // FIX: Lowered from 45 to 40 — STRONG_TREND tier1 (ADX>=40) should get probe, not hard block
-    HIGH_ADX_PROBE_MULTIPLIER: 0.15,
-    HIGH_ADX_PROBE_THRESHOLD: 40,
+    // FIX: Lowered from 40 to 35 — SOL(38.2) and AVAX(34.1) were being hard-blocked
+    // despite strong structural trends. ADX>=35 = confirmed strong trend.
+    HIGH_ADX_PROBE_MULTIPLIER: 0.20,
+    HIGH_ADX_PROBE_THRESHOLD: 35,
     // ===== TREND ACCELERATION MICRO PROBE =====
     // When DEEP_EXHAUSTION triggers but ADX slope indicates strong acceleration,
     // allow a micro probe instead of hard block. This captures trend continuation dips.
-    // Conditions: ADX > 32 AND slope > 0.6 → 0.20x position
-    // (was ADX>35/slope>1.2 — too restrictive; 4H slope rarely exceeds 1.0)
+    // Conditions: ADX > 30 AND slope > 0.3 → 0.20x position
+    // Rationale: 4H ADX slope distribution: 0.2-0.4 very common, 0.4-0.7 strong, 0.8+ rare
+    // Previous 0.6 threshold missed SOL(slope=0.31) which was in BREAKOUT_SETUP
     ACCELERATION_PROBE_ENABLED: true,
-    ACCELERATION_PROBE_MIN_ADX: 32,
-    ACCELERATION_PROBE_MIN_SLOPE: 0.6,
+    ACCELERATION_PROBE_MIN_ADX: 30,
+    ACCELERATION_PROBE_MIN_SLOPE: 0.3,
     ACCELERATION_PROBE_MULTIPLIER: 0.20,
     // ===== PROBE CASCADE PROTECTION =====
     // Prevent multiple probes on the same symbol within a short window

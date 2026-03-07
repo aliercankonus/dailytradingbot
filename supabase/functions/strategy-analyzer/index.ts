@@ -3720,8 +3720,14 @@ serve(async (req) => {
                 const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
                 const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
                 if (symbolProbeCount >= maxProbes6h) {
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
-                  // Fall through to standard block
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to hard block`);
+                  // FIX: Properly reject instead of silently continuing through pipeline
+                  rejectedByHardGates++;
+                  perSymbolGateAttribution.set(symbol, { 
+                    gate: 'EARLY_TIER_0_DEEP_OVERSOLD', 
+                    details: `K=${earlyStochRsiK4h.toFixed(1)} < ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} (probe cascade limit reached)` 
+                  });
+                  continue;
                 } else {
                   strongTrendTier0OverrideApplied = true;
                   strongTrendTier0PositionMultiplier = 0.25;
@@ -5815,7 +5821,25 @@ serve(async (req) => {
               }
             }
             
-            if (!adxExceptionAllowed && !priceActionOverrideAllowed && !htf1hAgreementBypassAllowed) {
+            // ===== EXCEPTION #4: STRUCTURAL ACCELERATION BYPASS =====
+            // When ADX is strong (>=30), slope positive (>=0.3), and 4h trend aligns with direction,
+            // the momentum lag is the most likely explanation for opposing score.
+            // Allow probe entry at 0.30x instead of hard block.
+            let structuralAccelBypassAllowed = false;
+            let structuralAccelPositionMultiplier = 0.30;
+            if (adx >= 30 && (fullAdxResult.adxSlope ?? 0) >= 0.3 && htfAlignedWith4h) {
+              const absMom = Math.abs(smartMomentum.score);
+              // Only bypass moderate opposition (15-40), not extreme (>40)
+              if (absMom >= 15 && absMom <= 40) {
+                structuralAccelBypassAllowed = true;
+                structuralAccelPositionMultiplier = absMom <= 25 ? 0.35 : 0.25;
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ STRUCTURAL_ACCELERATION_BYPASS: ${derivedDirection.toUpperCase()} allowed — ADX=${adx.toFixed(1)}, slope=${(fullAdxResult.adxSlope ?? 0).toFixed(2)}, 4h aligned, momentum=${smartMomentum.score.toFixed(0)} (likely lagging)`);
+                logger.forSymbol(symbol).info(`   → Position reduced to ${(structuralAccelPositionMultiplier * 100).toFixed(0)}%`);
+                (trendData as any).structuralAccelBypassMultiplier = structuralAccelPositionMultiplier;
+              }
+            }
+            
+            if (!adxExceptionAllowed && !priceActionOverrideAllowed && !htf1hAgreementBypassAllowed && !structuralAccelBypassAllowed) {
               // Determine phase for diagnostic transparency
               const absMomentumScore = Math.abs(smartMomentum.score);
               const phase = absMomentumScore > 50 ? 'EXTREME' : absMomentumScore >= 15 ? 'MODERATE' : 'MILD';
@@ -10136,9 +10160,12 @@ serve(async (req) => {
         // When structural trend acceleration is confirmed (strong ADX + positive slope + momentum aligned),
         // ATR overextension is expected behavior, not a "chasing" signal.
         // Bypass OVEREXTENSION block but cap position at probe size.
-        const trendAccelerationConfirmed = adx >= 35 && adxSlope >= 0.5 && 
-          ((derivedDirection === 'short' && smartMomentum.score < -15) || 
-           (derivedDirection === 'long' && smartMomentum.score > 15));
+        // FIX: Relaxed momentum threshold from ±15 to ±10 — momentum lag means
+        // the score is often still partially opposing during trend acceleration.
+        // Also lowered ADX from 35→30 to match DEEP_EXHAUSTION probe consistency.
+        const trendAccelerationConfirmed = adx >= 30 && adxSlope >= 0.3 && 
+          ((derivedDirection === 'short' && smartMomentum.score < -10) || 
+           (derivedDirection === 'long' && smartMomentum.score > 10));
         
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
