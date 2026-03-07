@@ -4588,10 +4588,10 @@ serve(async (req) => {
         let preMomentumDirection: "long" | "short" | null = null;
         let preMomentumPositionMultiplier = 1.0;
         
-        // CENTRALIZED: Use shared extractors for StochRSI K/D values
-        const stochK1h = extractStochRsiK(trendData, '1h');
-        const stochD1h = extractStochRsiD(trendData, '1h');
-        const conf1hForPreMomentum = timeframes?.['1h']?.confidence ?? 50;
+        // PHASE 2 MIGRATION: Read from snapshot
+        const stochK1h = mfs.stochRsi["1h"].k;
+        const stochD1h = mfs.stochRsi["1h"].d;
+        const conf1hForPreMomentum = mfs.timeframes["1h"].confidence;
         
         if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && !orderFlowDirectionOverrideApplied && PRE_MOMENTUM_STOCHRSI_PARAMS.ENABLED) {
           const adxSufficient = adx >= PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_ADX;
@@ -4931,12 +4931,12 @@ serve(async (req) => {
         // ============= 4-STATE REGIME CLASSIFIER GATE =============
         // Forensic audit: 100% of recent losses came from neutral/ranging entries.
         // This gate classifies market into 4 states and hard-blocks RANGE_COMPRESSION.
-        const htf1hTrendForRegime = trendData.timeframes?.['1h']?.trend || htfTrend1h || 'neutral';
-        const htf30mTrendForRegime = trendData.timeframes?.['30m']?.trend || 'neutral';
-        const momentumStateForRegime = trendData?.momentum?.state || 'none';
-        const stochK4hForRegime = extractStochRsiK(trendData, '4h');
-        const primaryTrendForRegime = trendData?.primaryTrend || 'neutral';
-        const isBBSqueeze = trendData?.bollingerBands?.squeezeActive || trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
+        const htf1hTrendForRegime = mfs.timeframes["1h"].trend || htfTrend1h || 'neutral';
+        const htf30mTrendForRegime = mfs.timeframes["30m"].trend || 'neutral';
+        const momentumStateForRegime = mfs.momentumState || 'none';
+        const stochK4hForRegime = mfs.stochRsi["4h"].k;
+        const primaryTrendForRegime = mfs.primaryTrend || 'neutral';
+        const isBBSqueeze = mfs.bollinger.squeezeActive || mfs.bollinger["4h"].squeeze;
         
         // Count aligned timeframes for breakout confirmation
         let alignedTFCount = 0;
