@@ -3201,20 +3201,19 @@ serve(async (req) => {
         // the "MACD Signal Cross" strategy used a different code path. This early gate
         // catches ALL entries regardless of strategy path.
         if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
-          // CENTRALIZED: Use shared extractor for StochRSI K
-          const earlyStochRsiK4h = extractStochRsiK(trendData, '4h');
+          // PHASE 2 MIGRATION: Read from MarketFeatureSnapshot instead of individual extractors
+          const earlyStochRsiK4h = mfs.stochRsi["4h"].k;
           const earlyDirection = directionResult.direction;  // May be null if no clear direction yet
           
           // Only check if we have an early direction - otherwise let downstream gates handle it
           if (earlyDirection) {
             // ===== STRONG TREND OVERRIDE PREPARATION =====
-            // Extract values needed to check if Strong Trend Override applies
-            const earlyAdxSlope = trendData?.volatility?.adxSlope ?? 0;
-            // FIX: Read from correct path - smartMomentum is injected at top-level trendData, not under .momentum
-            const earlyMomentumScore = trendData.smartMomentum?.score ?? trendData?.momentum?.smartMomentum?.score ?? 0;
-            const earlyMomentumDirection = trendData.smartMomentum?.direction ?? trendData?.momentum?.smartMomentum?.direction ?? 'neutral';
-            const early1hTrend = timeframes?.['1h']?.trend ?? 'neutral';
-            const early1hConfidence = timeframes?.['1h']?.confidence ?? 0;
+            // Read from snapshot instead of raw trendData paths
+            const earlyAdxSlope = mfs.adxSlope;
+            const earlyMomentumScore = mfs.smartMomentum?.score ?? 0;
+            const earlyMomentumDirection = mfs.smartMomentum?.direction ?? 'neutral';
+            const early1hTrend = mfs.timeframes["1h"].trend;
+            const early1hConfidence = mfs.timeframes["1h"].confidence;
             
             // Helper: Check if Strong Trend Override conditions are met
             const checkStrongTrendOverride = (direction: 'long' | 'short'): { allowed: boolean; reason: string } => {
