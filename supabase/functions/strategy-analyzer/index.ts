@@ -5454,6 +5454,7 @@ serve(async (req) => {
                 shadowIgnitionEligible: shadowIgnitionDiag || false,
               }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
+              } // end compressionMicroOverride else (standard block)
             }
           } else {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 RANGE_COMPRESSION: Would block but MR bypass allowed (stochK=${stochK.toFixed(1)} at extreme)`);
