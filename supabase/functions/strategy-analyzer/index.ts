@@ -3337,8 +3337,8 @@ serve(async (req) => {
               let phase2Diagnostics: Record<string, unknown> = {};
               if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
                 const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
-                const stochK4h = earlyStochRsiK4h;
-                const stochK1h = extractStochRsiK(trendData, '1h');
+                const flashStochK4h = earlyStochRsiK4h;
+                const flashStochK1h = extractStochRsiK(trendData, '1h');
                 
                 // ===== PHASE 1: STATIC EXHAUSTION (K currently pinned) =====
                 phase1Triggered = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
