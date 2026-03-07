@@ -3382,9 +3382,9 @@ serve(async (req) => {
               let recentMinK = earlyStochRsiK4h;
               let phase2Diagnostics: Record<string, unknown> = {};
               if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
-                const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
+                const priceDropPercent = mfs.distanceFromHighPercent;
                 const flashStochK4h = earlyStochRsiK4h;
-                const flashStochK1h = extractStochRsiK(trendData, '1h');
+                const flashStochK1h = mfs.stochRsi["1h"].k;
                 
                 // ===== PHASE 1: STATIC EXHAUSTION (K currently pinned) =====
                 phase1Triggered = flashStochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
@@ -3831,7 +3831,7 @@ serve(async (req) => {
                     direction: "short",
                     earlyDirection,
                     stochRsiK4h: earlyStochRsiK4h.toFixed(1),
-                    stochRsiK1h: extractStochRsiK(trendData, '1h').toFixed(1),
+                    stochRsiK1h: mfs.stochRsi["1h"].k.toFixed(1),
                     threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
                     adx: adx.toFixed(1),
                     adxSlope: earlyAdxSlope.toFixed(2),
@@ -3907,9 +3907,8 @@ serve(async (req) => {
             // to prevent borderline K=97.6 from blocking confirmed rallies
             const earlyRallyAlignedCount = (() => {
               let count = 0;
-              const tfTrends = trendData.timeframes || {};
-              for (const tf of ['15m', '30m', '1h', '4h']) {
-                const tfTrend = tfTrends[tf]?.trend;
+              for (const tf of ['15m', '30m', '1h', '4h'] as const) {
+                const tfTrend = mfs.timeframes[tf].trend;
                 if ((earlyDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
                     (earlyDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
                   count++;
@@ -3936,7 +3935,7 @@ serve(async (req) => {
                 if (earlyRallyAlignedCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${earlyRallyAlignedCount} aligned TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
                 
                 // Weighted StochRSI: 70% 4H + 30% 1H to resolve cross-TF divergence
-                const stochRsiK1h = trendData?.stochasticRsi?.['1h']?.k ?? earlyStochRsiK4h;
+                const stochRsiK1h = mfs.stochRsi["1h"].k;
                 const effectiveK = (earlyStochRsiK4h * (TEE.WEIGHT_4H_STOCHRSI ?? 0.70)) + 
                                    (stochRsiK1h * (TEE.WEIGHT_1H_STOCHRSI ?? 0.30));
                 
