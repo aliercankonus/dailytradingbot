@@ -3201,20 +3201,19 @@ serve(async (req) => {
         // the "MACD Signal Cross" strategy used a different code path. This early gate
         // catches ALL entries regardless of strategy path.
         if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
-          // CENTRALIZED: Use shared extractor for StochRSI K
-          const earlyStochRsiK4h = extractStochRsiK(trendData, '4h');
+          // PHASE 2 MIGRATION: Read from MarketFeatureSnapshot instead of individual extractors
+          const earlyStochRsiK4h = mfs.stochRsi["4h"].k;
           const earlyDirection = directionResult.direction;  // May be null if no clear direction yet
           
           // Only check if we have an early direction - otherwise let downstream gates handle it
           if (earlyDirection) {
             // ===== STRONG TREND OVERRIDE PREPARATION =====
-            // Extract values needed to check if Strong Trend Override applies
-            const earlyAdxSlope = trendData?.volatility?.adxSlope ?? 0;
-            // FIX: Read from correct path - smartMomentum is injected at top-level trendData, not under .momentum
-            const earlyMomentumScore = trendData.smartMomentum?.score ?? trendData?.momentum?.smartMomentum?.score ?? 0;
-            const earlyMomentumDirection = trendData.smartMomentum?.direction ?? trendData?.momentum?.smartMomentum?.direction ?? 'neutral';
-            const early1hTrend = timeframes?.['1h']?.trend ?? 'neutral';
-            const early1hConfidence = timeframes?.['1h']?.confidence ?? 0;
+            // Read from snapshot instead of raw trendData paths
+            const earlyAdxSlope = mfs.adxSlope;
+            const earlyMomentumScore = mfs.smartMomentum?.score ?? 0;
+            const earlyMomentumDirection = mfs.smartMomentum?.direction ?? 'neutral';
+            const early1hTrend = mfs.timeframes["1h"].trend;
+            const early1hConfidence = mfs.timeframes["1h"].confidence;
             
             // Helper: Check if Strong Trend Override conditions are met
             const checkStrongTrendOverride = (direction: 'long' | 'short'): { allowed: boolean; reason: string } => {
@@ -3383,9 +3382,9 @@ serve(async (req) => {
               let recentMinK = earlyStochRsiK4h;
               let phase2Diagnostics: Record<string, unknown> = {};
               if (!capitulationProbeTriggered && FLASH_CRASH_BOUNCE_PROBE.ENABLED) {
-                const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
+                const priceDropPercent = mfs.distanceFromHighPercent;
                 const flashStochK4h = earlyStochRsiK4h;
-                const flashStochK1h = extractStochRsiK(trendData, '1h');
+                const flashStochK1h = mfs.stochRsi["1h"].k;
                 
                 // ===== PHASE 1: STATIC EXHAUSTION (K currently pinned) =====
                 phase1Triggered = flashStochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
@@ -3760,7 +3759,7 @@ serve(async (req) => {
                 if (bearishCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${bearishCount} bearish TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
                 
                 // Weighted StochRSI: 70% 4H + 30% 1H (symmetric with LONG side)
-                const stochRsiK1h = trendData?.stochasticRsi?.['1h']?.k ?? earlyStochRsiK4h;
+                const stochRsiK1h = mfs.stochRsi["1h"].k;
                 const effectiveK = (earlyStochRsiK4h * (TEE.WEIGHT_4H_STOCHRSI ?? 0.70)) + 
                                    (stochRsiK1h * (TEE.WEIGHT_1H_STOCHRSI ?? 0.30));
                 
@@ -3832,7 +3831,7 @@ serve(async (req) => {
                     direction: "short",
                     earlyDirection,
                     stochRsiK4h: earlyStochRsiK4h.toFixed(1),
-                    stochRsiK1h: extractStochRsiK(trendData, '1h').toFixed(1),
+                    stochRsiK1h: mfs.stochRsi["1h"].k.toFixed(1),
                     threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
                     adx: adx.toFixed(1),
                     adxSlope: earlyAdxSlope.toFixed(2),
@@ -3908,9 +3907,8 @@ serve(async (req) => {
             // to prevent borderline K=97.6 from blocking confirmed rallies
             const earlyRallyAlignedCount = (() => {
               let count = 0;
-              const tfTrends = trendData.timeframes || {};
-              for (const tf of ['15m', '30m', '1h', '4h']) {
-                const tfTrend = tfTrends[tf]?.trend;
+              for (const tf of ['15m', '30m', '1h', '4h'] as const) {
+                const tfTrend = mfs.timeframes[tf].trend;
                 if ((earlyDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
                     (earlyDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
                   count++;
@@ -3937,7 +3935,7 @@ serve(async (req) => {
                 if (earlyRallyAlignedCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${earlyRallyAlignedCount} aligned TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
                 
                 // Weighted StochRSI: 70% 4H + 30% 1H to resolve cross-TF divergence
-                const stochRsiK1h = trendData?.stochasticRsi?.['1h']?.k ?? earlyStochRsiK4h;
+                const stochRsiK1h = mfs.stochRsi["1h"].k;
                 const effectiveK = (earlyStochRsiK4h * (TEE.WEIGHT_4H_STOCHRSI ?? 0.70)) + 
                                    (stochRsiK1h * (TEE.WEIGHT_1H_STOCHRSI ?? 0.30));
                 
@@ -4093,14 +4091,12 @@ serve(async (req) => {
         let forcedDirectionOverride: { direction: 'long' | 'short'; regime: string; reason: string } | null = null;
         
         if (CAPITULATION_BOUNCE_PROBE.ENABLED) {
-          // Extract required data using centralized extractors
-          const stochK4h = extractStochRsiK(trendData, '4h');
-          const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
-          const momentumScoreRaw = trendData?.smartMomentum?.score ?? trendData?.smart_momentum?.normalized_score ?? 0;
-          const adxValue = extractADX(trendData);
-          // ADX slope - extractADXSlope returns an object, get the value
-          const adxSlopeResult = extractADXSlope(trendData);
-          const adxSlopeValue = typeof adxSlopeResult === 'number' ? adxSlopeResult : (adxSlopeResult?.slope ?? trendData?.volatility?.adxSlope ?? 0);
+          // PHASE 2 MIGRATION: Read from MarketFeatureSnapshot
+          const stochK4h = mfs.stochRsi["4h"].k;
+          const priceDropPercent = mfs.distanceFromHighPercent;
+          const momentumScoreRaw = mfs.smartMomentum?.score ?? 0;
+          const adxValue = mfs.adx;
+          const adxSlopeValue = mfs.adxSlope;
           
           // Check all required conditions
           const stochAtExtreme = stochK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K;
@@ -4374,12 +4370,12 @@ serve(async (req) => {
         let lateGrindDirection: "long" | "short" | null = null;
         
         if (LATE_GRIND_ACCEPTANCE_PARAMS.ENABLED && !directionResult.direction) {
-          const stealthTrend = trendData.stealthTrend || { detected: false, driftPercent: 0, direction: "neutral", stealthScore: 0 };
-          const stealthDrift = Math.abs(stealthTrend.driftPercent || 0);
+          const stealthTrend = mfs.stealthTrend;
+          const stealthDrift = Math.abs(stealthTrend.driftPercent);
           const driftDirection = stealthTrend.direction;
-          const adxSlope = trendData.volatility?.adxSlope ?? 0;
-          const stochK4h = extractStochRsiK(trendData, '4h');
-          const htf4hConfidence = timeframes?.['4h']?.confidence ?? 0;
+          const adxSlope = mfs.adxSlope;
+          const stochK4h = mfs.stochRsi["4h"].k;
+          const htf4hConfidence = mfs.timeframes["4h"].confidence;
           
           // Check if sufficient drift has occurred
           // Apply neutral persistence bonus to relax Late Grind thresholds
@@ -4592,10 +4588,10 @@ serve(async (req) => {
         let preMomentumDirection: "long" | "short" | null = null;
         let preMomentumPositionMultiplier = 1.0;
         
-        // CENTRALIZED: Use shared extractors for StochRSI K/D values
-        const stochK1h = extractStochRsiK(trendData, '1h');
-        const stochD1h = extractStochRsiD(trendData, '1h');
-        const conf1hForPreMomentum = timeframes?.['1h']?.confidence ?? 50;
+        // PHASE 2 MIGRATION: Read from snapshot
+        const stochK1h = mfs.stochRsi["1h"].k;
+        const stochD1h = mfs.stochRsi["1h"].d;
+        const conf1hForPreMomentum = mfs.timeframes["1h"].confidence;
         
         if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && !orderFlowDirectionOverrideApplied && PRE_MOMENTUM_STOCHRSI_PARAMS.ENABLED) {
           const adxSufficient = adx >= PRE_MOMENTUM_STOCHRSI_PARAMS.MIN_ADX;
@@ -4935,29 +4931,28 @@ serve(async (req) => {
         // ============= 4-STATE REGIME CLASSIFIER GATE =============
         // Forensic audit: 100% of recent losses came from neutral/ranging entries.
         // This gate classifies market into 4 states and hard-blocks RANGE_COMPRESSION.
-        const htf1hTrendForRegime = trendData.timeframes?.['1h']?.trend || htfTrend1h || 'neutral';
-        const htf30mTrendForRegime = trendData.timeframes?.['30m']?.trend || 'neutral';
-        const momentumStateForRegime = trendData?.momentum?.state || 'none';
-        const stochK4hForRegime = extractStochRsiK(trendData, '4h');
-        const primaryTrendForRegime = trendData?.primaryTrend || 'neutral';
-        const isBBSqueeze = trendData?.bollingerBands?.squeezeActive || trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
+        const htf1hTrendForRegime = mfs.timeframes["1h"].trend || htfTrend1h || 'neutral';
+        const htf30mTrendForRegime = mfs.timeframes["30m"].trend || 'neutral';
+        const momentumStateForRegime = mfs.momentumState || 'none';
+        const stochK4hForRegime = mfs.stochRsi["4h"].k;
+        const primaryTrendForRegime = mfs.primaryTrend || 'neutral';
+        const isBBSqueeze = mfs.bollinger.squeezeActive || mfs.bollinger["4h"].squeeze;
         
-        // Count aligned timeframes for breakout confirmation
+        // Count aligned timeframes for breakout confirmation (from snapshot)
         let alignedTFCount = 0;
-        const tfTrends = trendData.timeframes || {};
-        for (const tf of ['15m', '30m', '1h', '4h']) {
-          const tfTrend = tfTrends[tf]?.trend;
+        for (const tf of ['15m', '30m', '1h', '4h'] as const) {
+          const tfTrend = mfs.timeframes[tf].trend;
           if ((derivedDirection === 'long' && tfTrend === 'bullish') || 
               (derivedDirection === 'short' && tfTrend === 'bearish')) {
             alignedTFCount++;
           }
         }
         
-        // Extract DI separation for transition buffer confidence scoring
-        const diPlus = trendData?.volatility?.diPlus ?? 0;
-        const diMinus = trendData?.volatility?.diMinus ?? 0;
-        const diSeparation = Math.abs(diPlus - diMinus);
-        const relativeATR = trendData?.volatility?.relativeATR ?? 1.0;
+        // DI separation and relative ATR from snapshot
+        const diPlus = mfs.diPlus;
+        const diMinus = mfs.diMinus;
+        const diSeparation = mfs.diSeparation;
+        const relativeATR = mfs.relativeATR;
         
         const fourStateRegime = classify4StateRegime(
           adx,
@@ -5044,8 +5039,8 @@ serve(async (req) => {
           const diagMomState = earlySmartMomentum?.direction || 'unknown';
           const diagMomScore = earlySmartMomentum?.score ?? 0;
           const diagDirConf = directionResult?.confidence ?? 0;
-          const diagStochK1h = extractStochRsiK(trendData, '1h')?.toFixed(1) ?? '?';
-          const diagStochK4h = stochK4hForRegime?.toFixed(1) ?? '?';
+          const diagStochK1h = mfs.stochRsi["1h"].k.toFixed(1);
+          const diagStochK4h = mfs.stochRsi["4h"].k.toFixed(1);
           const diagRegimeAge = regimeAgeBySymbol.get(symbol) || 0;
           const diagPersisted = persistenceResult.reason.includes('PERSISTED') ? 'YES' : 'NO';
           
