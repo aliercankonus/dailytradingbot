@@ -10469,8 +10469,8 @@ serve(async (req) => {
           const candleSize = lastCandle ? Math.abs(parseFloat(lastCandle[4]) - parseFloat(lastCandle[1])) : 0;
           const candleSizeATR = currentATR > 0 ? candleSize / currentATR : 0;
           
-          // CENTRALIZED: Use shared extractor for StochRSI K
-          const stochRsiK = extractStochRsiK(trendData, '1h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const stochRsiK = mfs.stochRsi["1h"].k;
           
           continuationModeResult = detectContinuationMode(
             adx,
@@ -10767,9 +10767,9 @@ serve(async (req) => {
           
           if (overrideParams.ENABLED) {
             const adxValue = adx || 0;
-            const momentumState = trendData.momentum?.state || "none";
-            // CENTRALIZED: Use shared extractor for StochRSI K
-            const stoch4h = extractStochRsiK(trendData, '4h');
+            const momentumState = mfs.momentumState || "none";
+            // PHASE 3 MIGRATION: Read from snapshot
+            const stoch4h = mfs.stochRsi["4h"].k;
             const trend1h = trendData.timeframes?.['1h'];
             const trend30m = trendData.timeframes?.['30m'];
             
@@ -10889,10 +10889,10 @@ serve(async (req) => {
         let preRecoveryMRPositionMultiplier = 1.0;
         
         // DIAGNOSTIC: Always log raw MR detection values for debugging
-        // CENTRALIZED: Use shared extractor for StochRSI K
-        const stochK4h = extractStochRsiK(trendData, '4h');
-        const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 
-                      trendData?.rsi?.['4h'] ?? null;
+        // PHASE 3 MIGRATION: Read from snapshot
+        const stochK4h = mfs.stochRsi["4h"].k;
+        const rsi4h = mfs.timeframes["4h"].rsi !== 50 ? mfs.timeframes["4h"].rsi : 
+                      (trendData?.rsi?.['4h'] ?? null);
         logger.forSymbol(symbol).debug(
           `[MEAN_REVERSION] Raw detection: detected=${earlyMeanReversionSignal?.detected ?? 'N/A'}, ` +
           `allowed=${earlyMeanReversionSignal?.allowed ?? 'N/A'}, ` +
@@ -11129,11 +11129,11 @@ serve(async (req) => {
         if (skipStochRSIGate) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ADAPTIVE FULL MODE: Skipping StochRSI gate - adaptive engine will handle extremes`);
         }
-        // CENTRALIZED: Use shared extractors for StochRSI K/D values
-        const stochRsiK4h = extractStochRsiK(trendData, '4h');
-        const stochRsiD4h = extractStochRsiD(trendData, '4h');
-        const stochRsiK1h = extractStochRsiK(trendData, '1h');
-        const stochRsiD1h = extractStochRsiD(trendData, '1h');  // Added for pullback K/D turn detection
+        // PHASE 3 MIGRATION: Read from snapshot
+        const stochRsiK4h = mfs.stochRsi["4h"].k;
+        const stochRsiD4h = mfs.stochRsi["4h"].d;
+        const stochRsiK1h = mfs.stochRsi["1h"].k;
+        const stochRsiD1h = mfs.stochRsi["1h"].d;
         // Keep raw object reference for signal property access (bullish_cross, bearish_cross)
         const stochRsi1h = trendData.stochasticRsi?.["1h"];
         // CRITICAL FIX: Using shared thresholds for consistency across all edge functions
@@ -13876,7 +13876,7 @@ serve(async (req) => {
         let transitionExpansionShadowTriggered = false;
         if (ADX_GATE.TRANSITION_EXPANSION.ENABLED) {
           const teConfig = ADX_GATE.TRANSITION_EXPANSION;
-          const priceChange4hForTE = extractPriceChange(trendData, '4h');
+          const priceChange4hForTE = mfs.priceChange4h;
           const absPriceMove = Math.abs(priceChange4hForTE);
           const momentumDir = smartMomentum?.direction ?? 'neutral';
           const momentumAligned = (
@@ -15048,9 +15048,9 @@ serve(async (req) => {
           const squeezeDirection: "long" | "short" = (momentum?.macdHistogram || 0) > 0 ? "long" : "short";
           
           // StochRSI loading zone check - extended zones for extreme conditions
-          // CENTRALIZED: Use shared extractors for StochRSI K values
-          const stochRsiK1hForSqueeze = extractStochRsiK(trendData, '1h');
-          const stochRsiK4h = extractStochRsiK(trendData, '4h');
+          // PHASE 3 MIGRATION: Read from snapshot
+          const stochRsiK1hForSqueeze = mfs.stochRsi["1h"].k;
+          const stochRsiK4h = mfs.stochRsi["4h"].k;
           
           // Standard loading zone check
           const stochRsiInStandardLoadingZone = squeezeDirection === "long"
@@ -15510,7 +15510,7 @@ serve(async (req) => {
           moveFromLowPercent,
           moveFromHighPercent,
           adx,
-          adxSlope: extractADXSlope(trendData).slope,
+          adxSlope: mfs.adxSlope,
           qualityScore: 0, // Will be calculated later, use 0 for initial check
         };
         
