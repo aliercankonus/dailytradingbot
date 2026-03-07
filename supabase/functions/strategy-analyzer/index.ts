@@ -18312,28 +18312,6 @@ serve(async (req) => {
         // Log unified risk calculation
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 💰 UNIFIED RISK: Profile=${riskProfile}, Position=${strategyPositionSize.toFixed(2)}% (base ${basePositionSize}%), SL=${stopLossPercent.toFixed(2)}% (base ${baseStopLoss}%), TP=${takeProfitPercent.toFixed(2)}% (${baseTpMultiplier}x)`);
 
-    // ============= DYNAMIC ENTRY WINDOW HELPER =============
-    // Returns adaptive StochRSI K threshold based on ADX slope
-    function getDynamicThreshold(
-      config: { DEFAULT_K: number; STRONG_TREND_K: number; MODERATE_TREND_K: number; STRONG_SLOPE: number; MODERATE_SLOPE: number; MIN_ADX: number },
-      currentAdx: number,
-      currentAdxSlope: number
-    ): number {
-      if (!DYNAMIC_ENTRY_WINDOW.ENABLED || currentAdx < config.MIN_ADX) return config.DEFAULT_K;
-      if (currentAdxSlope >= config.STRONG_SLOPE) return config.STRONG_TREND_K;
-      if (currentAdxSlope >= config.MODERATE_SLOPE) return config.MODERATE_TREND_K;
-      return config.DEFAULT_K;
-    }
-
-    // ============= RISK SCORE HELPER =============
-    // Maps cumulative risk score to position multiplier (null = reject)
-    function riskScoreToMultiplier(score: number): number | null {
-      if (!RISK_SCORE_SCALING.ENABLED) return null;
-      if (score >= RISK_SCORE_SCALING.REJECTION_THRESHOLD) return null;
-      const clampedScore = Math.max(0, Math.min(score, 3));
-      return RISK_SCORE_SCALING.SCORE_MULTIPLIER_MAP[clampedScore] ?? 0.35;
-    }
-
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
