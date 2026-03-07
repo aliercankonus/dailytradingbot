@@ -182,7 +182,10 @@ import {
   // NEW: Multi-TF Rally Override for fixing SHORT bias
   RALLY_OVERRIDE,
   // NEW: Trend Expansion StochRSI Exemption
-  TREND_EXPANSION_EXEMPTION
+  TREND_EXPANSION_EXEMPTION,
+  // NEW: Risk Score Position Scaling & Dynamic Entry Window
+  RISK_SCORE_SCALING,
+  DYNAMIC_ENTRY_WINDOW
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -2135,6 +2138,28 @@ serve(async (req) => {
       }
     }
 
+    // ============= DYNAMIC ENTRY WINDOW HELPER =============
+    // Returns adaptive StochRSI K threshold based on ADX slope
+    function getDynamicThreshold(
+      config: { DEFAULT_K: number; STRONG_TREND_K: number; MODERATE_TREND_K: number; STRONG_SLOPE: number; MODERATE_SLOPE: number; MIN_ADX: number },
+      currentAdx: number,
+      currentAdxSlope: number
+    ): number {
+      if (!DYNAMIC_ENTRY_WINDOW.ENABLED || currentAdx < config.MIN_ADX) return config.DEFAULT_K;
+      if (currentAdxSlope >= config.STRONG_SLOPE) return config.STRONG_TREND_K;
+      if (currentAdxSlope >= config.MODERATE_SLOPE) return config.MODERATE_TREND_K;
+      return config.DEFAULT_K;
+    }
+
+    // ============= RISK SCORE HELPER =============
+    // Maps cumulative risk score to position multiplier (null = reject)
+    function riskScoreToMultiplier(score: number): number | null {
+      if (!RISK_SCORE_SCALING.ENABLED) return null;
+      if (score >= RISK_SCORE_SCALING.REJECTION_THRESHOLD) return null;
+      const clampedScore = Math.max(0, Math.min(score, 3));
+      return RISK_SCORE_SCALING.SCORE_MULTIPLIER_MAP[clampedScore] ?? 0.35;
+    }
+
     const openTradesPerSymbol = new Map<string, number>();
     activePositions?.forEach((p) => {
       openTradesPerSymbol.set(p.symbol, (openTradesPerSymbol.get(p.symbol) || 0) + 1);
@@ -3191,7 +3216,12 @@ serve(async (req) => {
             // EXCEPTION 1: Mean reversion strategies targeting bounce (LONG) are allowed at K < 5
             // EXCEPTION 2: Strong Trend Override allows SHORT if ADX>40 and momentum confirms
             // EXCEPTION 3: Capitulation Bounce Probe - flip to LONG if probe conditions met
-            if (earlyDirection === 'short' && earlyStochRsiK4h < DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+            // DYNAMIC ENTRY WINDOW: Adaptive threshold based on ADX slope
+            const dynamicOversoldK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.TIER_0_OVERSOLD, adx, earlyAdxSlope);
+            if (DYNAMIC_ENTRY_WINDOW.ENABLED && dynamicOversoldK !== DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 DYNAMIC_ENTRY_WINDOW: Tier 0 oversold threshold ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} → ${dynamicOversoldK} (ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)})`);
+            }
+            if (earlyDirection === 'short' && earlyStochRsiK4h < dynamicOversoldK) {
               const overrideCheck = checkStrongTrendOverride('short');
               
               // ===== CAPITULATION BOUNCE PROBE CHECK (before blocking) =====
@@ -7084,10 +7114,18 @@ serve(async (req) => {
             : true;
           
           if (shouldApplyRunwayGate) {
-            // Check runway for direction
+            // DYNAMIC ENTRY WINDOW: Adaptive runway thresholds
+            const dynamicRunwayShortK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.RUNWAY_SHORT, adx, adxSlope);
+            const dynamicRunwayLongK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.RUNWAY_LONG, adx, adxSlope);
+            
+            if (DYNAMIC_ENTRY_WINDOW.LOG_ADAPTIVE_THRESHOLDS && (dynamicRunwayShortK !== STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY || dynamicRunwayLongK !== STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 DYNAMIC_ENTRY_WINDOW: Runway thresholds SHORT K>${dynamicRunwayShortK} (was ${STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY}), LONG K<${dynamicRunwayLongK} (was ${STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY})`);
+            }
+            
+            // Check runway for direction using dynamic thresholds
             const limitedRunway = 
-              (derivedDirection === 'short' && stochRsiK4h < STOCHRSI_RUNWAY_GATE.SHORT_MIN_STOCHRSI_FOR_RUNWAY) ||
-              (derivedDirection === 'long' && stochRsiK4h > STOCHRSI_RUNWAY_GATE.LONG_MAX_STOCHRSI_FOR_RUNWAY);
+              (derivedDirection === 'short' && stochRsiK4h < dynamicRunwayShortK) ||
+              (derivedDirection === 'long' && stochRsiK4h > dynamicRunwayLongK);
             
             if (limitedRunway) {
               // Exception: Very high ADX can override
@@ -7120,10 +7158,18 @@ serve(async (req) => {
             const moveFromHigh = priceDistForRunway?.distanceFromHighPercent ?? 0;
             const moveFromLow = priceDistForRunway?.distanceFromLowPercent ?? 0;
             
+            // DYNAMIC ENTRY WINDOW: Adaptive K thresholds for deep exhaustion
+            const dynamicDeepShortK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.DEEP_EXHAUSTION_SHORT, adx, fullAdxResult.adxSlope ?? 0);
+            const dynamicDeepLongK = getDynamicThreshold(DYNAMIC_ENTRY_WINDOW.DEEP_EXHAUSTION_LONG, adx, fullAdxResult.adxSlope ?? 0);
+            
             const shortDeepExhausted = derivedDirection === 'short' && 
-              stochK4hDeep < deepExhaustion.SHORT_MAX_K && moveFromHigh > deepExhaustion.SHORT_MIN_MOVE_PERCENT;
+              stochK4hDeep < dynamicDeepShortK && moveFromHigh > deepExhaustion.SHORT_MIN_MOVE_PERCENT;
             const longDeepExhausted = derivedDirection === 'long' && 
-              stochK4hDeep > deepExhaustion.LONG_MIN_K && moveFromLow > deepExhaustion.LONG_MIN_MOVE_PERCENT;
+              stochK4hDeep > dynamicDeepLongK && moveFromLow > deepExhaustion.LONG_MIN_MOVE_PERCENT;
+            
+            if (DYNAMIC_ENTRY_WINDOW.LOG_ADAPTIVE_THRESHOLDS && (dynamicDeepShortK !== deepExhaustion.SHORT_MAX_K || dynamicDeepLongK !== deepExhaustion.LONG_MIN_K)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 DYNAMIC_ENTRY_WINDOW: Deep exhaustion thresholds SHORT K<${dynamicDeepShortK} (was ${deepExhaustion.SHORT_MAX_K}), LONG K>${dynamicDeepLongK} (was ${deepExhaustion.LONG_MIN_K})`);
+            }
             
             if (shortDeepExhausted || longDeepExhausted) {
               const moveStr = shortDeepExhausted 
@@ -7155,28 +7201,56 @@ serve(async (req) => {
                   logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
                 }
               } else {
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
-                
-                rejectionBuffer.add({
-                  user_id: userId,
-                  symbol,
-                  rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
-                  filters_status: {
-                    gate: 'DEEP_EXHAUSTION_COMPOUND',
-                    direction: derivedDirection,
-                    stochK4h: stochK4hDeep,
-                    moveFromHigh,
-                    moveFromLow,
-                    adx,
-                    adxSlope: fullAdxResult.adxSlope ?? 0,
-                    accelerationProbeChecked: deepExhaustion.ACCELERATION_PROBE_ENABLED,
-                    accelerationProbeThresholds: {
-                      minAdx: deepExhaustion.ACCELERATION_PROBE_MIN_ADX,
-                      minSlope: deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE,
+                // ============= RISK SCORE SCALING: Convert hard block to graduated sizing =============
+                // Instead of hard-blocking, accumulate risk score and scale position
+                if (RISK_SCORE_SCALING.ENABLED) {
+                  let riskScore = RISK_SCORE_SCALING.RISK_POINTS.DEEP_EXHAUSTION; // +2
+                  // Apply risk reductions
+                  if (adx >= 35) riskScore += RISK_SCORE_SCALING.RISK_REDUCTIONS.STRONG_TREND_ADX_35; // -1
+                  const htfAlignedForRisk = (derivedDirection === 'long' && htfTrend4h === 'bullish') ||
+                                             (derivedDirection === 'short' && htfTrend4h === 'bearish');
+                  if (htfAlignedForRisk) riskScore += RISK_SCORE_SCALING.RISK_REDUCTIONS.HTF_4H_ALIGNED; // -1
+                  if ((fullAdxResult.adxSlope ?? 0) >= 0.5) riskScore += RISK_SCORE_SCALING.RISK_REDUCTIONS.ADX_SLOPE_POSITIVE; // -1
+                  
+                  const riskMultiplier = riskScoreToMultiplier(riskScore);
+                  
+                  if (riskMultiplier !== null) {
+                    // Allow with reduced position instead of blocking
+                    stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, riskMultiplier);
+                    stochRsiRunwayGateApplied = true;
+                    logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 RISK_SCORE_SCALING: DEEP_EXHAUSTION converted from block → ${(riskMultiplier * 100).toFixed(0)}% position (riskScore=${riskScore}, ADX=${adx.toFixed(1)}, 4hAligned=${htfAlignedForRisk})`);
+                    if (RISK_SCORE_SCALING.LOG_RISK_SCORES) {
+                      logger.forSymbol(symbol).info(`   → Risk breakdown: base=${RISK_SCORE_SCALING.RISK_POINTS.DEEP_EXHAUSTION}, adx35=${adx >= 35 ? -1 : 0}, htfAligned=${htfAlignedForRisk ? -1 : 0}, slopePositive=${(fullAdxResult.adxSlope ?? 0) >= 0.5 ? -1 : 0} → net=${riskScore}`);
+                    }
+                  } else {
+                    // Risk score too high — still reject
+                    logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND RISK_REJECT: riskScore=${riskScore} >= ${RISK_SCORE_SCALING.REJECTION_THRESHOLD} — ${moveStr}, ADX=${adx.toFixed(1)}`);
+                    rejectionBuffer.add({
+                      user_id: userId, symbol,
+                      rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
+                      filters_status: {
+                        gate: 'DEEP_EXHAUSTION_COMPOUND', direction: derivedDirection,
+                        stochK4h: stochK4hDeep, moveFromHigh, moveFromLow, adx,
+                        adxSlope: fullAdxResult.adxSlope ?? 0, riskScore,
+                        riskScalingApplied: true,
+                      },
+                    });
+                    continue;
+                  }
+                } else {
+                  // Legacy hard block (RISK_SCORE_SCALING disabled)
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
+                  rejectionBuffer.add({
+                    user_id: userId, symbol,
+                    rejection_reason: 'DEEP_EXHAUSTION_COMPOUND',
+                    filters_status: {
+                      gate: 'DEEP_EXHAUSTION_COMPOUND', direction: derivedDirection,
+                      stochK4h: stochK4hDeep, moveFromHigh, moveFromLow, adx,
+                      adxSlope: fullAdxResult.adxSlope ?? 0,
                     },
-                  },
-                });
-                continue;
+                  });
+                  continue;
+                }
               }
             }
           }

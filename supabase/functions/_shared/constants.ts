@@ -8791,3 +8791,147 @@ export const RALLY_OVERRIDE = {
   LOG_RALLY_OVERRIDE: true,
   ENTRY_TYPE_TAG: 'RALLY_OVERRIDE' as const,
 } as const;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RISK SCORE POSITION SCALING — Replaces binary hard gates with cumulative risk scoring
+// ═══════════════════════════════════════════════════════════════════════════════
+// Philosophy: Individual risk factors contribute points to a cumulative score.
+// Only when total score exceeds threshold does the signal get rejected.
+// Below threshold: position is scaled down proportionally.
+// This prevents minor risk = full rejection and maintains market participation.
+export const RISK_SCORE_SCALING = {
+  ENABLED: true,
+  
+  // ===== RISK SCORE → POSITION MULTIPLIER MAP =====
+  // Score 0: no risk factors → full position (1.0x)
+  // Score 1: minor risk → 0.75x
+  // Score 2: moderate risk → 0.50x 
+  // Score 3: elevated risk → 0.35x
+  // Score 4+: high risk → REJECT (hard block)
+  SCORE_MULTIPLIER_MAP: {
+    0: 1.0,
+    1: 0.75,
+    2: 0.50,
+    3: 0.35,
+  } as Record<number, number>,
+  REJECTION_THRESHOLD: 4,  // Score >= this → hard reject
+  
+  // ===== RISK POINT ASSIGNMENTS =====
+  // Each gate contributes risk points instead of binary block
+  RISK_POINTS: {
+    // K < dynamic oversold threshold → 2 points (was hard block)
+    DEEP_OVERSOLD_K: 2,
+    // Momentum opposing direction → 2 points (was hard block)  
+    MOMENTUM_OPPOSING: 2,
+    // ATR overextension → 1 point (was hard block)
+    OVEREXTENSION_ATR: 1,
+    // Deep exhaustion compound → 2 points (was hard block)
+    DEEP_EXHAUSTION: 2,
+    // No momentum state → 1 point (was hard block)
+    NO_MOMENTUM_STATE: 1,
+    // ADX slope declining → 1 point
+    ADX_SLOPE_DECLINING: 1,
+    // StochRSI limited runway → 1 point (was position reduction)
+    STOCHRSI_LIMITED_RUNWAY: 1,
+  },
+  
+  // ===== RISK REDUCTION BONUSES =====
+  // Positive factors that REDUCE the risk score (floor at 0)
+  RISK_REDUCTIONS: {
+    // Strong trend (ADX >= 35) reduces risk by 1
+    STRONG_TREND_ADX_35: -1,
+    // 4H trend aligned with direction reduces risk by 1
+    HTF_4H_ALIGNED: -1,
+    // Momentum confirming direction reduces risk by 1
+    MOMENTUM_CONFIRMING: -1,
+    // ADX slope strongly positive (>= 0.5) reduces risk by 1
+    ADX_SLOPE_POSITIVE: -1,
+  },
+  
+  // ===== GATES CONVERTED TO RISK SCORING =====
+  // These gates now contribute risk points instead of hard-blocking:
+  // 1. DEEP_EXHAUSTION_COMPOUND
+  // 2. STOCHRSI_RUNWAY (limited runway)
+  // Gates that REMAIN as hard blocks (safety-critical):
+  // 1. EARLY_TIER_0 at K < 1 (absolute extreme)
+  // 2. Momentum opposing > 50 (extreme opposition)
+  // 3. OVEREXTENSION_ATR > 3.0 (extreme overextension)
+  
+  LOG_RISK_SCORES: true,
+} as const;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DYNAMIC ENTRY WINDOW — Adaptive oscillator thresholds based on ADX slope
+// ═══════════════════════════════════════════════════════════════════════════════
+// Philosophy: In strong trends, oscillators behave differently:
+// - Strong downtrend: K naturally stays 0-20 (doesn't mean "oversold")
+// - Strong uptrend: K naturally stays 80-100 (doesn't mean "overbought")
+// Static thresholds (K<3, K<15) miss trend continuation entries.
+// Solution: Tie thresholds to ADX slope (trend acceleration indicator).
+export const DYNAMIC_ENTRY_WINDOW = {
+  ENABLED: true,
+  
+  // ===== TIER 0 (EARLY_TIER_0) ADAPTIVE THRESHOLDS =====
+  // Default: K < 3 for SHORT block
+  // Strong trend (slope > 0.6): Lower to K < 1 (only absolute floor blocks)
+  // Moderate trend (slope 0.3-0.6): Lower to K < 2
+  TIER_0_OVERSOLD: {
+    DEFAULT_K: 3,           // Standard threshold (current behavior)
+    STRONG_TREND_K: 1,      // When ADX slope > STRONG_SLOPE
+    MODERATE_TREND_K: 2,    // When ADX slope > MODERATE_SLOPE
+    STRONG_SLOPE: 0.6,      // ADX slope threshold for "strong trend"
+    MODERATE_SLOPE: 0.3,    // ADX slope threshold for "moderate trend"
+    MIN_ADX: 30,            // Only apply dynamic thresholds above this ADX
+  },
+  TIER_0_OVERBOUGHT: {
+    DEFAULT_K: 97,
+    STRONG_TREND_K: 99,
+    MODERATE_TREND_K: 98,
+    STRONG_SLOPE: 0.6,
+    MODERATE_SLOPE: 0.3,
+    MIN_ADX: 30,
+  },
+  
+  // ===== DEEP EXHAUSTION ADAPTIVE THRESHOLDS =====
+  // Default: K < 15 for SHORT block (with big move)
+  // Strong trend: Lower to K < 8 (deeper oversold allowed in strong trends)
+  // Moderate trend: Lower to K < 12
+  DEEP_EXHAUSTION_SHORT: {
+    DEFAULT_K: 15,
+    STRONG_TREND_K: 8,
+    MODERATE_TREND_K: 12,
+    STRONG_SLOPE: 0.6,
+    MODERATE_SLOPE: 0.3,
+    MIN_ADX: 30,
+  },
+  DEEP_EXHAUSTION_LONG: {
+    DEFAULT_K: 85,
+    STRONG_TREND_K: 92,
+    MODERATE_TREND_K: 88,
+    STRONG_SLOPE: 0.6,
+    MODERATE_SLOPE: 0.3,
+    MIN_ADX: 30,
+  },
+  
+  // ===== STOCHRSI RUNWAY ADAPTIVE =====
+  // Default: SHORT needs K > 30 for runway
+  // Strong trend: Relax to K > 15 (trend continuation needs less runway)
+  RUNWAY_SHORT: {
+    DEFAULT_K: 30,
+    STRONG_TREND_K: 15,
+    MODERATE_TREND_K: 22,
+    STRONG_SLOPE: 0.6,
+    MODERATE_SLOPE: 0.3,
+    MIN_ADX: 30,
+  },
+  RUNWAY_LONG: {
+    DEFAULT_K: 70,
+    STRONG_TREND_K: 85,
+    MODERATE_TREND_K: 78,
+    STRONG_SLOPE: 0.6,
+    MODERATE_SLOPE: 0.3,
+    MIN_ADX: 30,
+  },
+  
+  LOG_ADAPTIVE_THRESHOLDS: true,
+} as const;
