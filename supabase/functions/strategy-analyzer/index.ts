@@ -10141,8 +10141,16 @@ serve(async (req) => {
           // When trend acceleration is structurally confirmed (ADX>=35, slope>=0.5, momentum aligned),
           // ATR overextension is natural — price is moving fast from EMA. Allow probe entry.
           if (trendAccelerationConfirmed && !isMRDirection) {
-            positionMultiplier = Math.min(positionMultiplier, 0.20);
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 OVEREXTENSION ATR BYPASS: trendAcceleration confirmed (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, momentum=${smartMomentum.score.toFixed(0)}) — allowing 20% probe despite ${currentOverextensionAtr.toFixed(2)} ATR overextension`);
+            // Probe cascade check
+            const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
+            const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
+            if (symbolProbeCount >= maxProbes6h) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to standard block`);
+              // Fall through to standard block below
+            } else {
+              positionMultiplier = Math.min(positionMultiplier, 0.20);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 OVEREXTENSION ATR BYPASS: trendAcceleration confirmed (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, momentum=${smartMomentum.score.toFixed(0)}) — allowing 20% probe despite ${currentOverextensionAtr.toFixed(2)} ATR overextension`);
+            }
           } else if (!isMRDirection) {
             // Still log shadow for regime-adaptive tracking
             const regimeAdaptiveThresholds: Record<string, number> = {
