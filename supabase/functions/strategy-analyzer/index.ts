@@ -278,6 +278,7 @@ import {
   type ImpulseContinuationResult,
   type FourStateRegimeResult
 } from "../_shared/scoring.ts";
+import { buildMarketFeatureSnapshot, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
@@ -3023,6 +3024,12 @@ serve(async (req) => {
         const adxRising = extractADXSlope(trendData).isRising;
         const momentum = trendData.momentum;
         
+        // ============= MARKET FEATURE SNAPSHOT (SINGLE EXTRACTION POINT) =============
+        // Build once per symbol — all gates should progressively migrate to reading from this.
+        // NOTE: smartMomentum is injected into trendData later (line ~3105), so snapshot.smartMomentum
+        // will be undefined at this point. It gets populated after earlySmartMomentum calculation.
+        const mfs = buildMarketFeatureSnapshot(symbol, trendData);
+        
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
         // Extract weighted components for smarter quality scoring and gate decisions
         const tf4hConfidence = trueAlignment?.tf4hConfidence ?? 0;
@@ -3102,6 +3109,18 @@ serve(async (req) => {
         // INJECT into trendData so deriveTradeDirection can access it
         // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
         trendData.smartMomentum = earlySmartMomentum;
+        
+        // UPDATE snapshot with smartMomentum (was unavailable at initial build)
+        (mfs as any).smartMomentum = {
+          score: earlySmartMomentum.score ?? 0,
+          direction: earlySmartMomentum.direction ?? "neutral",
+          phase: earlySmartMomentum.phase ?? "unknown",
+          isAccelerating: earlySmartMomentum.isAccelerating ?? false,
+          isExhausted: earlySmartMomentum.isExhausted ?? false,
+          isWeakening: earlySmartMomentum.isWeakening ?? false,
+          isTransitioning: earlySmartMomentum.isTransitioning ?? false,
+          overextensionATR: earlySmartMomentum.overextensionATR ?? 0,
+        };
         
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
         const _mc = earlySmartMomentum.components;
