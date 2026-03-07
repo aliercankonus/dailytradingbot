@@ -7355,6 +7355,15 @@ serve(async (req) => {
           }
         }
         
+        // ============= GATE COLLISION FLAG: DEEP_EXHAUSTION → MOVE_EXHAUSTED =============
+        // When DEEP_EXHAUSTION was overridden (by HIGH_ADX_PROBE, ACCELERATION_PROBE, or RISK_SCORE_SCALING),
+        // set a flag so MOVE_EXHAUSTED doesn't re-block the same signal. These gates measure the same
+        // underlying condition (move too extended) — only one should decide.
+        const deepExhaustionOverrideApplied = stochRsiRunwayGateApplied && stochRsiRunwayMultiplier < 1.0 && stochRsiRunwayMultiplier > 0;
+        if (deepExhaustionOverrideApplied) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔗 GATE_COLLISION_PROTECTION: DEEP_EXHAUSTION override active (${(stochRsiRunwayMultiplier * 100).toFixed(0)}%) — MOVE_EXHAUSTED hard blocks will be bypassed`);
+        }
+        
         // ============= FIX #1 EARLY SHADOW: TRANSITION_EXPANSION =============
         // This shadow check runs BEFORE MOVE_EXHAUSTED and NEAR_24H gates so that
         // even when those gates block and `continue`, we still capture whether
@@ -7784,6 +7793,28 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price dropped too far already =====
             if (distanceFromHigh >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
+              
+              // ===== GATE COLLISION BYPASS: DEEP_EXHAUSTION already handled this signal =====
+              // When DEEP_EXHAUSTION override was applied, MOVE_EXHAUSTED should not re-block.
+              // Both gates measure the same condition (extended move + exhausted oscillator).
+              if (deepExhaustionOverrideApplied) {
+                moveZone = 'EXCEPTION';
+                moveExhaustionPositionMultiplier = stochRsiRunwayMultiplier; // Use DEEP_EXHAUSTION's sizing
+                moveZoneDetails = {
+                  zone: 'EXCEPTION',
+                  distancePercent: distanceFromHigh,
+                  direction: 'short',
+                  stochRsiK: stochRsiK4h,
+                  adx,
+                  adxSlope,
+                  outcome: 'EXCEPTION_ALLOWED',
+                  positionMultiplier: moveExhaustionPositionMultiplier,
+                  overrideReason: `GATE_COLLISION_BYPASS: DEEP_EXHAUSTION override active at ${(stochRsiRunwayMultiplier * 100).toFixed(0)}%`,
+                  relaxationApplied: useRelaxedThresholds,
+                  relaxationCondition
+                };
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔗 MOVE_EXHAUSTED bypassed by DEEP_EXHAUSTION override: distance=${distanceFromHigh.toFixed(1)}%, using DEEP_EXHAUSTION sizing at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              } else {
               // Check for strong trend continuation override
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX &&
@@ -7958,6 +7989,7 @@ serve(async (req) => {
                   };
                 }
               }
+              } // close deepExhaustionOverrideApplied else block
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
             else if (distanceFromHigh >= effectiveSoftThreshold) {
@@ -8140,6 +8172,26 @@ serve(async (req) => {
             // ===== HARD BLOCK: Price rallied too far already =====
             if (distanceFromLow >= effectiveHardThreshold) {
               moveZone = useRelaxedThresholds ? 'RELAXED_HARD' : 'HARD';
+              
+              // ===== GATE COLLISION BYPASS: DEEP_EXHAUSTION already handled this signal =====
+              if (deepExhaustionOverrideApplied) {
+                moveZone = 'EXCEPTION';
+                moveExhaustionPositionMultiplier = stochRsiRunwayMultiplier;
+                moveZoneDetails = {
+                  zone: 'EXCEPTION',
+                  distancePercent: distanceFromLow,
+                  direction: 'long',
+                  stochRsiK: stochRsiK4h,
+                  adx,
+                  adxSlope,
+                  outcome: 'EXCEPTION_ALLOWED',
+                  positionMultiplier: moveExhaustionPositionMultiplier,
+                  overrideReason: `GATE_COLLISION_BYPASS: DEEP_EXHAUSTION override active at ${(stochRsiRunwayMultiplier * 100).toFixed(0)}%`,
+                  relaxationApplied: useRelaxedThresholds,
+                  relaxationCondition
+                };
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔗 MOVE_EXHAUSTED bypassed by DEEP_EXHAUSTION override: distance=${distanceFromLow.toFixed(1)}%, using DEEP_EXHAUSTION sizing at ${(moveExhaustionPositionMultiplier * 100).toFixed(0)}%`);
+              } else {
               // Check for strong trend continuation override
               const strongTrendException = MOVE_EXHAUSTION_FILTER_PARAMS.ALLOW_STRONG_TREND_CONTINUATION &&
                 adx >= MOVE_EXHAUSTION_FILTER_PARAMS.CONTINUATION_MIN_ADX &&
@@ -8310,6 +8362,7 @@ serve(async (req) => {
                   };
                 }
               }
+              } // close deepExhaustionOverrideApplied else block
             }
             // ===== SOFT GATE: Check StochRSI alignment =====
             else if (distanceFromLow >= effectiveSoftThreshold) {
