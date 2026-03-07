@@ -4195,6 +4195,37 @@ serve(async (req) => {
           );
           
           if (isCounterTrend && !counterTrendAdmissionResult.allowed) {
+            // ===== MICRO ADMISSION RELAXATION CHECK =====
+            // Before hard blocking, check if near-zero slope + extreme StochRSI warrants micro probe
+            const microAdm = COUNTER_TREND_ADMISSION.MICRO_ADMISSION;
+            const admStochK = stochRsi4h?.k ?? 50;
+            const admAdxSlope = fullAdxResult.adxSlope ?? 0;
+            const admFailureReasons = counterTrendAdmissionResult.failureReasons || [];
+            
+            // Only apply relaxation for slope-related failures (not volatility or other structural issues)
+            const isSlopeRelatedBlock = admFailureReasons.some((r: string) => 
+              r.includes('ADX_STILL_EXPANDING') || r.includes('ADX_PERSISTENCE_INSUFFICIENT')
+            );
+            const isDeeplyExtremeForAdm = (directionResult.direction === 'long' && admStochK < microAdm.STOCH_K_EXTREME_THRESHOLD) ||
+                                           (directionResult.direction === 'short' && admStochK > (100 - microAdm.STOCH_K_EXTREME_THRESHOLD));
+            const slopeNearZero = admAdxSlope >= 0 && admAdxSlope <= microAdm.MAX_SLOPE_FOR_RELAXATION;
+            
+            const canRelaxAdmission = microAdm.ENABLED && isSlopeRelatedBlock && isDeeplyExtremeForAdm && slopeNearZero;
+            
+            if (canRelaxAdmission) {
+              // Allow micro probe with reduced position
+              counterTrendAdmissionMultiplier = microAdm.MICRO_POSITION_MULTIPLIER;
+              
+              if (microAdm.LOG_RELAXATION) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} 🔬 MICRO_COUNTER_TREND_ADMISSION: ${directionResult.direction.toUpperCase()} relaxed to ${(microAdm.MICRO_POSITION_MULTIPLIER * 100).toFixed(0)}% probe\n` +
+                  `   → StochK=${admStochK.toFixed(1)} (deeply extreme), ADX slope=${admAdxSlope.toFixed(2)} (near-zero)\n` +
+                  `   → Original block: ${counterTrendAdmissionResult.reason}\n` +
+                  `   → Relaxation: slope-related block bypassed for micro probe`
+                );
+              }
+              // DON'T continue - let probe proceed through remaining gates
+            } else {
             // Counter-trend entry blocked by admission layer
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
@@ -4225,6 +4256,10 @@ serve(async (req) => {
                 ltfStructureFlip: counterTrendAdmissionResult.ltfStructureFlip,
                 failureReasons: counterTrendAdmissionResult.failureReasons,
                 triggers: counterTrendAdmissionResult.triggers,
+                microAdmissionChecked: microAdm.ENABLED,
+                microAdmissionStochK: admStochK,
+                microAdmissionSlopeNearZero: slopeNearZero,
+                microAdmissionSlopeRelatedBlock: isSlopeRelatedBlock,
                 message: `Counter-trend ${directionResult.direction.toUpperCase()} blocked: trend energy not exhausted`
               },
               trendData,
@@ -4232,6 +4267,7 @@ serve(async (req) => {
               earlyOrderFlowAnalysis
             );
             continue;
+            }
           }
           
           // If counter-trend and admitted, apply probe position sizing
