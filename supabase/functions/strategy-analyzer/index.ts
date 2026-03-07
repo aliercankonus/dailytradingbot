@@ -4091,14 +4091,12 @@ serve(async (req) => {
         let forcedDirectionOverride: { direction: 'long' | 'short'; regime: string; reason: string } | null = null;
         
         if (CAPITULATION_BOUNCE_PROBE.ENABLED) {
-          // Extract required data using centralized extractors
-          const stochK4h = extractStochRsiK(trendData, '4h');
-          const priceDropPercent = trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? 0;
-          const momentumScoreRaw = trendData?.smartMomentum?.score ?? trendData?.smart_momentum?.normalized_score ?? 0;
-          const adxValue = extractADX(trendData);
-          // ADX slope - extractADXSlope returns an object, get the value
-          const adxSlopeResult = extractADXSlope(trendData);
-          const adxSlopeValue = typeof adxSlopeResult === 'number' ? adxSlopeResult : (adxSlopeResult?.slope ?? trendData?.volatility?.adxSlope ?? 0);
+          // PHASE 2 MIGRATION: Read from MarketFeatureSnapshot
+          const stochK4h = mfs.stochRsi["4h"].k;
+          const priceDropPercent = mfs.distanceFromHighPercent;
+          const momentumScoreRaw = mfs.smartMomentum?.score ?? 0;
+          const adxValue = mfs.adx;
+          const adxSlopeValue = mfs.adxSlope;
           
           // Check all required conditions
           const stochAtExtreme = stochK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K;
