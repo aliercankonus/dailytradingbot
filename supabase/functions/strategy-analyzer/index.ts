@@ -8935,7 +8935,22 @@ serve(async (req) => {
                 const momentumBypass = absMomentumScore >= regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS && smartMomentum.score < 0;
                 const orderFlowBypass = absOrderFlowScore >= regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS && (earlyOrderFlowAnalysis?.score ?? 0) < 0;
                 
-                if (!adxBypass && !momentumBypass && !orderFlowBypass) {
+                // ===== BEARISH TREND BYPASS =====
+                // In confirmed bearish trends, making new lows is structural — not a location failure
+                const bearishBypass = NEAR_EXTREME_PROTECTION_GATE.BEARISH_TREND_BYPASS;
+                const trend4hForNearExtreme = trendData.timeframes?.['4h']?.trend || 'neutral';
+                const bearishTrendBypass = bearishBypass?.ENABLED && 
+                  adx >= bearishBypass.MIN_ADX && 
+                  (!bearishBypass.REQUIRE_BEARISH_4H || trend4hForNearExtreme === 'bearish') &&
+                  adxSlope <= (bearishBypass.MAX_ADX_SLOPE ?? 0);
+                
+                if (bearishTrendBypass) {
+                  // Allow micro short — bearish trend making new lows is normal
+                  const isStrongBearish = bearishBypass.STRONG_BEARISH && adx >= bearishBypass.STRONG_BEARISH.MIN_ADX && ltfSupportsShort;
+                  const bypassMultiplier = isStrongBearish ? bearishBypass.STRONG_BEARISH!.POSITION_MULTIPLIER : bearishBypass.POSITION_MULTIPLIER;
+                  nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, bypassMultiplier);
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 NEAR_24H_LOW BEARISH_TREND_BYPASS: ${distanceFromLow.toFixed(2)}% from low, ADX=${adx.toFixed(1)}, 4h=${trend4hForNearExtreme}, slope=${adxSlope.toFixed(2)} → ${isStrongBearish ? 'strong' : 'standard'} bearish bypass at ${(bypassMultiplier * 100).toFixed(0)}%`);
+                } else if (!adxBypass && !momentumBypass && !orderFlowBypass) {
                   // HARD BLOCK: Location failure - no expansion regime to justify entry
                   nearExtremeBlocked = true;
                   rejectedByHardGates++;
