@@ -6068,7 +6068,7 @@ export const COUNTER_TREND_ADMISSION = {
   // ===== ADX EXHAUSTION REQUIREMENTS =====
   // Trend energy must be decaying, not expanding
   MAX_ADX_FOR_EXHAUSTION: 45,       // ADX must be below this (not in dominant trend)
-  MAX_ADX_SLOPE: 0.0,               // ADX slope must be flat/declining
+  MAX_ADX_SLOPE: 0.15,              // ADX slope must be near-flat/declining (0.15 tolerates micro-positive drift)
   MAX_ADX_SLOPE_STRONG: -0.5,       // Strong exhaustion: ADX clearly declining
   MIN_ADX_SLOPE_PERSISTENCE: 2,     // Consecutive candles with non-positive slope
   
@@ -7357,7 +7357,7 @@ export const STOCHRSI_RUNWAY_GATE = {
   DEEP_EXHAUSTION_COMPOUND: {
     ENABLED: true,
     // SHORT: Block when K < 15 AND moveFromHigh > 2%
-    SHORT_MAX_K: 15,
+    SHORT_MAX_K: 12,
     SHORT_MIN_MOVE_PERCENT: 2.0,
     // LONG: Block when K > 85 AND moveFromLow > 2%
     LONG_MIN_K: 85,
