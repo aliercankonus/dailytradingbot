@@ -4198,7 +4198,7 @@ serve(async (req) => {
             // ===== MICRO ADMISSION RELAXATION CHECK =====
             // Before hard blocking, check if near-zero slope + extreme StochRSI warrants micro probe
             const microAdm = COUNTER_TREND_ADMISSION.MICRO_ADMISSION;
-            const admStochK = stochRsi4h?.k ?? 50;
+            const admStochK = stochK4h;
             const admAdxSlope = fullAdxResult.adxSlope ?? 0;
             const admFailureReasons = counterTrendAdmissionResult.failureReasons || [];
             
