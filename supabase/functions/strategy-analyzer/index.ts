@@ -3694,11 +3694,12 @@ serve(async (req) => {
                 logger.forSymbol(symbol).info(`   → Position size reduced to ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
                 
                 // Continue processing instead of blocking
-              } else if (adx >= 30 && earlyAdxSlope >= 0.8) {
+              } else if (adx >= 30 && earlyAdxSlope >= 0.5) {
                 // ============= TREND ACCELERATION PROBE =============
                 // When Strong Trend Override fails (usually due to momentum lag),
-                // but ADX > 30 and slope > 0.8 confirms structural trend acceleration,
+                // but ADX > 30 and slope > 0.5 confirms structural trend acceleration,
                 // allow a micro probe instead of hard block.
+                // (was slope >= 0.8 — too restrictive for 4H; typical strong trends show 0.3-0.7 slope)
                 strongTrendTier0OverrideApplied = true;
                 strongTrendTier0PositionMultiplier = 0.25;
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔬 TREND ACCELERATION PROBE: SHORT at K=${earlyStochRsiK4h.toFixed(1)} — ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)} confirms acceleration`);

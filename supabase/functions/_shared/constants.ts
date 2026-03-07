@@ -7369,10 +7369,11 @@ export const STOCHRSI_RUNWAY_GATE = {
     // ===== TREND ACCELERATION MICRO PROBE =====
     // When DEEP_EXHAUSTION triggers but ADX slope indicates strong acceleration,
     // allow a micro probe instead of hard block. This captures trend continuation dips.
-    // Conditions: ADX > 35 AND slope > 1.2 → 0.20x position
+    // Conditions: ADX > 32 AND slope > 0.6 → 0.20x position
+    // (was ADX>35/slope>1.2 — too restrictive; 4H slope rarely exceeds 1.0)
     ACCELERATION_PROBE_ENABLED: true,
-    ACCELERATION_PROBE_MIN_ADX: 35,
-    ACCELERATION_PROBE_MIN_SLOPE: 1.2,
+    ACCELERATION_PROBE_MIN_ADX: 32,
+    ACCELERATION_PROBE_MIN_SLOPE: 0.6,
     ACCELERATION_PROBE_MULTIPLIER: 0.20,
   },
   
@@ -8513,14 +8514,15 @@ export const MOMENTUM_SCORE_COMPONENTS = {
     MIN_PRICE_MOVE_PERCENT: 3.0,
     // ADX must confirm strong trend
     MIN_ADX: 25,
-    // ADX slope must confirm acceleration
-    MIN_ADX_SLOPE: 0.8,
+    // ADX slope must confirm acceleration (was 0.8 — too high for 4H, typical strong trends are 0.3-0.7)
+    MIN_ADX_SLOPE: 0.5,
     // Override clamps momentum to this value toward the price direction
     // For bearish price move: clamp momentum to max -20
     // For bullish price move: clamp momentum to min +20
     OVERRIDE_SCORE: 20,
     // Minimum impulse component to confirm the override (prevents stale override)
-    MIN_PRICE_IMPULSE_ABS: 3,
+    // Lowered from 3 to 2: 4H priceImpulse rarely reaches 3 during the lag window
+    MIN_PRICE_IMPULSE_ABS: 2,
   },
 } as const;
 
