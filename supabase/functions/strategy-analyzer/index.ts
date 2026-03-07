@@ -2115,6 +2115,26 @@ serve(async (req) => {
       }
     }
 
+    // ============= PROBE CASCADE PROTECTION =============
+    // Track recent probe entries per symbol to prevent over-probing
+    const probeCountPerSymbol6h = new Map<string, number>();
+    {
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recentProbes } = await supabase
+        .from("positions")
+        .select("symbol, entry_exception_type, opened_at")
+        .eq("user_id", userId)
+        .gte("opened_at", sixHoursAgo)
+        .in("entry_exception_type", ['TREND_ACCELERATION_PROBE', 'DEEP_EXHAUSTION_ACCEL_PROBE', 'OVEREXTENSION_ACCEL_BYPASS']);
+      
+      recentProbes?.forEach((p: any) => {
+        probeCountPerSymbol6h.set(p.symbol, (probeCountPerSymbol6h.get(p.symbol) || 0) + 1);
+      });
+      if (probeCountPerSymbol6h.size > 0) {
+        logger.info(`${LOG_CATEGORIES.GATE} Probe cascade protection: ${[...probeCountPerSymbol6h.entries()].map(([s, c]) => `${s}=${c}`).join(', ')}`);
+      }
+    }
+
     const openTradesPerSymbol = new Map<string, number>();
     activePositions?.forEach((p) => {
       openTradesPerSymbol.set(p.symbol, (openTradesPerSymbol.get(p.symbol) || 0) + 1);
@@ -3694,15 +3714,20 @@ serve(async (req) => {
                 logger.forSymbol(symbol).info(`   → Position size reduced to ${(strongTrendTier0PositionMultiplier * 100).toFixed(0)}%`);
                 
                 // Continue processing instead of blocking
-              } else if (adx >= 30 && earlyAdxSlope >= 0.8) {
+              } else if (adx >= 30 && earlyAdxSlope >= 0.5) {
                 // ============= TREND ACCELERATION PROBE =============
-                // When Strong Trend Override fails (usually due to momentum lag),
-                // but ADX > 30 and slope > 0.8 confirms structural trend acceleration,
-                // allow a micro probe instead of hard block.
-                strongTrendTier0OverrideApplied = true;
-                strongTrendTier0PositionMultiplier = 0.25;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔬 TREND ACCELERATION PROBE: SHORT at K=${earlyStochRsiK4h.toFixed(1)} — ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)} confirms acceleration`);
-                logger.forSymbol(symbol).info(`   → Override failed (${overrideCheck.reason}), but structural acceleration allows 25% probe`);
+                // Probe cascade check: max 2 probes per symbol per 6h
+                const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
+                const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
+                if (symbolProbeCount >= maxProbes6h) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
+                  // Fall through to standard block
+                } else {
+                  strongTrendTier0OverrideApplied = true;
+                  strongTrendTier0PositionMultiplier = 0.25;
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} 🔬 TREND ACCELERATION PROBE: SHORT at K=${earlyStochRsiK4h.toFixed(1)} — ADX=${adx.toFixed(1)}, slope=${earlyAdxSlope.toFixed(2)} confirms acceleration`);
+                  logger.forSymbol(symbol).info(`   → Override failed (${overrideCheck.reason}), but structural acceleration allows 25% probe`);
+                }
               } else {
                 // Standard block - no override allowed
                 rejectedByHardGates++;
@@ -3730,7 +3755,7 @@ serve(async (req) => {
                     strongTrendOverrideAttempted: true,
                     strongTrendOverrideReason: overrideCheck.reason,
                     trendAccelerationProbeChecked: true,
-                    trendAccelerationProbeFailed: `ADX=${adx.toFixed(1)} (need>=30), slope=${earlyAdxSlope.toFixed(2)} (need>=0.8)`,
+                    trendAccelerationProbeFailed: `ADX=${adx.toFixed(1)} (need>=30), slope=${earlyAdxSlope.toFixed(2)} (need>=0.5)`,
                     // Add Capitulation Bounce Probe near-miss data
                     capitulationProbeChecked: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
                     capitulationProbeFailed: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
@@ -7090,11 +7115,18 @@ serve(async (req) => {
                          Math.abs(fullAdxResult.adxSlope ?? 0) >= deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE) {
                 // ============= TREND ACCELERATION MICRO PROBE =============
                 // ADX slope confirms strong trend acceleration despite deep exhaustion.
-                // Allow micro probe instead of hard block.
-                const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
-                stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.ACCELERATION_PROBE_MULTIPLIER);
-                stochRsiRunwayGateApplied = true;
-                logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
+                // Probe cascade check: max 2 probes per symbol per 6h
+                const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
+                const maxProbes6h = deepExhaustion.MAX_PROBES_PER_SYMBOL_6H;
+                if (symbolProbeCount >= maxProbes6h) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
+                  // Fall through to hard block below
+                } else {
+                  const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
+                  stochRsiRunwayMultiplier = Math.min(stochRsiRunwayMultiplier, deepExhaustion.ACCELERATION_PROBE_MULTIPLIER);
+                  stochRsiRunwayGateApplied = true;
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🔬 DEEP_EXHAUSTION_COMPOUND ACCELERATION PROBE: ${moveStr}, ADX=${adx.toFixed(1)}, slope=${accelSlope.toFixed(2)} >= ${deepExhaustion.ACCELERATION_PROBE_MIN_SLOPE} — micro probe at ${(deepExhaustion.ACCELERATION_PROBE_MULTIPLIER * 100).toFixed(0)}%`);
+                }
               } else {
                 logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION_COMPOUND BLOCK: ${derivedDirection?.toUpperCase()} blocked — ${moveStr}, ADX=${adx.toFixed(1)}`);
                 
@@ -10100,10 +10132,33 @@ serve(async (req) => {
           : baseMaxOverextensionAtr;
         const currentOverextensionAtr = smartMomentum.overextensionATR;
         
+        // ============= TREND ACCELERATION BYPASS =============
+        // When structural trend acceleration is confirmed (strong ADX + positive slope + momentum aligned),
+        // ATR overextension is expected behavior, not a "chasing" signal.
+        // Bypass OVEREXTENSION block but cap position at probe size.
+        const trendAccelerationConfirmed = adx >= 35 && adxSlope >= 0.5 && 
+          ((derivedDirection === 'short' && smartMomentum.score < -15) || 
+           (derivedDirection === 'long' && smartMomentum.score > 15));
+        
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
           const isMRDirection = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed;
-          if (!isMRDirection) {
+          
+          // ============= TREND ACCELERATION ATR BYPASS =============
+          // When trend acceleration is structurally confirmed (ADX>=35, slope>=0.5, momentum aligned),
+          // ATR overextension is natural — price is moving fast from EMA. Allow probe entry.
+          if (trendAccelerationConfirmed && !isMRDirection) {
+            // Probe cascade check
+            const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
+            const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
+            if (symbolProbeCount >= maxProbes6h) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to standard block`);
+              // Fall through to standard block below
+            } else {
+              positionMultiplier = Math.min(positionMultiplier, 0.20);
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 OVEREXTENSION ATR BYPASS: trendAcceleration confirmed (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, momentum=${smartMomentum.score.toFixed(0)}) — allowing 20% probe despite ${currentOverextensionAtr.toFixed(2)} ATR overextension`);
+            }
+          } else if (!isMRDirection) {
             // Still log shadow for regime-adaptive tracking
             const regimeAdaptiveThresholds: Record<string, number> = {
               'RANGE_COMPRESSION': 2.5,

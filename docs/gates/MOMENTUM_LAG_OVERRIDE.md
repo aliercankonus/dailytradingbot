@@ -42,9 +42,9 @@ STRUCTURAL_LAG_OVERRIDE = {
   ENABLED: true,
   MIN_PRICE_MOVE_PERCENT: 3.0,
   MIN_ADX: 25,
-  MIN_ADX_SLOPE: 0.8,
+  MIN_ADX_SLOPE: 0.5,        // was 0.8 — too high for 4H (typical strong trends: 0.3-0.7)
   OVERRIDE_SCORE: 20,
-  MIN_PRICE_IMPULSE_ABS: 3,
+  MIN_PRICE_IMPULSE_ABS: 2,  // was 3 — 4H impulse rarely reaches 3 during lag window
 }
 ```
 
@@ -53,14 +53,38 @@ STRUCTURAL_LAG_OVERRIDE = {
 With momentum clamped to -20 (for bearish price):
 - **Momentum Direction Opposing**: No longer blocks SHORT (score is now bearish)
 - **STRONG_TREND_TIER0_OVERRIDE**: May still fail (-20 > -30 threshold) but...
-- **TREND_ACCELERATION_PROBE**: New fallback allows 0.25x probe when ADX>30, slope>0.8
+- **TREND_ACCELERATION_PROBE**: Fallback allows 0.25x probe when ADX>30, slope>0.5
 
 ## Related Changes
 
-- `EARLY_TIER_0`: Added Trend Acceleration Probe (0.25x) when override fails but ADX confirms
-- `DEEP_EXHAUSTION_COMPOUND`: Added Acceleration Probe (0.20x) when slope > 1.2 and ADX > 35
+### EARLY_TIER_0 Trend Acceleration Probe
+- Slope threshold: 0.8 → **0.5** (matches 4H slope distribution)
+- Position: 0.25x (unchanged — high variance trade)
+
+### DEEP_EXHAUSTION Acceleration Probe
+- ADX threshold: 35 → **32**
+- Slope threshold: 1.2 → **0.6** (was spike-only; now captures strong expansions)
+- Position: 0.20x (unchanged)
+
+### OVEREXTENSION_ATR_BLOCK Bypass
+- New: `trendAccelerationConfirmed` flag bypasses OVEREXTENSION block
+- Conditions: ADX >= 35, slope >= 0.5, momentum aligned (score > 15 or < -15)
+- Position: capped at 0.20x
+- Rationale: During trend acceleration, ATR overextension is expected — price moves fast from EMA
+
+### Probe Cascade Protection
+- `MAX_PROBES_PER_SYMBOL_6H = 2` — prevents over-probing on same symbol
+- Applied to all three probe types: EARLY_TIER_0, DEEP_EXHAUSTION, OVEREXTENSION bypass
 
 ## Changelog
+
+### v1.1 (2026-03-07)
+- MIN_ADX_SLOPE: 0.8 → 0.5 (staggered adjustment, production-safe)
+- MIN_PRICE_IMPULSE_ABS: 3 → 2
+- EARLY_TIER_0 probe slope: 0.8 → 0.5
+- DEEP_EXHAUSTION: ADX 35→32, slope 1.2→0.6
+- Added trendAcceleration bypass for OVEREXTENSION_ATR_BLOCK
+- Added probe cascade protection (max 2 per symbol per 6h)
 
 ### v1.0 (2026-03-07)
 - Initial implementation fixing momentum-price divergence
