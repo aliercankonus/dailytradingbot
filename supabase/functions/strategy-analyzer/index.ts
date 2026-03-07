@@ -9128,6 +9128,7 @@ serve(async (req) => {
                         earlyOrderFlowAnalysis
                       );
                       continue;
+                      } // end bearish bypass else (standard block)
                     }
                   } else {
                     // Fallback: original hard block if graduated not enabled
