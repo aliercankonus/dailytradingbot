@@ -182,7 +182,10 @@ import {
   // NEW: Multi-TF Rally Override for fixing SHORT bias
   RALLY_OVERRIDE,
   // NEW: Trend Expansion StochRSI Exemption
-  TREND_EXPANSION_EXEMPTION
+  TREND_EXPANSION_EXEMPTION,
+  // NEW: Risk Score Position Scaling & Dynamic Entry Window
+  RISK_SCORE_SCALING,
+  DYNAMIC_ENTRY_WINDOW
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
