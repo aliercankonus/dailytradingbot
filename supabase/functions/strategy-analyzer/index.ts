@@ -7355,6 +7355,15 @@ serve(async (req) => {
           }
         }
         
+        // ============= GATE COLLISION FLAG: DEEP_EXHAUSTION → MOVE_EXHAUSTED =============
+        // When DEEP_EXHAUSTION was overridden (by HIGH_ADX_PROBE, ACCELERATION_PROBE, or RISK_SCORE_SCALING),
+        // set a flag so MOVE_EXHAUSTED doesn't re-block the same signal. These gates measure the same
+        // underlying condition (move too extended) — only one should decide.
+        const deepExhaustionOverrideApplied = stochRsiRunwayGateApplied && stochRsiRunwayMultiplier < 1.0 && stochRsiRunwayMultiplier > 0;
+        if (deepExhaustionOverrideApplied) {
+          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔗 GATE_COLLISION_PROTECTION: DEEP_EXHAUSTION override active (${(stochRsiRunwayMultiplier * 100).toFixed(0)}%) — MOVE_EXHAUSTED hard blocks will be bypassed`);
+        }
+        
         // ============= FIX #1 EARLY SHADOW: TRANSITION_EXPANSION =============
         // This shadow check runs BEFORE MOVE_EXHAUSTED and NEAR_24H gates so that
         // even when those gates block and `continue`, we still capture whether
