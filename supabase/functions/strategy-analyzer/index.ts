@@ -2589,6 +2589,7 @@ serve(async (req) => {
       // NEW: 4-State Regime Classifier gates
       | 'RANGE_COMPRESSION_BLOCK'
       | 'COMPRESSION_NO_SETUP'
+      | 'COMPRESSION_MICRO_OVERRIDE'
       | 'BREAKOUT_WATCH'
       | 'TREND_EXHAUSTION_CONTINUATION_BLOCK'
       // Fix #3: Capitulation acceleration override
