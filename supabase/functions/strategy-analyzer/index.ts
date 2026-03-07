@@ -10101,6 +10101,14 @@ serve(async (req) => {
           : baseMaxOverextensionAtr;
         const currentOverextensionAtr = smartMomentum.overextensionATR;
         
+        // ============= TREND ACCELERATION BYPASS =============
+        // When structural trend acceleration is confirmed (strong ADX + positive slope + momentum aligned),
+        // ATR overextension is expected behavior, not a "chasing" signal.
+        // Bypass OVEREXTENSION block but cap position at probe size.
+        const trendAccelerationConfirmed = adx >= 35 && adxSlope >= 0.5 && 
+          ((derivedDirection === 'short' && smartMomentum.score < -15) || 
+           (derivedDirection === 'long' && smartMomentum.score > 15));
+        
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
           const isMRDirection = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed;
