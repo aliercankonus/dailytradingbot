@@ -4195,6 +4195,37 @@ serve(async (req) => {
           );
           
           if (isCounterTrend && !counterTrendAdmissionResult.allowed) {
+            // ===== MICRO ADMISSION RELAXATION CHECK =====
+            // Before hard blocking, check if near-zero slope + extreme StochRSI warrants micro probe
+            const microAdm = COUNTER_TREND_ADMISSION.MICRO_ADMISSION;
+            const admStochK = stochK4h;
+            const admAdxSlope = fullAdxResult.adxSlope ?? 0;
+            const admFailureReasons = counterTrendAdmissionResult.failureReasons || [];
+            
+            // Only apply relaxation for slope-related failures (not volatility or other structural issues)
+            const isSlopeRelatedBlock = admFailureReasons.some((r: string) => 
+              r.includes('ADX_STILL_EXPANDING') || r.includes('ADX_PERSISTENCE_INSUFFICIENT')
+            );
+            const isDeeplyExtremeForAdm = (directionResult.direction === 'long' && admStochK < microAdm.STOCH_K_EXTREME_THRESHOLD) ||
+                                           (directionResult.direction === 'short' && admStochK > (100 - microAdm.STOCH_K_EXTREME_THRESHOLD));
+            const slopeNearZero = admAdxSlope >= 0 && admAdxSlope <= microAdm.MAX_SLOPE_FOR_RELAXATION;
+            
+            const canRelaxAdmission = microAdm.ENABLED && isSlopeRelatedBlock && isDeeplyExtremeForAdm && slopeNearZero;
+            
+            if (canRelaxAdmission) {
+              // Allow micro probe with reduced position
+              counterTrendAdmissionMultiplier = microAdm.MICRO_POSITION_MULTIPLIER;
+              
+              if (microAdm.LOG_RELAXATION) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} 🔬 MICRO_COUNTER_TREND_ADMISSION: ${directionResult.direction.toUpperCase()} relaxed to ${(microAdm.MICRO_POSITION_MULTIPLIER * 100).toFixed(0)}% probe\n` +
+                  `   → StochK=${admStochK.toFixed(1)} (deeply extreme), ADX slope=${admAdxSlope.toFixed(2)} (near-zero)\n` +
+                  `   → Original block: ${counterTrendAdmissionResult.reason}\n` +
+                  `   → Relaxation: slope-related block bypassed for micro probe`
+                );
+              }
+              // DON'T continue - let probe proceed through remaining gates
+            } else {
             // Counter-trend entry blocked by admission layer
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
@@ -4225,6 +4256,10 @@ serve(async (req) => {
                 ltfStructureFlip: counterTrendAdmissionResult.ltfStructureFlip,
                 failureReasons: counterTrendAdmissionResult.failureReasons,
                 triggers: counterTrendAdmissionResult.triggers,
+                microAdmissionChecked: microAdm.ENABLED,
+                microAdmissionStochK: admStochK,
+                microAdmissionSlopeNearZero: slopeNearZero,
+                microAdmissionSlopeRelatedBlock: isSlopeRelatedBlock,
                 message: `Counter-trend ${directionResult.direction.toUpperCase()} blocked: trend energy not exhausted`
               },
               trendData,
@@ -4232,6 +4267,7 @@ serve(async (req) => {
               earlyOrderFlowAnalysis
             );
             continue;
+            }
           }
           
           // If counter-trend and admitted, apply probe position sizing
@@ -6636,7 +6672,40 @@ serve(async (req) => {
             
             // DON'T continue - let the rest of the gates evaluate this new direction
           } else {
-            // No valid fallback - reject as before
+            // ===== MICRO COUNTER-TREND PROBE CHECK =====
+            // Before hard blocking, check if deeply oversold/overbought warrants a micro probe
+            const ctMicroProbe = COUNTER_TREND_PROTECTION.MICRO_PROBE;
+            const ctStochK = stochK4h;
+            const ctAdxSlope = fullAdxResult.adxSlope ?? 0;
+            const ctAbsMomentum = Math.abs(smartMomentum.score);
+            
+            const isDeeplyOversold = isCounterTrendLong && ctStochK < ctMicroProbe.STOCH_K_OVERSOLD_THRESHOLD;
+            const isDeeplyOverbought = isCounterTrendShort && ctStochK > ctMicroProbe.STOCH_K_OVERBOUGHT_THRESHOLD;
+            const slopeAllowsProbe = ctAdxSlope < ctMicroProbe.MAX_ADX_SLOPE_FOR_PROBE;
+            const momentumAllowsProbe = ctAbsMomentum < ctMicroProbe.MAX_MOMENTUM_FOR_PROBE;
+            
+            const canMicroProbe = ctMicroProbe.ENABLED && 
+                                   (isDeeplyOversold || isDeeplyOverbought) && 
+                                   slopeAllowsProbe && 
+                                   momentumAllowsProbe;
+            
+            if (canMicroProbe) {
+              // Allow micro probe instead of hard block
+              counterTrendFallbackApplied = true;
+              counterTrendFallbackMultiplier = ctMicroProbe.POSITION_MULTIPLIER;
+              
+              if (ctMicroProbe.LOG_PROBES) {
+                logger.forSymbol(symbol).info(
+                  `${LOG_CATEGORIES.GATE} 🔬 MICRO_COUNTER_TREND_PROBE: ${derivedDirection.toUpperCase()} allowed as ${(ctMicroProbe.POSITION_MULTIPLIER * 100).toFixed(0)}% probe\n` +
+                  `   → StochK=${ctStochK.toFixed(1)} (${isDeeplyOversold ? 'deeply oversold' : 'deeply overbought'})\n` +
+                  `   → ADX slope=${ctAdxSlope.toFixed(2)}, momentum=${smartMomentum.score}\n` +
+                  `   → Would have been blocked: ${blockReason}`
+                );
+              }
+              
+              // DON'T continue - let probe entry proceed through remaining gates
+            } else {
+            // No valid fallback or micro probe - reject as before
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
               gate: 'COUNTER_TREND_PROTECTION', 
@@ -6648,6 +6717,7 @@ serve(async (req) => {
               logger.forSymbol(symbol).warn(`   → ADX=${adx.toFixed(1)}, regime=${masterRegime.regime}, trendDirection=${regimeTrendDirection}`);
               logger.forSymbol(symbol).warn(`   → Momentum score=${smartMomentum.score}, direction=${smartMomentum.direction}`);
               logger.forSymbol(symbol).warn(`   → Fallback not possible: fallbackAligns=${fallbackAligns}, regime=${masterRegime.regime}`);
+              logger.forSymbol(symbol).warn(`   → Micro probe not eligible: K=${ctStochK.toFixed(1)}, slope=${ctAdxSlope.toFixed(2)}, |mom|=${ctAbsMomentum}`);
             }
             
             await logRejectionWithAI(
@@ -6662,6 +6732,10 @@ serve(async (req) => {
                 fallbackDirection,
                 fallbackAttempted: COUNTER_TREND_PROTECTION.FALLBACK_TO_TREND_ALIGNED,
                 fallbackReason: !fallbackAligns ? "direction_mismatch" : "regime_ranging",
+                microProbeChecked: ctMicroProbe.ENABLED,
+                microProbeStochK: ctStochK,
+                microProbeSlopeOk: slopeAllowsProbe,
+                microProbeMomentumOk: momentumAllowsProbe,
                 adx: adx.toFixed(1),
                 adxSlope: (fullAdxResult.adxSlope ?? 0).toFixed(2),
                 regimeTrendDirection,
@@ -6682,6 +6756,7 @@ serve(async (req) => {
               earlyOrderFlowAnalysis
             );
             continue;
+            }
           }
         }
         

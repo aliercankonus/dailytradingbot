@@ -4970,6 +4970,24 @@ export const COUNTER_TREND_PROTECTION = {
   
   // Log fallback entries
   LOG_FALLBACKS: true,
+  
+  // ===== MICRO COUNTER-TREND PROBE =====
+  // When deeply oversold/overbought (StochRSI K extreme), allow micro probe entry
+  // instead of hard blocking. Captures mean-reversion bounces at exhaustion points.
+  MICRO_PROBE: {
+    ENABLED: true,
+    // StochRSI K must be deeply extreme (oversold for LONG, overbought for SHORT)
+    STOCH_K_OVERSOLD_THRESHOLD: 10,    // K < 10 = deeply oversold → allow micro LONG
+    STOCH_K_OVERBOUGHT_THRESHOLD: 90,  // K > 90 = deeply overbought → allow micro SHORT
+    // ADX slope must NOT be strongly expanding (trend not accelerating)
+    MAX_ADX_SLOPE_FOR_PROBE: 0.50,     // Allow probe if slope < 0.50 (not aggressively expanding)
+    // Momentum must not be extreme (< 60 absolute)
+    MAX_MOMENTUM_FOR_PROBE: 60,
+    // Position size for micro probe
+    POSITION_MULTIPLIER: 0.20,         // 20% position - pure probe
+    // Logging
+    LOG_PROBES: true,
+  },
 } as const;
 
 // ============= PHASE 9: ADX EXHAUSTION / LATE TREND PROTECTION (NEW) =============
@@ -6071,6 +6089,21 @@ export const COUNTER_TREND_ADMISSION = {
   MAX_ADX_SLOPE: 0.15,              // ADX slope must be near-flat/declining (0.15 tolerates micro-positive drift)
   MAX_ADX_SLOPE_STRONG: -0.5,       // Strong exhaustion: ADX clearly declining
   MIN_ADX_SLOPE_PERSISTENCE: 2,     // Consecutive candles with non-positive slope
+  
+  // ===== MICRO ADMISSION RELAXATION =====
+  // When ADX slope is near-zero (barely expanding), allow micro probe with reduced persistence
+  MICRO_ADMISSION: {
+    ENABLED: true,
+    // Allow probe when slope is between 0 and this threshold (barely expanding)
+    MAX_SLOPE_FOR_RELAXATION: 0.20,
+    // Reduced persistence requirement (0 = no persistence needed for micro probe)
+    RELAXED_PERSISTENCE: 0,
+    // StochRSI extreme required for relaxation
+    STOCH_K_EXTREME_THRESHOLD: 15,     // K < 15 for LONG, K > 85 for SHORT
+    // Position multiplier (even smaller than standard probe)
+    MICRO_POSITION_MULTIPLIER: 0.20,
+    LOG_RELAXATION: true,
+  },
   
   // ===== VOLATILITY CONTRACTION REQUIREMENTS =====
   // Confirms impulse is dying, not just oscillators resetting
