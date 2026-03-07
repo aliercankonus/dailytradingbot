@@ -7375,6 +7375,10 @@ export const STOCHRSI_RUNWAY_GATE = {
     ACCELERATION_PROBE_MIN_ADX: 32,
     ACCELERATION_PROBE_MIN_SLOPE: 0.6,
     ACCELERATION_PROBE_MULTIPLIER: 0.20,
+    // ===== PROBE CASCADE PROTECTION =====
+    // Prevent multiple probes on the same symbol within a short window
+    MAX_PROBES_PER_SYMBOL_6H: 2,
+    MIN_BARS_BETWEEN_PROBES: 3,
   },
   
   LOG_GATE_CHECKS: true,
