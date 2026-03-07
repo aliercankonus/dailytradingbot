@@ -3755,7 +3755,7 @@ serve(async (req) => {
                     strongTrendOverrideAttempted: true,
                     strongTrendOverrideReason: overrideCheck.reason,
                     trendAccelerationProbeChecked: true,
-                    trendAccelerationProbeFailed: `ADX=${adx.toFixed(1)} (need>=30), slope=${earlyAdxSlope.toFixed(2)} (need>=0.8)`,
+                    trendAccelerationProbeFailed: `ADX=${adx.toFixed(1)} (need>=30), slope=${earlyAdxSlope.toFixed(2)} (need>=0.5)`,
                     // Add Capitulation Bounce Probe near-miss data
                     capitulationProbeChecked: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
                     capitulationProbeFailed: CAPITULATION_BOUNCE_PROBE.ENABLED && earlyStochRsiK4h <= CAPITULATION_BOUNCE_PROBE.MAX_STOCHRSI_K,
