@@ -7070,6 +7070,22 @@ export const NEAR_EXTREME_PROTECTION_GATE = {
    // FIXED: Was 1.5% — in bearish markets most coins sit within 1.5% of lows permanently
    HARD_ZONE_THRESHOLD_PERCENT: 0.8,
    BLOCK_IN_HARD_ZONE: true,
+   
+  // ===== STRONG BEARISH TREND BYPASS =====
+  // In strong bearish trends, making new 24h lows is NORMAL — allow micro shorts
+  // This prevents the gate from blocking all SHORTs during sustained downtrends
+  BEARISH_TREND_BYPASS: {
+    ENABLED: true,
+    MIN_ADX: 28,                    // Strong trend energy required
+    REQUIRE_BEARISH_4H: true,       // 4H trend must be bearish
+    MAX_ADX_SLOPE: 0.0,             // ADX must NOT be rising (trend maturing, not forming)
+    POSITION_MULTIPLIER: 0.25,      // 25% micro position
+    // Even more aggressive if ADX >= 35 and 1h also bearish
+    STRONG_BEARISH: {
+      MIN_ADX: 35,
+      POSITION_MULTIPLIER: 0.35,    // 35% position for confirmed strong bearish
+    },
+  },
   
   // ===== HARD ZONE GRADUATION (ADX-conditioned micro positions) =====
   // Replaces binary hard block with ADX-graduated sizing when LTF is neutral

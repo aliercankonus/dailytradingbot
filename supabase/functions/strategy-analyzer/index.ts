@@ -5357,6 +5357,23 @@ serve(async (req) => {
               perSymbolGateAttribution.set(symbol, { gate: 'BREAKOUT_WATCH', details: `Compression ending, BB expanding, ADX slope rising → probe entry at ${(breakoutWatchMultiplier * 100).toFixed(0)}%` });
               // Don't continue — fall through to normal signal generation
             } else {
+              // ===== STRUCTURAL MICRO-ENTRY OVERRIDE FOR RANGE_COMPRESSION =====
+              // When price impulse and ADX confirm directional energy, allow micro position
+              // instead of hard blocking. This captures early breakout setups.
+              const compressionPriceImpulse = Math.abs(earlySmartMomentum?.components?.priceImpulse ?? 0);
+              const compressionMomScore = Math.abs(earlySmartMomentum?.score ?? 0);
+              const compressionHasDirection = derivedDirection !== null;
+              const compressionMicroOverride = compressionHasDirection && compressionPriceImpulse >= 1.5 && adx >= 20 && compressionMomScore >= 10;
+              
+              if (compressionMicroOverride) {
+                // Allow micro entry — structural evidence suggests directional energy building
+                const microMultiplier = adx >= 30 ? 0.25 : 0.20;
+                fourStatePositionMultiplier = microMultiplier;
+                
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 COMPRESSION_MICRO_OVERRIDE: priceImpulse=${compressionPriceImpulse.toFixed(1)} + ADX=${adx.toFixed(1)} + |mom|=${compressionMomScore.toFixed(0)} → allowing ${derivedDirection!.toUpperCase()} at ${(microMultiplier * 100).toFixed(0)}% (structural energy detected in compression)`);
+                perSymbolGateAttribution.set(symbol, { gate: 'COMPRESSION_MICRO_OVERRIDE', details: `Price impulse ${compressionPriceImpulse.toFixed(1)} + ADX ${adx.toFixed(1)} → micro entry ${(microMultiplier * 100).toFixed(0)}%` });
+                // Fall through to normal signal generation
+              } else {
               // Standard compression rejection — neither MR nor breakout conditions met
               rejectedByHardGates++;
               const blockReason = `RANGE_COMPRESSION_BLOCK: 4-State regime=RANGE_COMPRESSION, primaryTrend=${primaryTrendForRegime}, momentum=${momentumStateForRegime}, ADX=${adx.toFixed(1)}, |score|=${Math.abs(earlySmartMomentum?.score ?? 0).toFixed(0)} → noise dominates, no edge${compressionDiag}`;
