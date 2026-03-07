@@ -10112,7 +10112,14 @@ serve(async (req) => {
         if (currentOverextensionAtr > maxOverextensionAtr && !bbSqueeze.isBreakingOut && !qualifiesForContinuationMode) {
           // Allow MR entries in overextended conditions (they trade against the overextension)
           const isMRDirection = moveZone === 'MEAN_REVERSION' && moveZoneDetails?.meanReversionAllowed;
-          if (!isMRDirection) {
+          
+          // ============= TREND ACCELERATION ATR BYPASS =============
+          // When trend acceleration is structurally confirmed (ADX>=35, slope>=0.5, momentum aligned),
+          // ATR overextension is natural — price is moving fast from EMA. Allow probe entry.
+          if (trendAccelerationConfirmed && !isMRDirection) {
+            positionMultiplier = Math.min(positionMultiplier, 0.20);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 OVEREXTENSION ATR BYPASS: trendAcceleration confirmed (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, momentum=${smartMomentum.score.toFixed(0)}) — allowing 20% probe despite ${currentOverextensionAtr.toFixed(2)} ATR overextension`);
+          } else if (!isMRDirection) {
             // Still log shadow for regime-adaptive tracking
             const regimeAdaptiveThresholds: Record<string, number> = {
               'RANGE_COMPRESSION': 2.5,
