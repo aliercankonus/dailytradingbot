@@ -278,6 +278,7 @@ import {
   type ImpulseContinuationResult,
   type FourStateRegimeResult
 } from "../_shared/scoring.ts";
+import { buildMarketFeatureSnapshot, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
