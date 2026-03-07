@@ -3341,12 +3341,12 @@ serve(async (req) => {
                 const flashStochK1h = extractStochRsiK(trendData, '1h');
                 
                 // ===== PHASE 1: STATIC EXHAUSTION (K currently pinned) =====
-                phase1Triggered = stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
-                                        stochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K;
+                phase1Triggered = flashStochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K || 
+                                        flashStochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_1_MAX_STOCHRSI_K;
                 
                 // ===== PHASE 2: RELEASE STATE (K was recently pinned, now recovering) =====
                 // This catches V-shaped bounces where momentum leads price
-                recentMinK = stochK4h;
+                recentMinK = flashStochK4h;
                 
                 if (!phase1Triggered && FLASH_CRASH_BOUNCE_PROBE.PHASE_2_ENABLED) {
                   // Extract recent StochRSI K values from klines
@@ -3398,13 +3398,13 @@ serve(async (req) => {
                   // 2. Current K is still low but recovering (INCLUDE 1H - Issue 3 fix)
                   const include1hRecovery = FLASH_CRASH_BOUNCE_PROBE.PHASE_2_INCLUDE_1H_RECOVERY ?? true;
                   const currentKRecovering = include1hRecovery 
-                    ? (stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K || stochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K)
-                    : stochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K;
+                    ? (flashStochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K || flashStochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K)
+                    : flashStochK4h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K;
                   
                   // Determine which K to use for rise calculation (use the one that's recovering)
-                  const effectiveCurrentK = (include1hRecovery && stochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K && stochK4h > FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K)
-                    ? stochK1h
-                    : stochK4h;
+                  const effectiveCurrentK = (include1hRecovery && flashStochK1h <= FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K && flashStochK4h > FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K)
+                    ? flashStochK1h
+                    : flashStochK4h;
                   
                   // 3. K has risen enough (momentum snapback)
                   const kRise = effectiveCurrentK - recentMinK;
@@ -3471,7 +3471,7 @@ serve(async (req) => {
                   } else if (wasAtFloor && priceDropPercent >= 8) {
                     // Log near-miss for Phase 2 with detailed diagnostics
                     const failedReasons: string[] = [];
-                    if (!currentKRecovering) failedReasons.push(`current_K too high (4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} > ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})`);
+                    if (!currentKRecovering) failedReasons.push(`current_K too high (4h=${flashStochK4h.toFixed(1)}, 1h=${flashStochK1h.toFixed(1)} > ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})`);
                     if (!hasMinRise) failedReasons.push(`rise insufficient (${kRise.toFixed(1)} < ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MIN_K_RISE})`);
                     if (!kIsRising) failedReasons.push(`not enough rising steps (${risingSteps} < ${minRisingSteps})`);
                     if (!momentumStabilizing) failedReasons.push(`momentum not stabilizing (${earlyMomentumScore.toFixed(0)} < ${-phase2MomentumMax})`);
@@ -3479,7 +3479,7 @@ serve(async (req) => {
                     logger.forSymbol(symbol).info(
                       `${LOG_CATEGORIES.INFO} 📊 FLASH CRASH PHASE 2 CHECK:\n` +
                       `   → Recent min K: ${recentMinK.toFixed(1)} (threshold ≤${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_FLOOR_THRESHOLD})\n` +
-                      `   → Current K: 4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} (effective=${effectiveCurrentK.toFixed(1)}, max allowed: ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})\n` +
+                      `   → Current K: 4h=${flashStochK4h.toFixed(1)}, 1h=${flashStochK1h.toFixed(1)} (effective=${effectiveCurrentK.toFixed(1)}, max allowed: ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_CURRENT_MAX_K})\n` +
                       `   → K Rise: ${kRise.toFixed(1)} (min required: ${FLASH_CRASH_BOUNCE_PROBE.PHASE_2_MIN_K_RISE})\n` +
                       `   → K Rising Steps: ${risingSteps}/${minRisingSteps}\n` +
                       `   → Momentum Stabilizing: ${momentumStabilizing} (score=${earlyMomentumScore.toFixed(0)}, max opposing=${-phase2MomentumMax})\n` +
@@ -3615,8 +3615,8 @@ serve(async (req) => {
                   // Determine trigger phase for logging
                   const triggerPhase = phase1Triggered ? 'Phase 1 (STATIC)' : 'Phase 2 (RELEASE)';
                   const stochDetails = phase1Triggered 
-                    ? `4h=${stochK4h.toFixed(1)}, 1h=${stochK1h.toFixed(1)} (pinned at floor NOW)`
-                    : `4h=${stochK4h.toFixed(1)} (recent_min=${recentMinK.toFixed(1)}, RECOVERING)`;
+                    ? `4h=${flashStochK4h.toFixed(1)}, 1h=${flashStochK1h.toFixed(1)} (pinned at floor NOW)`
+                    : `4h=${flashStochK4h.toFixed(1)} (recent_min=${recentMinK.toFixed(1)}, RECOVERING)`;
                   
                   logger.forSymbol(symbol).info(
                     `${LOG_CATEGORIES.SUCCESS} 🔥 FLASH CRASH BOUNCE PROBE ACTIVATED (at Tier 0):\n` +
