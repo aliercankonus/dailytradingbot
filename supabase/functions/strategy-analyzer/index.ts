@@ -3767,8 +3767,9 @@ serve(async (req) => {
                 // Probe cascade check: max 2 probes per symbol per 6h
                 const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
                 const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
-                if (symbolProbeCount >= maxProbes6h) {
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to hard block`);
+                if (symbolProbeCount >= maxProbes6h || isProbeBarCooldownActive(symbol)) {
+                  const cooldownActive = isProbeBarCooldownActive(symbol);
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 TREND ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${cooldownActive ? ', bar cooldown active' : ''} — falling through to hard block`);
                   // FIX: Properly reject instead of silently continuing through pipeline
                   rejectedByHardGates++;
                   perSymbolGateAttribution.set(symbol, { 
@@ -7334,8 +7335,8 @@ serve(async (req) => {
                 // Probe cascade check: max 2 probes per symbol per 6h
                 const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
                 const maxProbes6h = deepExhaustion.MAX_PROBES_PER_SYMBOL_6H;
-                if (symbolProbeCount >= maxProbes6h) {
-                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h`);
+                if (symbolProbeCount >= maxProbes6h || isProbeBarCooldownActive(symbol)) {
+                  logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 🚫 DEEP_EXHAUSTION ACCELERATION PROBE blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${isProbeBarCooldownActive(symbol) ? ', bar cooldown active' : ''}`);
                   // Fall through to hard block below
                 } else {
                   const accelSlope = Math.abs(fullAdxResult.adxSlope ?? 0);
@@ -10547,8 +10548,8 @@ serve(async (req) => {
             // Probe cascade check
             const symbolProbeCount = probeCountPerSymbol6h.get(symbol) || 0;
             const maxProbes6h = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MAX_PROBES_PER_SYMBOL_6H;
-            if (symbolProbeCount >= maxProbes6h) {
-              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h — falling through to standard block`);
+            if (symbolProbeCount >= maxProbes6h || isProbeBarCooldownActive(symbol)) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${isProbeBarCooldownActive(symbol) ? ', bar cooldown active' : ''} — falling through to standard block`);
               // Fall through to standard block below
             } else {
               positionMultiplier = Math.min(positionMultiplier, 0.20);
