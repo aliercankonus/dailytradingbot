@@ -5889,6 +5889,9 @@ serve(async (req) => {
             } else if (htf1hAgreementBypassAllowed) {
               // Store for later position sizing
               (trendData as any).htf1hAgreementMultiplier = htf1hAgreementPositionMultiplier;
+            } else if (structuralAccelBypassAllowed) {
+              // Structural acceleration bypass — momentum is lagging behind price+ADX
+              logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MOMENTUM_HARD_GATE bypassed via STRUCTURAL_ACCELERATION: position at ${(structuralAccelPositionMultiplier * 100).toFixed(0)}%`);
             }
           }
         }
