@@ -3024,6 +3024,12 @@ serve(async (req) => {
         const adxRising = extractADXSlope(trendData).isRising;
         const momentum = trendData.momentum;
         
+        // ============= MARKET FEATURE SNAPSHOT (SINGLE EXTRACTION POINT) =============
+        // Build once per symbol — all gates should progressively migrate to reading from this.
+        // NOTE: smartMomentum is injected into trendData later (line ~3105), so snapshot.smartMomentum
+        // will be undefined at this point. It gets populated after earlySmartMomentum calculation.
+        const mfs = buildMarketFeatureSnapshot(symbol, trendData);
+        
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
         // Extract weighted components for smarter quality scoring and gate decisions
         const tf4hConfidence = trueAlignment?.tf4hConfidence ?? 0;
