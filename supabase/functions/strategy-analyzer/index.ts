@@ -2115,6 +2115,26 @@ serve(async (req) => {
       }
     }
 
+    // ============= PROBE CASCADE PROTECTION =============
+    // Track recent probe entries per symbol to prevent over-probing
+    const probeCountPerSymbol6h = new Map<string, number>();
+    {
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+      const { data: recentProbes } = await supabase
+        .from("positions")
+        .select("symbol, entry_exception_type, opened_at")
+        .eq("user_id", userId)
+        .gte("opened_at", sixHoursAgo)
+        .in("entry_exception_type", ['TREND_ACCELERATION_PROBE', 'DEEP_EXHAUSTION_ACCEL_PROBE', 'OVEREXTENSION_ACCEL_BYPASS']);
+      
+      recentProbes?.forEach((p: any) => {
+        probeCountPerSymbol6h.set(p.symbol, (probeCountPerSymbol6h.get(p.symbol) || 0) + 1);
+      });
+      if (probeCountPerSymbol6h.size > 0) {
+        logger.info(`${LOG_CATEGORIES.GATE} Probe cascade protection: ${[...probeCountPerSymbol6h.entries()].map(([s, c]) => `${s}=${c}`).join(', ')}`);
+      }
+    }
+
     const openTradesPerSymbol = new Map<string, number>();
     activePositions?.forEach((p) => {
       openTradesPerSymbol.set(p.symbol, (openTradesPerSymbol.get(p.symbol) || 0) + 1);
