@@ -2121,6 +2121,7 @@ serve(async (req) => {
     // ============= PROBE CASCADE PROTECTION =============
     // Track recent probe entries per symbol to prevent over-probing
     const probeCountPerSymbol6h = new Map<string, number>();
+    const lastProbeTimestampPerSymbol = new Map<string, string>();
     {
       const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
       const { data: recentProbes } = await supabase
@@ -2128,14 +2129,29 @@ serve(async (req) => {
         .select("symbol, entry_exception_type, opened_at")
         .eq("user_id", userId)
         .gte("opened_at", sixHoursAgo)
-        .in("entry_exception_type", ['TREND_ACCELERATION_PROBE', 'DEEP_EXHAUSTION_ACCEL_PROBE', 'OVEREXTENSION_ACCEL_BYPASS']);
+        .in("entry_exception_type", ['TREND_ACCELERATION_PROBE', 'DEEP_EXHAUSTION_ACCEL_PROBE', 'OVEREXTENSION_ACCEL_BYPASS', 'ADX_SLOPE_DECAY_MR_PROBE', 'CAPITULATION_OVERRIDE'])
+        .order("opened_at", { ascending: false });
       
       recentProbes?.forEach((p: any) => {
         probeCountPerSymbol6h.set(p.symbol, (probeCountPerSymbol6h.get(p.symbol) || 0) + 1);
+        // Track most recent probe timestamp per symbol
+        if (!lastProbeTimestampPerSymbol.has(p.symbol)) {
+          lastProbeTimestampPerSymbol.set(p.symbol, p.opened_at);
+        }
       });
       if (probeCountPerSymbol6h.size > 0) {
         logger.info(`${LOG_CATEGORIES.GATE} Probe cascade protection: ${[...probeCountPerSymbol6h.entries()].map(([s, c]) => `${s}=${c}`).join(', ')}`);
       }
+    }
+    
+    // Helper: Check if enough bars have passed since last probe for a symbol
+    // MIN_BARS_BETWEEN_PROBES = 3, using 15m bars → 45 minutes minimum gap
+    const MIN_BARS_MS = STOCHRSI_RUNWAY_GATE.DEEP_EXHAUSTION_COMPOUND.MIN_BARS_BETWEEN_PROBES * 15 * 60 * 1000;
+    function isProbeBarCooldownActive(sym: string): boolean {
+      const lastTs = lastProbeTimestampPerSymbol.get(sym);
+      if (!lastTs) return false;
+      const elapsed = Date.now() - new Date(lastTs).getTime();
+      return elapsed < MIN_BARS_MS;
     }
 
     // ============= DYNAMIC ENTRY WINDOW HELPER =============
