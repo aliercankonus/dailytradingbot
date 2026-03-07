@@ -9077,8 +9077,22 @@ serve(async (req) => {
                       nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, graduatedMomentum.NEUTRAL_MULTIPLIER);
                       logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ NEAR_24H_LOW_EXPANDED GRADUATED: SHORT allowed - momentum ${momScore.toFixed(0)} neutral (${graduatedMomentum.MODERATE_SHORT_MAX} to ${graduatedMomentum.NEUTRAL_SHORT_MAX}), ${distanceFromLow.toFixed(2)}% from low - micro position ${(graduatedMomentum.NEUTRAL_MULTIPLIER * 100).toFixed(0)}%`);
                     }
-                    // Band 4: Opposing momentum (> +5 for SHORT) — hard block
+                    // Band 4: Opposing momentum (> +5 for SHORT) — hard block UNLESS bearish trend bypass
                     else {
+                      // ===== BEARISH TREND BYPASS FOR EXPANDED BLOCK =====
+                      const bearishBypassExpanded = NEAR_EXTREME_PROTECTION_GATE.BEARISH_TREND_BYPASS;
+                      const trend4hExpanded = trendData.timeframes?.['4h']?.trend || 'neutral';
+                      const bearishBypassApplies = bearishBypassExpanded?.ENABLED && 
+                        adx >= bearishBypassExpanded.MIN_ADX && 
+                        (!bearishBypassExpanded.REQUIRE_BEARISH_4H || trend4hExpanded === 'bearish') &&
+                        adxSlope <= (bearishBypassExpanded.MAX_ADX_SLOPE ?? 0);
+                      
+                      if (bearishBypassApplies) {
+                        const isStrongBearishExp = bearishBypassExpanded.STRONG_BEARISH && adx >= bearishBypassExpanded.STRONG_BEARISH.MIN_ADX && ltfSupportsShort;
+                        const bypassMult = isStrongBearishExp ? bearishBypassExpanded.STRONG_BEARISH!.POSITION_MULTIPLIER : bearishBypassExpanded.POSITION_MULTIPLIER;
+                        nearExtremePositionMultiplier = Math.min(nearExtremePositionMultiplier, bypassMult);
+                        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔓 NEAR_24H_LOW_EXPANDED BEARISH_TREND_BYPASS: momentum=${momScore.toFixed(0)} opposing but ADX=${adx.toFixed(1)}, 4h=${trend4hExpanded}, slope=${adxSlope.toFixed(2)} → ${isStrongBearishExp ? 'strong' : 'standard'} bearish bypass at ${(bypassMult * 100).toFixed(0)}%`);
+                      } else {
                       nearExtremeBlocked = true;
                       rejectedByHardGates++;
                       const blockReason = `NEAR_24H_LOW_EXPANDED: SHORT blocked - ${distanceFromLow.toFixed(2)}% from 24h low ($${priceDistance.low24h.toFixed(2)}), momentum_score=${momScore.toFixed(0)} > ${graduatedMomentum.NEUTRAL_SHORT_MAX} — opposing momentum = location failure`;
