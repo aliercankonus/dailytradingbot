@@ -2943,14 +2943,78 @@ export const deriveTradeDirection = (
     let momentumConfidenceReduction = 0;
     let momentumPositionMultiplier = 1.0;
     
-    // ===== EXTREME MOMENTUM VETO CHECK (v3.0) =====
+    // ===== EXTREME MOMENTUM VETO CHECK (v3.0 + STRUCTURAL LAG OVERRIDE) =====
     // Hard safety rail: extreme momentum completely blocks opposing direction derivation
     // This check happens BEFORE graduated penalties are calculated
+    // FIX: STRUCTURAL_LAG_OVERRIDE can now bypass this veto with micro position
     const tentativeDirection = baseWeightedSum > 0 ? 'long' : 'short';
     const vetoCheck = checkExtremeMomentumVeto(momentumScore, tentativeDirection, P);
     
     if (vetoCheck.vetoed) {
-      // Return NO_CLEAR_DIRECTION with clear veto reason
+      // ===== STRUCTURAL LAG OVERRIDE FOR EXTREME VETO =====
+      // When momentum is extreme (+50+) but price impulse confirms the opposing direction,
+      // this is a lag problem: indicators haven't caught up to a sharp price reversal.
+      // Allow micro position (0.20x) instead of full block.
+      const smartMomentumData = trendData.smartMomentum;
+      const vetoAdx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 0;
+      const vetoPriceImpulse = Math.abs(smartMomentumData?.components?.priceImpulse ?? 0);
+      const vetoAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      const veto4hTrend = trendData.timeframes?.['4h']?.trend || 'neutral';
+      
+      // Check if price impulse opposes the momentum (confirming lag)
+      // For SHORT veto (momentum +50+): price must be dropping (impulse > 0 means price moved, 4h bearish)
+      // For LONG veto (momentum -50-): price must be rising (4h bullish)
+      const priceConfirmsOpposingDirection = 
+        (vetoCheck.vetoedDirection === 'short' && veto4hTrend === 'bearish' && vetoPriceImpulse >= 3) ||
+        (vetoCheck.vetoedDirection === 'long' && veto4hTrend === 'bullish' && vetoPriceImpulse >= 3);
+      
+      const structuralLagBypass = priceConfirmsOpposingDirection && vetoAdx >= 28 && Math.abs(vetoAdxSlope) >= 0.3;
+      
+      if (structuralLagBypass) {
+        // Allow with micro position — momentum lag confirmed by structural evidence
+        reasons.push(vetoCheck.reason!);
+        reasons.push(`🔧 EXTREME_VETO_LAG_OVERRIDE: Price impulse ${vetoPriceImpulse.toFixed(1)} + ADX=${vetoAdx.toFixed(1)} + 4h=${veto4hTrend} confirms ${tentativeDirection.toUpperCase()} despite momentum lag → 0.20x micro`);
+        
+        const rescueConf = Math.min(45, 30 + vetoPriceImpulse * 2);
+        
+        outerGraduatedMomentumEffect = {
+          directionFlipped: false,
+          directionNullified: false,
+          baseDirection: tentativeDirection,
+          adjustedDirection: tentativeDirection,
+          baseWeightedSum,
+          adjustedWeightedSum: baseWeightedSum,
+          penaltyApplied: 0,
+        };
+        outerMomentumImpact = 'extreme_opposing';
+        outerMomentumScore = momentumScore;
+        
+        return {
+          direction: tentativeDirection,
+          confidence: rescueConf,
+          source: "extreme_veto_lag_override",
+          reasons,
+          isWeightedDerivation: true,
+          positionSizeMultiplier: 0.20,
+          regime,
+          momentumImpact: 'extreme_opposing',
+          momentumScore,
+          graduatedMomentumEffect: outerGraduatedMomentumEffect,
+          directionContext: createDirectionContext(tentativeDirection, {
+            evidenceType: 'STRUCTURAL_RESCUE',
+            tier: 0.5,
+            tierSource: 'TIER_0.50_EXTREME_VETO_LAG_OVERRIDE',
+            confidence: rescueConf,
+            positionMultiplier: 0.20,
+            isCounterTrend: false,
+            riskClass: 'HIGH',
+            evidenceStrength: 'WEAK',
+            weightedScore: baseWeightedSum,
+          }),
+        };
+      }
+      
+      // Standard veto — no structural evidence to override
       reasons.push(vetoCheck.reason!);
       reasons.push(`⛔ EXTREME MOMENTUM VETO ACTIVE: Cannot derive ${vetoCheck.vetoedDirection?.toUpperCase()} into |momentum| = ${Math.abs(momentumScore).toFixed(0)}`);
       
