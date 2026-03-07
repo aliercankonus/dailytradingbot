@@ -7406,25 +7406,25 @@ export const STOCHRSI_RUNWAY_GATE = {
   DEEP_EXHAUSTION_COMPOUND: {
     ENABLED: true,
     // SHORT: Block when K < 15 AND moveFromHigh > 2%
-    SHORT_MAX_K: 12,
+    // RELAXED: was 12, raised to 15 to catch AVAX(K=14), SOL(K=3.7) etc.
+    SHORT_MAX_K: 15,
     SHORT_MIN_MOVE_PERCENT: 2.0,
     // LONG: Block when K > 85 AND moveFromLow > 2%
     LONG_MIN_K: 85,
     LONG_MIN_MOVE_PERCENT: 2.0,
     // Position multiplier if ADX is very high (probe instead of block)
-    // FIX: Lowered from 40 to 35 — SOL(38.2) and AVAX(34.1) were being hard-blocked
-    // despite strong structural trends. ADX>=35 = confirmed strong trend.
+    // RELAXED: Lowered from 35 to 30 — AVAX(ADX=34), XRP(ADX=33) were being hard-blocked
+    // despite strong structural trends. ADX>=30 = confirmed trend with enough energy for micro probe.
     HIGH_ADX_PROBE_MULTIPLIER: 0.20,
-    HIGH_ADX_PROBE_THRESHOLD: 35,
+    HIGH_ADX_PROBE_THRESHOLD: 30,
     // ===== TREND ACCELERATION MICRO PROBE =====
     // When DEEP_EXHAUSTION triggers but ADX slope indicates strong acceleration,
     // allow a micro probe instead of hard block. This captures trend continuation dips.
-    // Conditions: ADX > 30 AND slope > 0.3 → 0.20x position
-    // Rationale: 4H ADX slope distribution: 0.2-0.4 very common, 0.4-0.7 strong, 0.8+ rare
-    // Previous 0.6 threshold missed SOL(slope=0.31) which was in BREAKOUT_SETUP
+    // Conditions: ADX > 28 AND |slope| > 0.20 → 0.20x position
+    // RELAXED: ADX 30→28, slope 0.3→0.20 to catch more borderline cases
     ACCELERATION_PROBE_ENABLED: true,
-    ACCELERATION_PROBE_MIN_ADX: 30,
-    ACCELERATION_PROBE_MIN_SLOPE: 0.3,
+    ACCELERATION_PROBE_MIN_ADX: 28,
+    ACCELERATION_PROBE_MIN_SLOPE: 0.20,
     ACCELERATION_PROBE_MULTIPLIER: 0.20,
     // ===== PROBE CASCADE PROTECTION =====
     // Prevent multiple probes on the same symbol within a short window
