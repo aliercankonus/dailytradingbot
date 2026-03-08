@@ -316,22 +316,24 @@ export async function getCurrentPrice(symbol: string): Promise<number | null> {
  * Fetch 24hr ticker data for a symbol
  */
 export async function get24hrTicker(symbol: string): Promise<any | null> {
+  await acquireFetchSlot();
   try {
-    await acquireFetchSlot();
     const response = await fetchWithTimeout(
       `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`,
       FETCH_TIMEOUTS.ticker
     );
-    releaseFetchSlot();
     if (!response.ok) {
       logger.warn(`Failed to fetch 24hr ticker for ${symbol}: ${response.status}`);
       return null;
     }
+    fetchOkCount++;
     return await response.json();
   } catch (error) {
-    releaseFetchSlot();
+    if (String(error).includes('BINANCE_TIMEOUT')) timeoutCount++;
     logger.error(`Error fetching 24hr ticker for ${symbol}: ${error}`);
     return null;
+  } finally {
+    releaseFetchSlot();
   }
 }
 
