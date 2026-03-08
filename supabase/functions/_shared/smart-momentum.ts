@@ -3169,3 +3169,297 @@ export function detectLiquidityTrap(
     trapDirection
   };
 }
+
+// ============= LIQUIDITY SWEEP REVERSAL DETECTION (LSRD) =============
+// Detects when price sweeps below a key level (24h low) then reverses
+// Creates counter-direction bounce opportunities from false breakdowns
+//
+// Pattern: 
+//   1. Price breaks below 24h low (sweep)
+//   2. Wick rejection or engulfing candle forms (reversal)
+//   3. Price recovers back above the swept level
+//   4. Volume confirms institutional participation
+//
+export interface LiquiditySweepResult {
+  detected: boolean;
+  score: number;           // 0-100 quality score
+  sweepDirection: 'low_sweep' | 'high_sweep' | 'none';
+  bounceDirection: 'long' | 'short' | 'none';
+  sweepDepthATR: number;   // How deep the sweep went
+  recoveryPercent: number; // How much price recovered from sweep
+  patternType: 'pin_bar' | 'engulfing' | 'hammer' | 'multi_bar_reversal' | 'none';
+  volumeConfirmed: boolean;
+  signals: string[];
+  positionMultiplier: number;
+}
+
+export function detectLiquiditySweepReversal(
+  klines5m: any[],
+  klines1m: any[],
+  extremeLevel: number,       // 24h low or 24h high
+  sweepType: 'low' | 'high',  // Are we checking for sweep below low or above high?
+  currentATR: number,
+  stochK: number,
+  adx: number,
+  config: typeof import("../_shared/constants.ts").LIQUIDITY_SWEEP_REVERSAL
+): LiquiditySweepResult {
+  const defaultResult: LiquiditySweepResult = {
+    detected: false, score: 0, sweepDirection: 'none', bounceDirection: 'none',
+    sweepDepthATR: 0, recoveryPercent: 0, patternType: 'none',
+    volumeConfirmed: false, signals: [], positionMultiplier: 0
+  };
+
+  if (!klines5m || klines5m.length < 10 || currentATR <= 0) return defaultResult;
+
+  // Parse recent 5m candles
+  const parseCandle = (k: any) => ({
+    o: parseFloat(k[1] ?? k.open ?? 0),
+    h: parseFloat(k[2] ?? k.high ?? 0),
+    l: parseFloat(k[3] ?? k.low ?? 0),
+    c: parseFloat(k[4] ?? k.close ?? 0),
+    v: parseFloat(k[5] ?? k.volume ?? 0),
+  });
+
+  const recentCandles = klines5m.slice(-config.MAX_BARS_SINCE_SWEEP).map(parseCandle);
+  if (recentCandles.length < 3) return defaultResult;
+
+  // Calculate average volume
+  const allCandles = klines5m.slice(-30).map(parseCandle);
+  const avgVolume = allCandles.reduce((s, c) => s + c.v, 0) / allCandles.length;
+
+  let sweepScore = 0;
+  const signals: string[] = [];
+  let sweepDepthATR = 0;
+  let sweepCandleIdx = -1;
+  let sweepCandle: ReturnType<typeof parseCandle> | null = null;
+
+  // ===== STEP 1: DETECT SWEEP =====
+  // Find the candle that broke below 24h low (or above 24h high)
+  for (let i = 0; i < recentCandles.length; i++) {
+    const c = recentCandles[i];
+    
+    if (sweepType === 'low') {
+      // Sweep below 24h low
+      if (c.l < extremeLevel) {
+        const depth = (extremeLevel - c.l) / currentATR;
+        if (depth >= config.MIN_SWEEP_DEPTH_ATR && depth <= config.MAX_SWEEP_DEPTH_ATR) {
+          if (depth > sweepDepthATR) {
+            sweepDepthATR = depth;
+            sweepCandleIdx = i;
+            sweepCandle = c;
+          }
+        }
+      }
+    } else {
+      // Sweep above 24h high
+      if (c.h > extremeLevel) {
+        const depth = (c.h - extremeLevel) / currentATR;
+        if (depth >= config.MIN_SWEEP_DEPTH_ATR && depth <= config.MAX_SWEEP_DEPTH_ATR) {
+          if (depth > sweepDepthATR) {
+            sweepDepthATR = depth;
+            sweepCandleIdx = i;
+            sweepCandle = c;
+          }
+        }
+      }
+    }
+  }
+
+  if (sweepCandleIdx === -1 || !sweepCandle) return defaultResult;
+
+  // Sweep depth score (0-25)
+  const depthScore = Math.min(25, Math.round(sweepDepthATR * 20));
+  sweepScore += depthScore;
+  signals.push(`SWEEP: depth=${sweepDepthATR.toFixed(2)} ATR below ${sweepType === 'low' ? 'low' : 'high'} (+${depthScore})`);
+
+  // ===== STEP 2: DETECT REVERSAL PATTERN =====
+  // Look at candles AFTER the sweep for reversal confirmation
+  const postSweepCandles = recentCandles.slice(sweepCandleIdx);
+  if (postSweepCandles.length < 1) return defaultResult;
+
+  let patternType: LiquiditySweepResult['patternType'] = 'none';
+  let patternScore = 0;
+  const lastCandle = postSweepCandles[postSweepCandles.length - 1];
+  const currentPrice = lastCandle.c;
+
+  if (sweepType === 'low') {
+    // Looking for BULLISH reversal patterns after low sweep
+    
+    // Check sweep candle itself for hammer/pin bar
+    const sweepLowerWick = sweepCandle.o > sweepCandle.c 
+      ? sweepCandle.c - sweepCandle.l 
+      : sweepCandle.o - sweepCandle.l;
+    const sweepBody = Math.abs(sweepCandle.c - sweepCandle.o);
+    const sweepRange = sweepCandle.h - sweepCandle.l;
+    
+    if (sweepRange > 0 && sweepLowerWick / sweepRange > 0.6 && sweepBody / sweepRange < 0.3) {
+      // Pin bar / hammer on sweep candle
+      patternType = 'pin_bar';
+      patternScore = Math.min(25, Math.round((sweepLowerWick / sweepRange) * 35));
+      signals.push(`PATTERN: Pin bar on sweep candle, wick=${(sweepLowerWick/sweepRange*100).toFixed(0)}% (+${patternScore})`);
+    }
+    
+    // Check for bullish engulfing after sweep
+    if (postSweepCandles.length >= 2) {
+      const prevC = postSweepCandles[postSweepCandles.length - 2];
+      if (prevC.c < prevC.o && lastCandle.c > lastCandle.o && 
+          lastCandle.c > prevC.o && lastCandle.o <= prevC.c) {
+        const engulfScore = Math.min(25, 20);
+        if (engulfScore > patternScore) {
+          patternType = 'engulfing';
+          patternScore = engulfScore;
+          signals.push(`PATTERN: Bullish engulfing (+${engulfScore})`);
+        }
+      }
+    }
+    
+    // Multi-bar reversal: price swept low then recovered in 2-3 bars
+    if (patternType === 'none' && postSweepCandles.length >= 2) {
+      const recovery = currentPrice - sweepCandle.l;
+      const sweepDrop = extremeLevel - sweepCandle.l;
+      if (sweepDrop > 0 && recovery / sweepDrop > 1.2) {
+        patternType = 'multi_bar_reversal';
+        patternScore = Math.min(20, Math.round((recovery / sweepDrop) * 10));
+        signals.push(`PATTERN: Multi-bar reversal, recovery=${(recovery/sweepDrop*100).toFixed(0)}% of sweep (+${patternScore})`);
+      }
+    }
+    
+    // Check hammer pattern (small body at top, long lower shadow)
+    if (patternType === 'none' && sweepCandle.c > sweepCandle.o) {
+      const hammerRatio = sweepLowerWick / (sweepBody || 0.0001);
+      if (hammerRatio >= 2.0) {
+        patternType = 'hammer';
+        patternScore = Math.min(20, Math.round(hammerRatio * 5));
+        signals.push(`PATTERN: Hammer, wick/body=${hammerRatio.toFixed(1)} (+${patternScore})`);
+      }
+    }
+  } else {
+    // Looking for BEARISH reversal patterns after high sweep
+    const sweepUpperWick = sweepCandle.c > sweepCandle.o
+      ? sweepCandle.h - sweepCandle.c
+      : sweepCandle.h - sweepCandle.o;
+    const sweepBody = Math.abs(sweepCandle.c - sweepCandle.o);
+    const sweepRange = sweepCandle.h - sweepCandle.l;
+    
+    if (sweepRange > 0 && sweepUpperWick / sweepRange > 0.6 && sweepBody / sweepRange < 0.3) {
+      patternType = 'pin_bar';
+      patternScore = Math.min(25, Math.round((sweepUpperWick / sweepRange) * 35));
+      signals.push(`PATTERN: Bearish pin bar on sweep candle, wick=${(sweepUpperWick/sweepRange*100).toFixed(0)}% (+${patternScore})`);
+    }
+    
+    if (postSweepCandles.length >= 2) {
+      const prevC = postSweepCandles[postSweepCandles.length - 2];
+      if (prevC.c > prevC.o && lastCandle.c < lastCandle.o &&
+          lastCandle.c < prevC.o && lastCandle.o >= prevC.c) {
+        const engulfScore = Math.min(25, 20);
+        if (engulfScore > patternScore) {
+          patternType = 'engulfing';
+          patternScore = engulfScore;
+          signals.push(`PATTERN: Bearish engulfing (+${engulfScore})`);
+        }
+      }
+    }
+    
+    if (patternType === 'none' && postSweepCandles.length >= 2) {
+      const recovery = sweepCandle.h - currentPrice;
+      const sweepRise = sweepCandle.h - extremeLevel;
+      if (sweepRise > 0 && recovery / sweepRise > 1.2) {
+        patternType = 'multi_bar_reversal';
+        patternScore = Math.min(20, Math.round((recovery / sweepRise) * 10));
+        signals.push(`PATTERN: Multi-bar bearish reversal (+${patternScore})`);
+      }
+    }
+  }
+
+  sweepScore += patternScore;
+
+  // ===== STEP 3: RECOVERY CHECK =====
+  let recoveryPercent = 0;
+  if (sweepType === 'low') {
+    // Price should be back above 24h low
+    recoveryPercent = extremeLevel > 0 ? ((currentPrice - extremeLevel) / extremeLevel) * 100 : 0;
+    if (config.REQUIRE_RECOVERY_ABOVE_LEVEL && currentPrice <= extremeLevel) {
+      signals.push(`RECOVERY_FAIL: price ${currentPrice.toFixed(4)} still below level ${extremeLevel.toFixed(4)}`);
+      // Reduce score but don't eliminate — may still be forming
+      sweepScore = Math.round(sweepScore * 0.5);
+    } else if (currentPrice > extremeLevel) {
+      const recoveryPoints = Math.min(15, Math.round(recoveryPercent * 10));
+      sweepScore += recoveryPoints;
+      signals.push(`RECOVERY: ${recoveryPercent.toFixed(2)}% above swept level (+${recoveryPoints})`);
+    }
+  } else {
+    recoveryPercent = extremeLevel > 0 ? ((extremeLevel - currentPrice) / extremeLevel) * 100 : 0;
+    if (config.REQUIRE_RECOVERY_ABOVE_LEVEL && currentPrice >= extremeLevel) {
+      sweepScore = Math.round(sweepScore * 0.5);
+    } else if (currentPrice < extremeLevel) {
+      const recoveryPoints = Math.min(15, Math.round(recoveryPercent * 10));
+      sweepScore += recoveryPoints;
+      signals.push(`RECOVERY: ${recoveryPercent.toFixed(2)}% below swept level (+${recoveryPoints})`);
+    }
+  }
+
+  // ===== STEP 4: VOLUME CONFIRMATION =====
+  let volumeConfirmed = false;
+  if (avgVolume > 0) {
+    const sweepVolRatio = sweepCandle.v / avgVolume;
+    const lastVolRatio = lastCandle.v / avgVolume;
+    
+    if (sweepVolRatio >= config.MIN_SWEEP_VOLUME_RATIO) {
+      sweepScore += 10;
+      signals.push(`VOLUME_SWEEP: ${sweepVolRatio.toFixed(1)}x avg (+10)`);
+    }
+    if (lastVolRatio >= config.MIN_REVERSAL_VOLUME_RATIO || 
+        postSweepCandles.some(c => c.v / avgVolume >= config.MIN_REVERSAL_VOLUME_RATIO)) {
+      volumeConfirmed = true;
+      sweepScore += 10;
+      signals.push(`VOLUME_REVERSAL: confirmed (+10)`);
+    }
+  }
+
+  // ===== STEP 5: STRUCTURAL FILTERS =====
+  // StochRSI context
+  if (sweepType === 'low' && stochK <= config.MAX_STOCHRSI_FOR_LONG_BOUNCE) {
+    sweepScore += 5;
+    signals.push(`STOCHRSI_CONTEXT: K=${stochK.toFixed(1)} oversold → supports long bounce (+5)`);
+  } else if (sweepType === 'high' && stochK >= config.MIN_STOCHRSI_FOR_SHORT_BOUNCE) {
+    sweepScore += 5;
+    signals.push(`STOCHRSI_CONTEXT: K=${stochK.toFixed(1)} overbought → supports short bounce (+5)`);
+  }
+
+  // ADX filter
+  if (adx > config.MAX_ADX_FOR_COUNTER_BOUNCE) {
+    sweepScore = Math.round(sweepScore * 0.4); // Heavy penalty — opposing trend too strong
+    signals.push(`ADX_PENALTY: ${adx.toFixed(1)} > ${config.MAX_ADX_FOR_COUNTER_BOUNCE} → too strong to fade (×0.4)`);
+  } else if (adx < config.MIN_ADX_FOR_BOUNCE) {
+    sweepScore = Math.round(sweepScore * 0.6); // Mild penalty — no energy for bounce
+    signals.push(`ADX_LOW: ${adx.toFixed(1)} < ${config.MIN_ADX_FOR_BOUNCE} → weak energy (×0.6)`);
+  }
+
+  // ===== STEP 6: FINAL DETERMINATION =====
+  sweepScore = Math.min(100, sweepScore);
+  const detected = sweepScore >= config.MIN_PATTERN_SCORE && patternType !== 'none';
+
+  let positionMultiplier = 0;
+  if (detected) {
+    if (sweepScore >= config.ELITE_THRESHOLD) {
+      positionMultiplier = config.ELITE_MULTIPLIER;
+    } else if (sweepScore >= config.HIGH_QUALITY_THRESHOLD) {
+      positionMultiplier = config.HIGH_QUALITY_MULTIPLIER;
+    } else {
+      positionMultiplier = config.BASE_POSITION_MULTIPLIER;
+    }
+  }
+
+  return {
+    detected,
+    score: sweepScore,
+    sweepDirection: sweepType === 'low' ? 'low_sweep' : 'high_sweep',
+    bounceDirection: detected ? (sweepType === 'low' ? 'long' : 'short') : 'none',
+    sweepDepthATR,
+    recoveryPercent,
+    patternType,
+    volumeConfirmed,
+    signals,
+    positionMultiplier,
+  };
+}
