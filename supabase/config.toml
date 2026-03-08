@@ -73,3 +73,6 @@ verify_jwt = false
 enabled = true
 cron = "0 * * * *"
 
+[functions.backtest-runner]
+verify_jwt = true
+
