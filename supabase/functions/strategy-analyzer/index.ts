@@ -8964,7 +8964,7 @@ serve(async (req) => {
           // Log zone distribution for all symbols (not just blocked ones)
           if (moveZoneDetails) {
             const relaxedTag = moveZoneDetails.relaxationApplied ? ` [RELAXED: ${moveZoneDetails.relaxationCondition}]` : '';
-            logger.forSymbol(symbol).info(`📊 ZONE_ANALYTICS: ${moveZoneDetails.zone} | move=${moveZoneDetails.distancePercent.toFixed(1)}% | dir=${moveZoneDetails.direction} | outcome=${moveZoneDetails.outcome} | size=${(moveZoneDetails.positionMultiplier * 100).toFixed(0)}% | K=${moveZoneDetails.stochRsiK.toFixed(0)} | ADX=${moveZoneDetails.adx.toFixed(1)}${moveZoneDetails.overrideReason ? ` | reason=${moveZoneDetails.overrideReason}` : ''}${relaxedTag}`);
+            logger.forSymbol(symbol).debug(`📊 ZONE_ANALYTICS: ${moveZoneDetails.zone} | move=${moveZoneDetails.distancePercent.toFixed(1)}% | dir=${moveZoneDetails.direction} | outcome=${moveZoneDetails.outcome} | size=${(moveZoneDetails.positionMultiplier * 100).toFixed(0)}% | K=${moveZoneDetails.stochRsiK.toFixed(0)} | ADX=${moveZoneDetails.adx.toFixed(1)}${moveZoneDetails.overrideReason ? ` | reason=${moveZoneDetails.overrideReason}` : ''}${relaxedTag}`);
           }
           
           // ===== MEAN REVERSION DIRECTION FLIP =====
