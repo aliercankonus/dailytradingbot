@@ -2985,11 +2985,11 @@ export const deriveTradeDirection = (
       // When momentum is extreme (+50+) but price impulse confirms the opposing direction,
       // this is a lag problem: indicators haven't caught up to a sharp price reversal.
       // Allow micro position (0.20x) instead of full block.
-      const smartMomentumData = trendData.smartMomentum;
-      const vetoAdx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 0;
+      const smartMomentumData = mfs.smartMomentum;
+      const vetoAdx = mfs.adx;
       const vetoPriceImpulse = Math.abs(smartMomentumData?.components?.priceImpulse ?? 0);
-      const vetoAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
-      const veto4hTrend = trendData.timeframes?.['4h']?.trend || 'neutral';
+      const vetoAdxSlope = mfs.adxSlope;
+      const veto4hTrend = mfs.timeframes['4h'].trend || 'neutral';
       
       // Check if price impulse opposes the momentum (confirming lag)
       // For SHORT veto (momentum +50+): price must be dropping (impulse > 0 means price moved, 4h bearish)
