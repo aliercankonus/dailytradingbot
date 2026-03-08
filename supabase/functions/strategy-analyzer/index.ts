@@ -1937,7 +1937,7 @@ serve(async (req) => {
               strategiesCount: stats.uniqueStrategies.size,
               threshold: SYMBOL_WIN_RATE_THRESHOLD
             },
-            { direction: 'blocked' },
+            null,  // No mfs available for symbol-level blocks
             false  // No AI analysis for symbol-level blocks
           );
         } else if (hasEnoughTrades && !hasEnoughDiversity && isBelowThreshold) {
