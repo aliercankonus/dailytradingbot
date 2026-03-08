@@ -5594,7 +5594,7 @@ serve(async (req) => {
           const isSameDir = (lastExitSide === 'sell' && derivedDirection === 'short') ||
                             (lastExitSide === 'buy' && derivedDirection === 'long');
           if (isSameDir) {
-            const currentPrice = trendData.currentPrice || trendData.price || 0;
+            const currentPrice = mfs.currentPrice || 0;
             // For SHORT: entering at a LOWER price than exit = chasing (already captured that zone)
             // For LONG: entering at a HIGHER price than exit = chasing (already captured that zone)
             const isWorsePrice = (derivedDirection === 'short' && currentPrice < lastExitPrice) ||
