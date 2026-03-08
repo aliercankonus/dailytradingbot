@@ -9770,7 +9770,7 @@ serve(async (req) => {
                         ? `ADX >= ${hardGradLong.MODERATE_TREND.MIN_ADX} + slope >= ${hardGradLong.MODERATE_TREND.MIN_ADX_SLOPE} for 15%, ADX >= ${hardGradLong.STRONG_TREND.MIN_ADX} + slope >= ${hardGradLong.STRONG_TREND.MIN_ADX_SLOPE} for 25%`
                         : `LTF (1h or 30m) must be bullish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9861,7 +9861,7 @@ serve(async (req) => {
                       neutralZoneThreshold: MOMENTUM_REVERSAL_PROTECTION.NEUTRAL_ZONE_THRESHOLD,
                     }
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -10351,7 +10351,7 @@ serve(async (req) => {
                   allowNeutralAboveADX: MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX,
                 }
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -10485,7 +10485,7 @@ serve(async (req) => {
               continuationModeRejection: continuationModeResult?.reason || "N/A",
               continuationGateResults: continuationModeResult?.gateResults || []
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -10601,7 +10601,7 @@ serve(async (req) => {
                 momentumScore: smartMomentum.score,
                 architecture: "Strict block — shadow audit 48h: 392 signals, 0% win rate, all SL_HIT",
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -10642,7 +10642,7 @@ serve(async (req) => {
               currentPrice: feeCheckPrice,
               architecture: "Hard block — no exceptions"
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -10697,7 +10697,7 @@ serve(async (req) => {
               adxRising: smartAdxRising,
               isExhausted: adxExhaustion.isExhausted
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -10813,7 +10813,7 @@ serve(async (req) => {
                   exhaustionMature: { regimeScore: smartRegime.regimeScore, threshold: overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD }
                 } : undefined
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -10968,7 +10968,7 @@ serve(async (req) => {
                 meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
                 preRecoveryOverrideAllowed: earlyMeanReversionSignal?.preRecoveryOverrideAllowed ?? false
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -11006,7 +11006,7 @@ serve(async (req) => {
               threshold: REGIME_SCORE_PARAMS.BLOCK_CONTINUATION_BELOW,
               penalties: regimeEnhanced.penalties
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -11058,7 +11058,7 @@ serve(async (req) => {
               stochRsi: trendData.stochasticRsi?.aggregated,
               trend1h: htfTrend1h
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -11425,7 +11425,7 @@ serve(async (req) => {
                   tier1Thresholds: { adx: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX, slope: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE, diGap: STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP },
                   message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion OR recent profitable exit with ADX>=30"
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -11471,7 +11471,7 @@ serve(async (req) => {
                   tier1Thresholds: { adx: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX, slope: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE, diGap: STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP },
                   message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion OR recent profitable exit with ADX>=30"
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -11642,7 +11642,7 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               bollingerPosition
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
