@@ -248,6 +248,12 @@ export interface MarketFeatureSnapshot {
     isWeakening: boolean;
     isTransitioning: boolean;
     overextensionATR: number;
+    microExhaustion?: {
+      detected: boolean;
+      score: number;
+      recommendation: string;
+      signals: string[];
+    };
     components?: {
       macdSlope: number;
       priceImpulse: number;
