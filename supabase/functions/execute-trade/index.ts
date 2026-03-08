@@ -614,11 +614,10 @@ serve(async (req) => {
 
     // FILTER 2: Require trend consistency (dynamic threshold based on ADX and 1h confidence)
     // CENTRALIZED: Use shared extractor for consistent ADX access
-    const adxValueForConsistency = extractADX(trendData);
+    const adxValueForConsistency = mfs.adx;
     
     // Extract 1h confidence for dynamic threshold
-    const confidence1hForConsistency = trendData?.timeframes?.['1h']?.confidence || 
-                                       trendData?.higherTimeframeFilter?.confidence1h || 0;
+    const confidence1hForConsistency = mfs.timeframes['1h'].confidence || 0;
     
     // Check if this is a neutral trend scenario (for lower threshold)
     // Aligned with quality threshold logic: neutral applies when strategy contains "neutral" OR trend is neutral/ranging
