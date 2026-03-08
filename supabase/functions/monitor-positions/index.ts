@@ -45,11 +45,12 @@ interface TrueAlignmentData {
   isWeak: boolean;     // Weak/neutral alignment
 }
 
-function extractTrueAlignment(trendData: any): TrueAlignmentData | null {
-  const alignment = trendData?.trueAlignment;
-  if (!alignment) return null;
+function extractTrueAlignmentFromMFS(mfs: MarketFeatureSnapshot | undefined): TrueAlignmentData | null {
+  if (!mfs) return null;
+  const alignment = mfs.trueAlignment;
+  if (!alignment || (alignment.score === 0 && alignment.tf4hConfidence === 0)) return null;
   
-  const weighted = alignment.weightedComponents || {};
+  const weighted = alignment.weightedComponents || {} as any;
   const tf4hWeighted = weighted.tf4hWeighted ?? 0;
   const tf1hWeighted = weighted.tf1hWeighted ?? 0;
   const adxContribution = alignment.adxContribution ?? 0;
@@ -69,13 +70,11 @@ function extractTrueAlignment(trendData: any): TrueAlignmentData | null {
       volumeWeighted: weighted.volumeWeighted ?? 0,
     },
     neutralCapped,
-    // Premium: Strong 4H AND 1H alignment with good ADX contribution
     isPremium: tf4hWeighted >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_TF4H_WEIGHTED && tf1hWeighted >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_TF1H_WEIGHTED && adxContribution >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_ADX_CONTRIBUTION,
-    // Weak: Neutral capped OR very low 4H confidence
     isWeak: neutralCapped || tf4hConfidence < HTF_ALIGNMENT_EXIT.WEAK_MAX_TF4H_CONFIDENCE,
   };
 }
-import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
+// trend-types import removed — all reads come from MarketFeatureSnapshot (mfs)
 // Phase 3: Smart Momentum for context-aware exit management
 import {
   calculateMomentumScore,
@@ -469,12 +468,11 @@ serve(async (req) => {
       // DYNAMIC THRESHOLDS (aligned with strategy-analyzer)
       // Use ADX and volume to determine exit sensitivity
       // ============================================================
-      const trendDataForPosition = trendDataMap.get(position.symbol);
       const mfsForPosition = mfsMap.get(position.symbol);
-      // MFS MIGRATION: Use MFS for ADX instead of individual extractors
+      // MFS-NATIVE: All reads from MarketFeatureSnapshot — no trendData fallbacks
       const positionAdx = mfsForPosition?.adx ?? 20;
-      const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
-      const positionConfidence = mfsForPosition?.confidence ?? trendDataForPosition?.confidence ?? 50;
+      const positionVolumeScore = mfsForPosition?.volumeScore ?? 0;
+      const positionConfidence = mfsForPosition?.confidence ?? 50;
       
       // ============================================================
       // CONFIDENCE PENALTY (imported from shared scoring module)
@@ -624,7 +622,7 @@ serve(async (req) => {
       // Use HTF weighted components for smarter exit timing
       // Premium alignment = more patience, Weak alignment = exit sooner
       // ============================================================
-      const trueAlignment = extractTrueAlignment(trendDataForPosition);
+      const trueAlignment = extractTrueAlignmentFromMFS(mfsForPosition);
       let alignmentExitAdjustment = 0;
       let alignmentExitNote = "";
       let htfAlignmentMultiplier = 1.0; // Used for trailing stop distance adjustment
@@ -633,7 +631,7 @@ serve(async (req) => {
         const { tf4hWeighted, tf1hWeighted, adxWeighted, volumeWeighted } = trueAlignment.weightedComponents;
         
         // Check if position is aligned with HTF trend
-        const primaryTrend = trendDataForPosition?.trend || 'ranging';
+        const primaryTrend = mfsForPosition?.primaryTrend || 'ranging';
         const isPositionAlignedWithHTF = 
           (position.side === 'BUY' && primaryTrend === 'bullish') ||
           (position.side === 'SELL' && primaryTrend === 'bearish');
@@ -759,7 +757,7 @@ serve(async (req) => {
       }
 
       // Get current trend for this position's symbol
-      const trendData = trendDataMap.get(position.symbol);
+      // MFS-NATIVE: All trend reads from mfsForPosition — no raw trendData access
 
       // ============================================================
       // 🚨 EMERGENCY PROTECTION SYSTEMS
@@ -1085,8 +1083,8 @@ serve(async (req) => {
           atr: atrData?.atr || currentPrice * 0.02,
           adx: mfsForPosition?.adx ?? 20,
           adxSlope: mfsForPosition?.adxSlope ?? 0,
-          primaryTrend: mfsForPosition?.primaryTrend || trendDataForPosition?.primaryTrend || "ranging",
-          momentumScore: mfsForPosition?.smartMomentum?.score ?? trendDataForPosition?.momentum?.score ?? 0,
+          primaryTrend: mfsForPosition?.primaryTrend || "ranging",
+          momentumScore: mfsForPosition?.smartMomentum?.score ?? 0,
         };
         const mrResult = evaluateMeanReversionExit(
           { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
@@ -1148,8 +1146,8 @@ serve(async (req) => {
           atr: atrData?.atr || currentPrice * 0.02,
           adx: mfsForPosition?.adx ?? 20,
           adxSlope: mfsForPosition?.adxSlope ?? 0,
-          primaryTrend: mfsForPosition?.primaryTrend || trendDataForPosition?.primaryTrend || "ranging",
-          momentumScore: mfsForPosition?.smartMomentum?.score ?? trendDataForPosition?.momentum?.score ?? 0,
+          primaryTrend: mfsForPosition?.primaryTrend || "ranging",
+          momentumScore: mfsForPosition?.smartMomentum?.score ?? 0,
         };
         const decayResult = evaluateDecayVelocity(
           { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
@@ -1457,7 +1455,7 @@ serve(async (req) => {
       // Use ADX-aware activation and momentum-based trailing distance
       // FIXED: Calculate momentum with ACTUAL ADX values from trend data (not hardcoded 20)
       // MFS MIGRATION: Use MFS for ADX and slope (momentum calculation context)
-      const trendDataForMomentum = trendDataMap.get(position.symbol);
+      // MFS-NATIVE: ADX and slope for momentum calculation come from mfsForPosition
       const adxForMomentum = mfsForPosition?.adx ?? 20;
       const momentumAdxSlope = mfsForPosition?.adxSlope ?? 0;
       const adxRisingForMomentum = mfsForPosition?.adxRising ?? false;
@@ -1677,7 +1675,7 @@ serve(async (req) => {
       // ============= PHASE 3: EXIT SIGNAL SCORING =============
       // Calculate comprehensive exit signal based on multiple factors
       if (momentumData && swingData && position.opened_at) {
-        const reversalScoreForExit = trendDataForPosition?.reversalScore || 0;
+        const reversalScoreForExit = mfsForPosition?.reversalScore ?? 0;
         
         const exitSignal = calculateExitSignal(
           {
