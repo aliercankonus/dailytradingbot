@@ -181,7 +181,7 @@ export function checkVolatilityContracting(
  * For LONG: 15m or 30m shows Higher Low + Higher High
  * For SHORT: 15m or 30m shows Lower High + Lower Low
  * 
- * @param trendData - Trend data containing timeframe information
+ * @param mfs - MarketFeatureSnapshot containing timeframe information
  * @param direction - Trade direction ('long' or 'short')
  * @returns Object with flip status and confidence score
  */
