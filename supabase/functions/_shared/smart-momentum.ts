@@ -255,15 +255,37 @@ export function calculateMomentumScore(
       reasons.push(`🚀 EMA(3) momentum slope: ${emaSmoothed.toFixed(2)} (smoothed acceleration confirmed)`);
     }
   }
-  const isWeakening = 
-    (totalScore > 0 && defaultResult.components.macdSlope < 0 && !adxRising) ||
-    (totalScore < 0 && defaultResult.components.macdSlope > 0 && !adxRising);
+  // v3.0: EMA(momentum, 3) slope model for isWeakening (mirrors isAccelerating logic)
+  // Instead of single-bar macdSlope < 0, use 3-bar smoothed slope to filter noise
+  let isWeakening = false;
+  if (Math.abs(totalScore) > 5 && macdResult.histogramArray.length >= 6 && !adxRising) {
+    const hist = macdResult.histogramArray;
+    const priceNorm = prices[prices.length - 1] || 1;
+    
+    // 3-bar momentum deltas (same normalization as isAccelerating)
+    const w1 = ((hist[hist.length - 3] - hist[hist.length - 4]) / priceNorm) * 10000;
+    const w2 = ((hist[hist.length - 2] - hist[hist.length - 3]) / priceNorm) * 10000;
+    const w3 = ((hist[hist.length - 1] - hist[hist.length - 2]) / priceNorm) * 10000;
+    
+    // EMA(3) smoothing: weights [1, 2, 4] / 7
+    const emaWeakeningSlope = (w1 * 1 + w2 * 2 + w3 * 4) / 7;
+    
+    // Weakening = smoothed slope opposes score direction
+    // Bullish score but momentum decelerating (negative slope)
+    // Bearish score but momentum decelerating (positive slope)
+    isWeakening = (totalScore > 0 && emaWeakeningSlope < -0.5) ||
+                  (totalScore < 0 && emaWeakeningSlope > 0.5);
+    
+    if (isWeakening) {
+      reasons.push(`⚠️ EMA(3) momentum slope: ${emaWeakeningSlope.toFixed(2)} (smoothed weakening confirmed)`);
+    }
+  }
   const isExhausted = 
     adx >= ADX_THRESHOLDS.EXTREME && 
     overextensionATR >= MSC.EXHAUSTION_ATR_THRESHOLD && 
     !adxRising;
 
-  if (isWeakening) reasons.push("⚠️ Momentum WEAKENING");
+  // Note: isWeakening reason is pushed inside the EMA(3) block above
   if (isExhausted) reasons.push("🛑 Trend EXHAUSTED");
   // Note: isAccelerating reason is pushed inside the EMA(3) block above
 
