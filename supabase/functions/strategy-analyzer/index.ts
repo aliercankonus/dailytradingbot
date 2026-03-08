@@ -12666,6 +12666,8 @@ serve(async (req) => {
                 false,
                 earlyOrderFlowAnalysis
               );
+              // Track oversold event for bounce study
+              await trackOversoldEvent(symbol, 'SEVERE_HTF_OVERSOLD', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0);
               continue;
             }
           }
