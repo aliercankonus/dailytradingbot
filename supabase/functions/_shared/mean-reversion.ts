@@ -397,9 +397,9 @@ export function evaluateCounterTrendAdmission(
  * Classifies the current trend phase based on ADX and slope
  * Independent of expansion state for clean separation of concerns
  */
-export function classifyTrendPhase(trendData: any): 'RANGE' | 'EARLY_TREND' | 'LATE_TREND' {
-  const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+export function classifyTrendPhase(mfs: MarketFeatureSnapshot): 'RANGE' | 'EARLY_TREND' | 'LATE_TREND' {
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
   
   // RANGE: Very low ADX
   if (adx < TREND_PHASE_GATE.RANGE.ADX_MAX) {
