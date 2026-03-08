@@ -2301,7 +2301,7 @@ serve(async (req) => {
     };
 
     // Fetch 5m klines for LTF micro-momentum analysis (DB-cached by kline-collector)
-    const fetchLtfKlines = async (symbol: string): Promise<{ klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[] }> => {
+    const fetchLtfKlines = async (symbol: string): Promise<{ klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[]; rawKlines5m: any[]; rawPrices5m: number[] }> => {
       try {
         const [klines5m, klines1m] = await Promise.all([
           getKlines(symbol, "5m", 100),
@@ -2314,10 +2314,13 @@ serve(async (req) => {
           prices5m: closed5m.map((k: any) => parseFloat(k[4])),
           klines1m: closed1m,
           prices1m: closed1m.map((k: any) => parseFloat(k[4])),
+          // RAW klines INCLUDING live candle — for tactical trap detection (wick rejection, sweep)
+          rawKlines5m: klines5m,
+          rawPrices5m: klines5m.map((k: any) => parseFloat(k[4])),
         };
       } catch (error) {
         logger.forSymbol(symbol).debug(`Failed to fetch LTF klines: ${error}`);
-        return { klines5m: [], prices5m: [], klines1m: [], prices1m: [] };
+        return { klines5m: [], prices5m: [], klines1m: [], prices1m: [], rawKlines5m: [], rawPrices5m: [] };
       }
     };
 
@@ -2336,7 +2339,7 @@ serve(async (req) => {
     const marketDataMap = new Map(marketDataResults.filter(Boolean).map((d) => [d.symbol, d]));
     const historicalDataMap = new Map<string, { prices: number[]; volumes: number[]; klines: any[]; livePrice: number }>();
     historicalResults.forEach(({ symbol, data }) => historicalDataMap.set(symbol, data));
-    const ltfDataMap = new Map<string, { klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[] }>();
+    const ltfDataMap = new Map<string, { klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[]; rawKlines5m: any[]; rawPrices5m: number[] }>();
     ltfResults.forEach(({ symbol, data }) => ltfDataMap.set(symbol, data));
 
     // Fetch trend data in PARALLEL for eligible symbols (already filtered by win rate)
@@ -3195,9 +3198,12 @@ serve(async (req) => {
         // ============= LIQUIDITY TRAP DETECTION (LTF) =============
         // Uses 5m/1m klines to detect fake breakouts, stop hunts, bull/bear traps
         const ltfDataForTrap = ltfDataMap.get(symbol);
-        const trapKlines = ltfDataForTrap?.klines5m ?? mfs.klines15m;
-        const trapPrices = ltfDataForTrap?.prices5m ?? parseKlinePrices(mfs.klines15m);
-        const trapAtr = ltfDataForTrap ? calculateATR(ltfDataForTrap.klines5m, 14) : mfs.atr;
+        // CRITICAL: Use RAW klines (including live candle) for trap detection
+        // Trap patterns (wick rejection, sweep, volume spike) are TACTICAL — they need the forming candle
+        // This eliminates the 1-candle (5min) detection delay
+        const trapKlines = ltfDataForTrap?.rawKlines5m?.length ? ltfDataForTrap.rawKlines5m : (ltfDataForTrap?.klines5m ?? mfs.klines15m);
+        const trapPrices = ltfDataForTrap?.rawPrices5m?.length ? ltfDataForTrap.rawPrices5m : (ltfDataForTrap?.prices5m ?? parseKlinePrices(mfs.klines15m));
+        const trapAtr = ltfDataForTrap ? calculateATR(ltfDataForTrap.klines5m, 14) : mfs.atr; // ATR still uses closed candles for stability
         
         // Direction is determined from smart momentum (early direction context)
         const trapDirection = earlySmartMomentum.direction === "bullish" ? "long" as const
