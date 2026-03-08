@@ -34,6 +34,7 @@ entryTimingScore = 50 (baseline) + htfAlignBonus + accelBonus + momMagBonus + al
 | Entry Timing Score | Multiplier | Tier |
 |---|---|---|
 | < 30 | 0.50x | POOR |
+| 30–70, align < 0 | 0.75x | CONFLICT |
 | 30–70 | 1.00x | NEUTRAL |
 | 70–80 | 1.10x | GOOD |
 | > 80 | 1.20x | EXCELLENT |

@@ -28,7 +28,7 @@ function multiplierLabel(score: number, alignment: number) {
 
 function SymbolRow({ data }: { data: LtfMicroData }) {
   const mult = multiplierLabel(data.entryTimingScore, data.ltfAlignment);
-  const multColor = mult === "×1.20" ? "text-emerald-500" : mult === "×1.10" ? "text-green-500" : mult === "×0.50" ? "text-red-500" : "text-muted-foreground";
+  const multColor = mult === "×1.20" ? "text-emerald-500" : mult === "×1.10" ? "text-green-500" : mult === "×0.50" ? "text-red-500" : mult === "×0.75" ? "text-amber-500" : "text-muted-foreground";
 
   return (
     <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-2 items-center py-2 border-b border-border/40 last:border-b-0 text-sm">
