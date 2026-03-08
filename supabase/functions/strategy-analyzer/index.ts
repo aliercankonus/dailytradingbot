@@ -16150,8 +16150,8 @@ serve(async (req) => {
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum, adx, trendData.volatility?.adxRising ?? false),
-          alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
-          technicalScore: getTechnicalScore(trendData, trend, symbol),
+          alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, mfs),
+          technicalScore: getTechnicalScore(mfs, trend, symbol),
           entryTimingScore: entryTimingScore,
           volumeScore: volumeScore,                // Volume confirmation
           orderFlowScore: orderFlowScore,          // NEW: Order flow analysis (-15 to +15)
