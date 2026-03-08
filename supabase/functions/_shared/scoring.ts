@@ -1881,14 +1881,11 @@ export const isValidSqueezeBreakout = (
   confidence += 25;
   reasons.push(`Price at ${isLong ? "upper" : "lower"} band edge (%B4h=${percentB4h.toFixed(0)}, %B1h=${percentB1h.toFixed(0)})`);
   
-  // Condition 3: Momentum building or confirmed (not 'none' or 'mixed')
-  const macdExpanding = momentum.macdExpanding ?? false;
-  const momentumState = momentum.state || 'none';
+  // Condition 3: Momentum building or confirmed
+  const macdExpanding = mfs.macdExpanding;
+  const momentumState = mfs.momentumState || 'none';
   const momentumBuilding = momentumState === "building" || momentumState === "confirmed";
-  const stoch4h = stochRsi['4h'] || {};
-  const stoch1h = stochRsi['1h'] || {};
-  const stochK4h = stoch4h.k ?? 50;
-  const stochK1h = stoch1h.k ?? 50;
+  const stochK1h = mfs.stochRsi['1h'].k;
   
   // StochRSI should be moving in trade direction
   const stochDirectionOk = isLong 
@@ -1905,11 +1902,10 @@ export const isValidSqueezeBreakout = (
   }
   if (momentumBuilding) {
     confidence += 15;
-    reasons.push(`Momentum ${momentum.state}`);
+    reasons.push(`Momentum ${momentumState}`);
   }
   
   // v1.1 NEW: Condition 3.5 - ADX slope must be rising (≥ 0.05)
-  // This prevents fake squeezes that never expand
   const MIN_ADX_SLOPE_FOR_SQUEEZE = 0.05;
   checkDetails.slopeOk = adxSlope >= MIN_ADX_SLOPE_FOR_SQUEEZE;
   
@@ -1927,16 +1923,15 @@ export const isValidSqueezeBreakout = (
   reasons.push(`ADX slope rising (${adxSlope.toFixed(3)} ≥ ${MIN_ADX_SLOPE_FOR_SQUEEZE})`);
   
   // Condition 4: No reversal divergence (critical for squeeze entries)
-  const hasDivergence = momentum.hasDivergence ?? false;
-  if (hasDivergence) {
+  if (mfs.hasDivergence) {
     return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["MACD divergence detected - not safe for squeeze entry"], checkDetails };
   }
   confidence += 10;
   reasons.push("No reversal divergence");
   
   // Condition 5: HTF trend not opposing (4h neutral is OK, 4h opposite is NOT)
-  const trend4h = timeframes['4h']?.trend || "neutral";
-  const trend1h = timeframes['1h']?.trend || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
   
   const htfOpposing = isLong 
     ? trend4h === "bearish"
