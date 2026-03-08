@@ -724,6 +724,31 @@ export function buildMarketFeatureSnapshot(
     
     // Market regime
     regime: trendData?.regime?.regime || 'RANGING',
+    
+    // Aggregate scores
+    volumeScore: trendData?.volumeScore ?? 0,
+    reversalScore: trendData?.reversalScore ?? 0,
+    volumeZScore: trendData?.volatility?.volumeZScore ?? 0,
+    
+    // Momentum extended
+    lastCloseAlignsWithTrend: momentum.lastCloseAlignsWithTrend ?? false,
+    momentumRsi: momentum.rsi ?? 50,
+    
+    // Trend age
+    trendAgeBars: trendData?.trendAge?.bars ?? 0,
+    
+    // StochRSI history
+    stochRsiHistory: {
+      "1h": trendData?.stochRsiHistory?.['1h'] ?? [],
+      "4h": trendData?.stochRsiHistory?.['4h'] ?? [],
+    },
+    
+    // Raw klines
+    klines15m: trendData?.klines15m ?? [],
+    klines30m: trendData?.klines30m ?? [],
+    
+    // Top-level volume ratio
+    volumeRatio: trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0,
   };
 }
 
