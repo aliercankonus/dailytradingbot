@@ -372,7 +372,7 @@ export function evaluateMeanReversionExit(
   // Moderate exhaustion momentum invalidation
   const isModerateExhaustion = position.strategy_name?.includes("MR_MODERATE_EXHAUSTION");
   if (isModerateExhaustion) {
-    const momentumScore = market.trendData?.momentum?.score ?? 0;
+    const momentumScore = market.momentumScore ?? 0;
     const momentumFloor = MEAN_REVERSION_CONFIG.MODERATE_EXHAUSTION?.INVALIDATION_MOMENTUM_FLOOR ?? 30;
     const isLong = position.side === "BUY";
     const invalidated = isLong ? momentumScore < momentumFloor : momentumScore > -momentumFloor;
