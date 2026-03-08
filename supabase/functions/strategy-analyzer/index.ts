@@ -2986,7 +2986,50 @@ serve(async (req) => {
         const adx = mfs.adx;
         const adxSlope = mfs.adxSlope;
         const adxRising = mfs.adxRising;
-        const momentum = trendData.momentum;
+        
+        // ============= MFS COMPATIBILITY SHIM =============
+        // All downstream code reads from these MFS-backed aliases instead of raw trendData.
+        // Fields NOT in MFS (klines15m, klines30m, klines4h, volumeZScore) remain as trendData.
+        const momentum = {
+          state: mfs.momentumState,
+          score: mfs.momentumScore,
+          prevScore: mfs.prevMomentumScore,
+          confirms: mfs.momentumConfirms,
+          macdExpanding: mfs.macdExpanding,
+          macdStrong: mfs.macdStrong,
+          macdHistogram: mfs.macdHistogram,
+          macdDirectionAligned: mfs.macdDirectionAligned,
+          hasDivergence: mfs.hasDivergence,
+          divergence: mfs.hasDivergence,
+          volumeConfirms: mfs.volumeConfirms,
+          adxRising: mfs.adxRisingMomentum,
+          fakeBreakoutRisk: mfs.fakeBreakoutRisk,
+          genuineMomentum: mfs.genuineMomentum,
+          consecutiveBars1h: mfs.consecutiveBars1h,
+          consecutiveBars15m: mfs.consecutiveBars15m,
+          consecutiveBars30m: mfs.consecutiveBars30m,
+          directionStableBars: mfs.directionStableBars,
+          direction: mfs.momentumDirection,
+          prevMacdHistogram: mfs.prevMacdHistogram,
+          // Fields not directly in MFS — read from raw trendData with fallbacks
+          lastCloseAlignsWithTrend: trendData.momentum?.lastCloseAlignsWithTrend ?? false,
+          rsi: trendData.momentum?.rsi ?? 50,
+          adx: mfs.adx,
+          adxSlope: mfs.adxSlope,
+        };
+        
+        // MFS-backed sub-object aliases (replaces direct trendData access)
+        const microTrend = mfs.microTrend;
+        const stealthTrend = mfs.stealthTrend;
+        const priceDistanceFromSwing = {
+          distanceFromHighPercent: mfs.distanceFromHighPercent,
+          distanceFromLowPercent: mfs.distanceFromLowPercent,
+          atrNormalizedFromHigh: mfs.atrNormalizedFromHigh,
+          atrNormalizedFromLow: mfs.atrNormalizedFromLow,
+          high24h: mfs.high24h,
+          low24h: mfs.low24h,
+        };
+        const priceActionMomentumData = mfs.priceActionMomentum;
         
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
         // Read from snapshot for consistency
@@ -3044,7 +3087,7 @@ serve(async (req) => {
         // Gate decisions use trendData ADX (1h closed candles) — set above as const.
         const earlyFullAdxResult = calculateADXWithDirection(klines, 14);
         const earlyAdxSlope = earlyFullAdxResult.adxSlope ?? 0;
-        const earlySmartAdxRising = earlyAdxSlope > 0 || (trendData.volatility?.adxRising === true);
+        const earlySmartAdxRising = earlyAdxSlope > 0 || mfs.adxRising;
         
         // Log if 15m and 1h ADX diverge significantly (diagnostic only)
         const adxDrift = Math.abs(adx - earlyFullAdxResult.adx);
@@ -3124,7 +3167,7 @@ serve(async (req) => {
           
           const allTimeframesNeutral = is4hNeutral && is1hNeutral && is30mNeutral;
           const isLowAdx = adx < RANGING_MARKET_DETECTION_PARAMS.ADX_THRESHOLD;
-          const volumeRatio = trendData.volume?.ratio ?? 1.0;
+          const volumeRatio = mfs.volume["1h"].volumeRatio || mfs.volume["30m"].volumeRatio || 1.0;
           const isLowVolume = volumeRatio < RANGING_MARKET_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD;
           
         if (allTimeframesNeutral && isLowAdx && isLowVolume) {
@@ -4583,8 +4626,8 @@ serve(async (req) => {
         if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && 
             !orderFlowDirectionOverrideApplied && !preMomentumStochRsiOverrideApplied && SHORT_TERM_ALIGNMENT_PARAMS.ENABLED) {
           
-          const trend30m = trendData.multiTimeframeTrends?.timeframe30m?.trend || timeframes?.['30m']?.trend || "neutral";
-          const microDirection = trendData.microTrend?.direction || "neutral";
+          const trend30m = mfs.timeframes['30m'].trend || "neutral";
+          const microDirection = microTrend.direction || "neutral";
           const momentumState = momentum?.state || "none";
           const adxSufficient = adx >= SHORT_TERM_ALIGNMENT_PARAMS.MIN_ADX;
           
@@ -4634,9 +4677,9 @@ serve(async (req) => {
           
           // Check for early ignition entry conditions
           const volumeInfo = {
-            ratio: trendData.volatility?.volumeRatio || 1.0,
-            zScore: trendData.volatility?.volumeZScore || 0,
-            spike: trendData.volatility?.volumeSpike || false,
+            ratio: mfs.volume["1h"].volumeRatio || 1.0,
+            zScore: trendData.volatility?.volumeZScore || 0, // NOT in MFS
+            spike: mfs.volume["1h"].volumeSpike || false,
           };
           
           const earlyIgnitionResult = detectEarlyIgnitionEntry(
@@ -4792,9 +4835,9 @@ serve(async (req) => {
               stochD1h: stochD1h.toFixed(1),
               orderFlowScore: earlyOrderFlowAnalysis?.score ?? 0,
               orderFlowSignal: earlyOrderFlowAnalysis?.signal ?? "neutral",
-              stealthDrift: trendData.stealthTrend?.driftPercent || 0,
-              trend30m: trendData.multiTimeframeTrends?.timeframe30m?.trend || timeframes?.['30m']?.trend || "neutral",
-              microDirection: trendData.microTrend?.direction || "neutral",
+              stealthDrift: stealthTrend.driftPercent || 0,
+              trend30m: mfs.timeframes['30m'].trend || "neutral",
+              microDirection: microTrend.direction || "neutral",
               momentum: {
                 confirms: momentum?.confirms ?? false,
                 state: momentum?.state ?? 'none',
@@ -5551,7 +5594,7 @@ serve(async (req) => {
           const isSameDir = (lastExitSide === 'sell' && derivedDirection === 'short') ||
                             (lastExitSide === 'buy' && derivedDirection === 'long');
           if (isSameDir) {
-            const currentPrice = trendData.currentPrice || trendData.price || 0;
+            const currentPrice = mfs.currentPrice || 0;
             // For SHORT: entering at a LOWER price than exit = chasing (already captured that zone)
             // For LONG: entering at a HIGHER price than exit = chasing (already captured that zone)
             const isWorsePrice = (derivedDirection === 'short' && currentPrice < lastExitPrice) ||
@@ -5638,7 +5681,7 @@ serve(async (req) => {
         let priceActionMomentumPositionMultiplier = 1.0;
         if (directionResult.source === "price-action-momentum") {
           priceActionMomentumPositionMultiplier = MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER;
-          const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+          const priceMove = priceActionMomentumData.movePercent || 0;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRICE ACTION MOMENTUM: ${priceMove.toFixed(2)}% move detected - position size ${(priceActionMomentumPositionMultiplier * 100).toFixed(0)}%`);
         }
         
@@ -5798,8 +5841,8 @@ serve(async (req) => {
                                   (klineData.length > 0 ? parseFloat(klineData[klineData.length - 1][4]) : 0);
               
               // Get price change from 24h high/low based on direction
-              const priceHigh24h = trendData.priceChange?.high24h ?? latestPrice;
-              const priceLow24h = trendData.priceChange?.low24h ?? latestPrice;
+              const priceHigh24h = mfs.high24h || latestPrice;
+              const priceLow24h = mfs.low24h || latestPrice;
               
               if (derivedDirection === 'short' && latestPrice > 0) {
                 // For SHORT: Check if price dropped significantly from 24h high
@@ -6317,9 +6360,9 @@ serve(async (req) => {
         if (TREND_REVERSAL_DETECTION_GATE.ENABLED) {
           // PHASE 3 MIGRATION: Read from snapshot
           const stochK = mfs.stochRsi["4h"].k;
-          const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK;
+          const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK; // prevK NOT in MFS
           const macdHist = mfs.macdHistogram;
-          const macdHistPrev = trendData.momentum?.macdHistogramPrevious ?? macdHist;
+          const macdHistPrev = momentum.prevMacdHistogram ?? macdHist;
           const priceChange4h = mfs.priceChange4h;
           
           // Detect BULLISH reversal (blocks SHORT)
@@ -6483,7 +6526,7 @@ serve(async (req) => {
         }
         
         // Classify market regime using smart module WITH behavioral exhaustion
-        const volume1hDataForRegime = trendData.volume?.["1h"] || {};
+        const volume1hDataForRegime = mfs.volume["1h"];
         const volumeRatioForRegime = volume1hDataForRegime.volumeRatio ?? 1.0;
         const smartRegime = classifySmartRegime(
           adx,
@@ -6498,7 +6541,7 @@ serve(async (req) => {
         // ============= PHASE 0: MASTER MARKET REGIME CLASSIFICATION =============
         // Critical foundation: ADX defines regime, all other gates change meaning based on regime
         // This runs ONCE at start of symbol processing - all subsequent gates reference this
-        const driftPercent = trendData.stealthTrend?.driftPercent || 0;
+        const driftPercent = stealthTrend.driftPercent || 0;
         
         // NEW: Pass DI values for accurate trend direction derivation
         const diPlusForRegime = earlyFullAdxResult.plusDI ?? 25;
@@ -7417,9 +7460,9 @@ serve(async (req) => {
                   conditions: earlyTeConditions,
                   note: 'Fired BEFORE MOVE_EXHAUSTED/NEAR_24H gates',
                 },
-                confidenceScore: trendData.confidence ?? 0,
-                entryPrice: trendData.currentPrice ?? 0,
-                atr: trendData?.volatility?.atr,
+                confidenceScore: mfs.confidence ?? 0,
+                entryPrice: mfs.currentPrice ?? 0,
+                atr: mfs.atr,
                 trend: derivedDirection,
                 oldPositionMultiplier: 0,
                 newPositionMultiplier: teMultiplier,
@@ -7457,7 +7500,7 @@ serve(async (req) => {
         } | null = null;
         
         if (MOVE_EXHAUSTION_FILTER_PARAMS.ENABLED) {
-          const priceDistance = trendData.priceDistanceFromSwing;
+          const priceDistance = priceDistanceFromSwing;
           // PHASE 3 MIGRATION: Read from snapshot
           const stochRsiK4h = mfs.stochRsi["4h"].k;
           const adxSlope = fullAdxResult.adxSlope ?? 0;
@@ -7465,7 +7508,7 @@ serve(async (req) => {
           // The 4-State regime classifier uses trendData.volatility.adxSlope (e.g., 1.06 for BTC)
           // but fullAdxResult.adxSlope can differ significantly (e.g., -0.48). Use regime slope
           // for checks that condition on regime === 'BREAKOUT_SETUP'.
-          const regimeConsistentAdxSlope = trendData.volatility?.adxSlope ?? adxSlope;
+          const regimeConsistentAdxSlope = mfs.adxSlope;
           
           let moveExhaustionBlocked = false;
           let moveExhaustionReason = '';
@@ -8647,7 +8690,7 @@ serve(async (req) => {
                 // Context for debugging
                 swingHigh24h: priceDistance?.high24h,
                 swingLow24h: priceDistance?.low24h,
-                currentPrice: trendData.currentPrice,
+                currentPrice: mfs.currentPrice,
               },
               mfs,
               riskParams.ai_analysis_enabled !== false,
@@ -8664,7 +8707,7 @@ serve(async (req) => {
         let ltfConfirmationApplied = false;
         
         if (LTF_CONFIRMATION_GATE.ENABLED) {
-          const priceDistance = trendData.priceDistanceFromSwing;
+          const priceDistance = priceDistanceFromSwing;
           const tf30mDir = mfs.timeframes['30m'].trend || mfs.timeframes['30m'].emaSignal || "neutral";
           const tf1hDir = mfs.timeframes['1h'].trend || mfs.timeframes['1h'].emaSignal || "neutral";
           const tf4hDir = mfs.timeframes['4h'].trend || mfs.timeframes['4h'].emaSignal || "neutral";
@@ -9045,7 +9088,7 @@ serve(async (req) => {
         let nearExtremeRelaxationTrigger: string | null = null;
         
         if (NEAR_EXTREME_PROTECTION_GATE.ENABLED) {
-          const priceDistance = trendData.priceDistanceFromSwing;
+          const priceDistance = priceDistanceFromSwing;
           
           if (priceDistance) {
             const distanceFromLow = priceDistance.distanceFromLowPercent ?? 0;
@@ -9065,11 +9108,11 @@ serve(async (req) => {
                 if (adx >= relaxConfig.MIN_ADX_FOR_RELAXATION) {
                   useRelaxedThresholds = true;
                   relaxationReason = `ADX ${adx.toFixed(1)} >= ${relaxConfig.MIN_ADX_FOR_RELAXATION}`;
-                } else if (relaxConfig.BOLLINGER_SQUEEZE_TRIGGER && trendData.volatility?.bbSqueeze) {
+                } else if (relaxConfig.BOLLINGER_SQUEEZE_TRIGGER && mfs.bollinger["1h"].squeeze) {
                   useRelaxedThresholds = true;
                   relaxationReason = 'BB Squeeze active';
                 } else if (relaxConfig.BOLLINGER_BREAKDOWN_TRIGGER) {
-                  const percentB = parseFloat(trendData.volatility?.percentB ?? '50');
+                  const percentB = mfs.bollinger["1h"].percentB ?? 50;
                   if (derivedDirection === 'short' && percentB <= relaxConfig.BOLLINGER_BREAKDOWN_SHORT_MAX_B) {
                     useRelaxedThresholds = true;
                     relaxationReason = `%B ${percentB.toFixed(1)} <= ${relaxConfig.BOLLINGER_BREAKDOWN_SHORT_MAX_B} (SHORT breakdown)`;
@@ -10374,7 +10417,7 @@ serve(async (req) => {
           const trend1h = mfs.timeframes['1h'].trend || "neutral";
           const conf4h = mfs.timeframes['4h'].confidence;
           const trend4h = mfs.timeframes['4h'].trend || "neutral";
-          const hasDivergence = trendData.momentum?.hasDivergence || false;
+          const hasDivergence = momentum.hasDivergence || false;
           const adxSlope = smartAdxRising ? 0.5 : -0.5;
           
           // Detect price action structure
@@ -10774,8 +10817,8 @@ serve(async (req) => {
                 overrideAttempted: overrideParams.ENABLED,
                 overrideConditions: overrideParams.ENABLED ? {
                   adxCheck: { value: adx, required: overrideParams.MIN_ADX, passed: adx >= overrideParams.MIN_ADX },
-                  momentumCheck: { value: trendData.momentum?.state, required: "confirmed", passed: trendData.momentum?.state === "confirmed" },
-                  stochSafe: { value: trendData.stochasticRsi?.['4h']?.k, safeForDirection: derivedDirection === "short" ? `>${overrideParams.BLOCK_IF_STOCHRSI_K_BELOW}` : `<${overrideParams.BLOCK_IF_STOCHRSI_K_ABOVE}` },
+                  momentumCheck: { value: momentum.state, required: "confirmed", passed: momentum.state === "confirmed" },
+                  stochSafe: { value: mfs.stochRsi['4h'].k, safeForDirection: derivedDirection === "short" ? `>${overrideParams.BLOCK_IF_STOCHRSI_K_BELOW}` : `<${overrideParams.BLOCK_IF_STOCHRSI_K_ABOVE}` },
                   alignment1h: { checked: true },
                   exhaustionMature: { regimeScore: smartRegime.regimeScore, threshold: overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD }
                 } : undefined
@@ -11022,7 +11065,7 @@ serve(async (req) => {
                 consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
               },
-              stochRsi: trendData.stochasticRsi?.aggregated,
+              stochRsi: mfs.stochRsiAggregated,
               trend1h: htfTrend1h
             },
             mfs,
@@ -11053,7 +11096,7 @@ serve(async (req) => {
         const stochRsiK1h = mfs.stochRsi["1h"].k;
         const stochRsiD1h = mfs.stochRsi["1h"].d;
         // Keep raw object reference for signal property access (bullish_cross, bearish_cross)
-        const stochRsi1h = trendData.stochasticRsi?.["1h"];
+        const stochRsi1h = trendData.stochasticRsi?.["1h"]; // Keep raw for bullish_cross/bearish_cross signal properties NOT in MFS
         // CRITICAL FIX: Using shared thresholds for consistency across all edge functions
         // Smart exception still allows legitimate continuation in strong trends
         const STOCHRSI_OVERSOLD_THRESHOLD = STOCHRSI_THRESHOLDS.OVERSOLD;  // 20 - bounce risk for shorts
@@ -11067,16 +11110,18 @@ serve(async (req) => {
         const stochFilterConf1h = mfs.timeframes['1h'].confidence || 50;
         
         // Get momentum and divergence info
-        const hasBearishDivergence = trendData.momentum?.hasDivergence && trend === "bullish";
-        const hasBullishDivergence = trendData.momentum?.hasDivergence && trend === "bearish";
-        const macdHistogram = trendData.momentum?.macdHistogram ?? 0;
-        const macdExpanding = trendData.momentum?.macdExpanding ?? false;
+        const hasBearishDivergence = momentum.hasDivergence && trend === "bullish";
+        const hasBullishDivergence = momentum.hasDivergence && trend === "bearish";
+        const macdHistogram = momentum.macdHistogram ?? 0;
+        const macdExpanding = momentum.macdExpanding ?? false;
         
         // Get Bollinger Band info for breakout detection (use 4h as primary, 1h as fallback)
-        const bollingerPosition = trendData.bollingerBands?.['4h']?.pricePosition ?? 
-                                  trendData.bollingerBands?.['1h']?.pricePosition ?? "middle";
-        const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
-                         trendData.bollingerBands?.['1h']?.percentB ?? 50;
+        const bollingerPosition = mfs.bollinger['4h'].pricePosition !== "middle" 
+          ? mfs.bollinger['4h'].pricePosition 
+          : mfs.bollinger['1h'].pricePosition;
+        const percentB = mfs.bollinger['4h'].percentB !== 50 
+          ? mfs.bollinger['4h'].percentB 
+          : mfs.bollinger['1h'].percentB;
         
         // Determine if StochRSI is rising or falling (K vs D comparison)
         const stochRsiRising = stochRsiK4h > stochRsiD4h;
@@ -11811,7 +11856,7 @@ serve(async (req) => {
         //   Tier 2 (STANDARD): K <= 20 & %B <= 25 or K >= 80 & %B >= 75 - Block with RESTRICTED bypass
         //   Tier 3 (CAUTION): K <= 30 or K >= 70 - Penalty scoring only (handled in reversal score)
         
-        const adxRisingForBypass = trendData.volatility?.adxRising ?? smartAdxRising ?? false;
+        const adxRisingForBypass = mfs.adxRising;
         const adxSlopeForParabolic = fullAdxResult.adxSlope ?? (adxRisingForBypass ? 0.5 : -0.5);
         const isInParabolicMode = adx >= (HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_MIN_ADX ?? 45) && 
           (!HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_REQUIRE_ADX_RISING || adxSlopeForParabolic >= 0);
@@ -15412,7 +15457,7 @@ serve(async (req) => {
         const smartMomentumScore = smartMomentum?.score || 0;
         
         // Extract directional runway values
-        const priceDistanceData = trendData.priceDistanceFromSwing;
+        const priceDistanceData = priceDistanceFromSwing;
         const moveFromLowPercent = priceDistanceData?.distanceFromLowPercent || 0;
         const moveFromHighPercent = priceDistanceData?.distanceFromHighPercent || 0;
         
