@@ -149,6 +149,7 @@ export interface MarketFeatureSnapshot {
   macdStrong: boolean;
   macdHistogram: number;
   macdDirectionAligned: boolean;
+  hasDivergence: boolean;
   volumeConfirms: boolean;
   adxRisingMomentum: boolean;
   fakeBreakoutRisk: boolean;
