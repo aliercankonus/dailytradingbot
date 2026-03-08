@@ -15847,7 +15847,7 @@ serve(async (req) => {
                 exceptionApplied: false
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false
           );
           continue;
@@ -15866,7 +15866,7 @@ serve(async (req) => {
 
         // ============= IMPROVEMENT #3: Pullback Entry Detection =============
         // UNIFIED: Delegates structural pullback detection to smartPullback (detectPullback)
-        const pullbackAnalysis = analyzePullbackEntry(trendData, trend, smartPullback);
+        const pullbackAnalysis = analyzePullbackEntry(mfs, trend, smartPullback);
 
         // ============= SCENARIO 6: ENHANCED RECOVERY MODE =============
         // Recovery mode = precision trading only, not punishment loop
@@ -16136,7 +16136,7 @@ serve(async (req) => {
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
         // Volume score component
-        const volumeScore = getVolumeScore(trendData, trend);
+        const volumeScore = getVolumeScore(mfs, trend);
         
         // ============= ORDER FLOW ANALYSIS =============
         // Use the early Order Flow analysis calculated before rejection gates
