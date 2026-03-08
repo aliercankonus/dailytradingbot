@@ -19,7 +19,7 @@ import {
   getConfidencePenalty, 
   getAdxWeight,
   calculateUnifiedReversalScore,
-  // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
+  // Keep extractors for trendData passed to shared modules (exit-strategies expects raw trendData)
   extractADX,
   extractADXSlope,
   extractStochRsiK,
@@ -27,6 +27,7 @@ import {
   extractAtrPercent,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
+import { buildMarketFeatureSnapshot, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 
 // ============================================================
 // TRUE ALIGNMENT v2.0 EXTRACTION HELPER
@@ -442,6 +443,19 @@ serve(async (req) => {
       }
     }
     logger.info(`📊 Loaded ${trendDataMap.size}/${symbols.length} trend snapshots from cache`);
+    
+    // ============= BUILD MFS PER SYMBOL =============
+    // Single extraction point for all market features — replaces individual extractor calls
+    const mfsMap = new Map<string, MarketFeatureSnapshot>();
+    for (const [sym, td] of trendDataMap.entries()) {
+      try {
+        const mfs = buildMarketFeatureSnapshot(sym, td);
+        mfsMap.set(sym, mfs);
+      } catch (mfsBuildErr) {
+        logger.forSymbol(sym).warn(`Failed to build MFS from cached trend data: ${mfsBuildErr}`);
+      }
+    }
+    logger.info(`📊 Built MFS for ${mfsMap.size}/${trendDataMap.size} symbols`);
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
       if (currentPrice === undefined || currentPrice === null) continue;
@@ -461,10 +475,11 @@ serve(async (req) => {
       // Use ADX and volume to determine exit sensitivity
       // ============================================================
       const trendDataForPosition = trendDataMap.get(position.symbol);
-      // CENTRALIZED: Use shared extractors for consistent ADX access across all edge functions
-      const positionAdx = extractADX(trendDataForPosition);
+      const mfsForPosition = mfsMap.get(position.symbol);
+      // MFS MIGRATION: Use MFS for ADX instead of individual extractors
+      const positionAdx = mfsForPosition?.adx ?? 20;
       const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
-      const positionConfidence = trendDataForPosition?.confidence ?? 50;
+      const positionConfidence = mfsForPosition?.confidence ?? trendDataForPosition?.confidence ?? 50;
       
       // ============================================================
       // CONFIDENCE PENALTY (imported from shared scoring module)
@@ -894,9 +909,10 @@ serve(async (req) => {
         // Strong trends can sustain higher volatility without indicating reversal
         // This prevents premature exits like the ETHUSDT $2,859 entry that was closed too early
         // ============================================================
-        // CENTRALIZED: Use shared extractors for consistent ADX access
-        const positionAdxValue = extractADX(trendData);
-        const { slope: adxSlope, isRising: isAdxRising } = extractADXSlope(trendData);
+        // MFS MIGRATION: Use MFS for ADX and slope
+        const positionAdxValue = mfsForPosition?.adx ?? 20;
+        const adxSlope = mfsForPosition?.adxSlope ?? 0;
+        const isAdxRising = mfsForPosition?.adxRising ?? false;
         
         // Determine adaptive threshold based on ADX and trend confirmation
         let adaptiveVolatilityThreshold: number = EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD; // Default: 3.0x
@@ -1403,7 +1419,8 @@ serve(async (req) => {
 
         // ADX-aware strong trend floor: let strong trends develop further
         if (TRAILING_MIN_PROFIT_FLOOR.STRONG_TREND_ENABLED) {
-          const { adx: posAdx } = extractADX(trendDataForPosition);
+          // MFS MIGRATION: Use MFS for ADX
+          const posAdx = mfsForPosition?.adx ?? 20;
           if (posAdx >= TRAILING_MIN_PROFIT_FLOOR.VERY_STRONG_TREND_MIN_ADX) {
             minProfitFloor = Math.max(minProfitFloor, TRAILING_MIN_PROFIT_FLOOR.VERY_STRONG_TREND_MIN_PROFIT_PERCENT);
             positionLogger.debug(`TRAILING FLOOR: Very strong trend (ADX ${posAdx.toFixed(1)}) → min profit ${minProfitFloor.toFixed(2)}%`);
@@ -1428,10 +1445,11 @@ serve(async (req) => {
       // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
       // Use ADX-aware activation and momentum-based trailing distance
       // FIXED: Calculate momentum with ACTUAL ADX values from trend data (not hardcoded 20)
-      // CENTRALIZED: Use shared extractors for consistent ADX access
+      // MFS MIGRATION: Use MFS for ADX and slope (momentum calculation context)
       const trendDataForMomentum = trendDataMap.get(position.symbol);
-      const adxForMomentum = extractADX(trendDataForMomentum);
-      const { slope: momentumAdxSlope, isRising: adxRisingForMomentum } = extractADXSlope(trendDataForMomentum);
+      const adxForMomentum = mfsForPosition?.adx ?? 20;
+      const momentumAdxSlope = mfsForPosition?.adxSlope ?? 0;
+      const adxRisingForMomentum = mfsForPosition?.adxRising ?? false;
       const currentAtrForMomentum = atrData?.atr || 0;
       const closesForMomentum = atrData?.closes || [];
       const klinesForMomentum = atrData?.klines || [];
@@ -1591,8 +1609,8 @@ serve(async (req) => {
         // EXIT TRIGGER 2: ADX flattening + opposing candle
         // ADX slope near zero or negative AND current candle closes against position
         if (!continuationModeExitTriggered && CONTINUATION_MODE_PARAMS.EXIT_ON_ADX_FLATTEN_PLUS_BEARISH_CANDLE) {
-          // CENTRALIZED: Use shared extractor for ADX slope
-          const { slope: contAdxSlope } = extractADXSlope(trendDataForPosition);
+          // MFS MIGRATION: Use MFS for ADX slope
+          const contAdxSlope = mfsForPosition?.adxSlope ?? 0;
           const adxFlattening = contAdxSlope <= 0.5; // ADX not rising anymore
           
           // Check if latest candle closed against position
@@ -1740,8 +1758,8 @@ serve(async (req) => {
               const minutesToPeak = (peakReachedAtDate.getTime() - openedAtDate.getTime()) / (1000 * 60);
               
               if (minutesToPeak < LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_MAX_MINUTES && minutesToPeak > 0) {
-                // Check additional conditions: ADX slope flattening
-                const { slope: fastPeakAdxSlope } = extractADXSlope(trendDataForPosition);
+                // MFS MIGRATION: Use MFS for ADX slope
+                const fastPeakAdxSlope = mfsForPosition?.adxSlope ?? 0;
                 const adxFlattening = !LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_REQUIRE_ADX_SLOPE_FLAT || 
                                       fastPeakAdxSlope < LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_ADX_SLOPE_THRESHOLD;
                 
@@ -1778,7 +1796,8 @@ serve(async (req) => {
               
               // ADX-aware relaxation: wider distance in strong trends
               if (PEAK_ADAPTIVE_TRAILING.STRONG_TREND_RELAXATION_ENABLED) {
-                const { adx: peakAdx } = extractADX(trendDataForPosition);
+                // MFS MIGRATION: Use MFS for ADX
+                const peakAdx = mfsForPosition?.adx ?? 20;
                 if (peakAdx >= PEAK_ADAPTIVE_TRAILING.VERY_STRONG_TREND_MIN_ADX) {
                   maxDistance *= PEAK_ADAPTIVE_TRAILING.VERY_STRONG_TREND_DISTANCE_MULTIPLIER;
                 } else if (peakAdx >= PEAK_ADAPTIVE_TRAILING.STRONG_TREND_MIN_ADX) {
@@ -2323,7 +2342,8 @@ serve(async (req) => {
           }
           
           // RSI pullback detection for conflict resolution
-          const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+          // MFS MIGRATION: Use MFS for RSI 4h
+          const rsi4h = mfsForPosition?.timeframes?.["4h"]?.rsi ?? trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
           const momentumConfirms = momentum.confirms === true;
           
           // For SHORT positions: check for bullish reversal signals
@@ -2413,8 +2433,8 @@ serve(async (req) => {
           // StochRSI filter for hedge opening - prevent hedges at extreme levels
           // For LONG: Don't hedge when K < OVERSOLD (price likely to bounce up)
           // For SHORT: Don't hedge when K > OVERBOUGHT (price likely to drop)
-          const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
-          const stochRsiK4h = stochRsi4h?.k ?? 50;
+          // MFS MIGRATION: Use MFS for StochRSI 4h instead of raw trendData access
+          const stochRsiK4h = mfsForPosition?.stochRsi?.["4h"]?.k ?? 50;
           const shouldBlockHedgeByStochRsi = isLong 
             ? stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD
             : stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT;
