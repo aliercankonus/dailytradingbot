@@ -74,7 +74,7 @@ function extractTrueAlignmentFromMFS(mfs: MarketFeatureSnapshot | undefined): Tr
     isWeak: neutralCapped || tf4hConfidence < HTF_ALIGNMENT_EXIT.WEAK_MAX_TF4H_CONFIDENCE,
   };
 }
-import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
+// trend-types import removed — all reads come from MarketFeatureSnapshot (mfs)
 // Phase 3: Smart Momentum for context-aware exit management
 import {
   calculateMomentumScore,
