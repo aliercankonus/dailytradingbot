@@ -2318,18 +2318,21 @@ serve(async (req) => {
 
     // Fetch market data in parallel using shared Binance utilities - use filtered activeSymbols
     const symbolsList = activeSymbols.map((s) => s.symbol);
-    const [marketDataResults, historicalResults] = await Promise.all([
+    const [marketDataResults, historicalResults, ltfResults] = await Promise.all([
       Promise.all(symbolsList.map(async (symbol) => {
         try {
           return await get24hrTicker(symbol);
         } catch { return null; }
       })),
-      Promise.all(symbolsList.map(async (symbol) => ({ symbol, data: await fetchHistoricalKlines(symbol) })))
+      Promise.all(symbolsList.map(async (symbol) => ({ symbol, data: await fetchHistoricalKlines(symbol) }))),
+      Promise.all(symbolsList.map(async (symbol) => ({ symbol, data: await fetchLtfKlines(symbol) }))),
     ]);
 
     const marketDataMap = new Map(marketDataResults.filter(Boolean).map((d) => [d.symbol, d]));
     const historicalDataMap = new Map<string, { prices: number[]; volumes: number[]; klines: any[]; livePrice: number }>();
     historicalResults.forEach(({ symbol, data }) => historicalDataMap.set(symbol, data));
+    const ltfDataMap = new Map<string, { klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[] }>();
+    ltfResults.forEach(({ symbol, data }) => ltfDataMap.set(symbol, data));
 
     // Fetch trend data in PARALLEL for eligible symbols (already filtered by win rate)
     const eligibleSymbols = symbolsList.filter((symbol) => {
