@@ -15455,7 +15455,7 @@ serve(async (req) => {
         const smartMomentumScore = smartMomentum?.score || 0;
         
         // Extract directional runway values
-        const priceDistanceData = trendData.priceDistanceFromSwing;
+        const priceDistanceData = priceDistanceFromSwing;
         const moveFromLowPercent = priceDistanceData?.distanceFromLowPercent || 0;
         const moveFromHighPercent = priceDistanceData?.distanceFromHighPercent || 0;
         
