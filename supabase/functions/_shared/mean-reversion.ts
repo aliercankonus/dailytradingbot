@@ -181,7 +181,7 @@ export function checkVolatilityContracting(
  * For LONG: 15m or 30m shows Higher Low + Higher High
  * For SHORT: 15m or 30m shows Lower High + Lower Low
  * 
- * @param trendData - Trend data containing timeframe information
+ * @param mfs - MarketFeatureSnapshot containing timeframe information
  * @param direction - Trade direction ('long' or 'short')
  * @returns Object with flip status and confidence score
  */
@@ -232,7 +232,7 @@ export function checkLtfStructureFlip(
  * Main entry point for counter-trend admission evaluation
  * Single authority for allowing reversal entries
  * 
- * @param trendData - Full trend data from calculate-trend
+ * @param mfs - MarketFeatureSnapshot for the symbol
  * @param derivedDirection - The direction derived by the signal generator
  * @param htfTrend - The higher timeframe trend ('bullish', 'bearish', 'neutral')
  * @returns CounterTrendAdmissionResult with pass/fail and detailed diagnostics
@@ -858,9 +858,7 @@ function checkOverboughtExhaustion(mfs: MarketFeatureSnapshot): ExhaustionCheck 
  * Runs BEFORE blocking gates to prevent gate collision
  * Returns signal with direction-aware gate bypasses
  * 
- * MFS MIGRATION: Now accepts MarketFeatureSnapshot directly.
- * The trendData parameter is fully removed — all reads come from mfs.
- * 
+ * @param mfs - MarketFeatureSnapshot for the symbol
  * @param options.skipRegimeGating - When true, bypasses isMeanReversionAllowed() check.
  */
 export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipRegimeGating?: boolean }): ExhaustionSignal {
