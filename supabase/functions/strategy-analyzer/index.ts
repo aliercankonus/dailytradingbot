@@ -12228,7 +12228,7 @@ serve(async (req) => {
                 meanReversionBypass: false,
                 message: `Pullback probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO EXCEPTIONS`
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -12307,7 +12307,7 @@ serve(async (req) => {
                   shortFlipReason: `K>D=${stochTurningUp}, strongTrend=${isStrongTrendRegimeOS}, adx<40=${adxAllowsMRLong}`,
                   message: `Bounce probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO bypass allowed`
                 },
-                trendData,
+                mfs,
                 false,
                 earlyOrderFlowAnalysis
               );
@@ -12375,7 +12375,7 @@ serve(async (req) => {
                   shortFlipReason: `K<D=${stochTurningDown}, strongTrend=${isStrongTrendRegime}, adx<40=${adxAllowsMRShort}`,
                   message: `Pullback probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO bypass allowed`
                 },
-                trendData,
+                mfs,
                 false,
                 earlyOrderFlowAnalysis
               );
@@ -12845,7 +12845,7 @@ serve(async (req) => {
                 negativePercentBBypassChecked: percentB < 0,
                 message: "Shorts at low %B blocked - no bearish trend confirmation"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13063,7 +13063,7 @@ serve(async (req) => {
                 adx: adx.toFixed(1),
                 message: "Longs at high %B blocked - no bullish trend confirmation"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13116,7 +13116,7 @@ serve(async (req) => {
               isInSqueeze4h,
               message: "4h squeeze + oversold StochRSI = MEAN_REVERSION context, blocking trend-continuation shorts"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -13140,7 +13140,7 @@ serve(async (req) => {
               isInSqueeze4h,
               message: "4h squeeze + overbought StochRSI = MEAN_REVERSION context, blocking trend-continuation longs"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -13248,7 +13248,7 @@ serve(async (req) => {
                   result: veryHighAdxBypassAllowed
                 }
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13286,7 +13286,7 @@ serve(async (req) => {
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought with bearish divergence`,
               { stochRsiK4h, hasBearishDivergence: true, gate: "BEARISH_DIVERGENCE_AT_EXTREME", direction: "long" },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13401,7 +13401,7 @@ serve(async (req) => {
                 reason: blockReason,
                 gate: "STOCHRSI_OVERBOUGHT_BLOCK"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13524,7 +13524,7 @@ serve(async (req) => {
                   result: veryHighAdxBypassAllowedShort
                 }
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13562,7 +13562,7 @@ serve(async (req) => {
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold with bullish divergence`,
               { stochRsiK4h, hasBullishDivergence: true, gate: "BULLISH_DIVERGENCE_AT_EXTREME" },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13614,7 +13614,7 @@ serve(async (req) => {
                 reason: blockReason,
                 gate: "STOCHRSI_OVERSOLD_BLOCK"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13700,7 +13700,7 @@ serve(async (req) => {
               macdSlope: trendData?.momentum?.macdSlope,
               adx: adx.toFixed(1)
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
