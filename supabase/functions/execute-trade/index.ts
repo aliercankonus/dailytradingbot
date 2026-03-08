@@ -1321,7 +1321,8 @@ serve(async (req) => {
     // REDUCE (40-60): Proceed with 50% position size
     // NORMAL (<40): Full position size
     // ============================================================
-    const unifiedReversalResult = calculateUnifiedReversalScore(trendData, signal.signal_type);
+    const executionMfs = buildMarketFeatureSnapshot(signal.symbol, trendData);
+    const unifiedReversalResult = calculateUnifiedReversalScore(executionMfs, signal.signal_type);
     logger.info(`🔄 Unified Reversal: ${unifiedReversalResult.score}/100 (ADX weight: ${unifiedReversalResult.adxWeight}) → ${unifiedReversalResult.decision}`);
     if (unifiedReversalResult.reasons.length > 0) {
       logger.info(`   Factors: ${unifiedReversalResult.reasons.slice(0, 3).join(', ')}`);
