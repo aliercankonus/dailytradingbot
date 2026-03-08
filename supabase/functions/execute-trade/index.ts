@@ -1613,7 +1613,7 @@ serve(async (req) => {
             throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
           }
           if (analysis.riskLevel === 'high') {
-            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Risk Level HIGH', signal, trendData, { aiRiskLevel: analysis.riskLevel, aiKeyFactors: analysis.keyFactors });
+            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Risk Level HIGH', signal, mfs, { aiRiskLevel: analysis.riskLevel, aiKeyFactors: analysis.keyFactors });
             throw new Error(`AI risk level HIGH: ${analysis.keyFactors?.slice(0, 2).join(', ')}`);
           }
           // Medium risk: reduce position size by 50%
