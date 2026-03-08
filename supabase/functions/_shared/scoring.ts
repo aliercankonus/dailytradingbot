@@ -4413,7 +4413,7 @@ export const deriveTradeDirection = (
     }
     
     // Evidence 4: Price action momentum (significant move in one direction)
-    const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+    const priceMove = mfs.priceActionMomentum?.movePercent || 0;
     if (Math.abs(priceMove) >= 1.5) {
       biasScore += 1;
       const priceDir: TradeDirection = priceMove > 0 ? "long" : "short";
