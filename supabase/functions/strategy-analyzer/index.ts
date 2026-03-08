@@ -13937,7 +13937,7 @@ serve(async (req) => {
            if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone) {
              // Re-run detectExhaustion with regime gating skipped for transitional zone
              const transitionalMRSignal = MEAN_REVERSION_CONFIG.ENABLED 
-               ? detectExhaustion(trendData, { skipRegimeGating: true }) 
+               ? detectExhaustion(mfs, { skipRegimeGating: true }) 
                : null;
              
              if (transitionalMRSignal?.detected && transitionalMRSignal?.allowed) {
