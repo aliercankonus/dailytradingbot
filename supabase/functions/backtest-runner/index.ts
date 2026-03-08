@@ -824,13 +824,14 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'adx_collapse_exit' };
   }
 
-  // 12. ALTCOIN HARD PNL FLOOR — hard stop at maxCapPercent loss regardless of momentum
-  if (pnlPercent < -symParams.stopLoss.maxCapPercent) {
+  // 12. ALTCOIN-ONLY: Hard PnL floor — prevent runaway losses on volatile altcoins
+  const isBtc = position.symbol.startsWith('BTC');
+  if (!isBtc && pnlPercent < -symParams.stopLoss.maxCapPercent) {
     return { shouldExit: true, exitReason: 'hard_pnl_floor_exit' };
   }
 
-  // 13. ALTCOIN QUICK LOSS CUT — if losing after 3+ hours with no recovery, cut
-  if (hoursHeld > 3 && pnlPercent < -0.5 && pnlPercent < position.peakPnl - 0.3) {
+  // 13. ALTCOIN-ONLY: Quick loss cut — if losing after 3+ hours with no recovery
+  if (!isBtc && hoursHeld > 3 && pnlPercent < -0.5 && pnlPercent < position.peakPnl - 0.3) {
     return { shouldExit: true, exitReason: 'stale_loss_exit' };
   }
 
