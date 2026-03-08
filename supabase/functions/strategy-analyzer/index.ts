@@ -9857,6 +9857,24 @@ serve(async (req) => {
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
+                  // Shadow tracking for NEAR_24H_LOW_HARD (hard zone graduation failed)
+                  if (shadowModeEnabled) {
+                    try {
+                      const _dedupSkipNL4 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
+                      if (!_dedupSkipNL4) {
+                        const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                        await supabase.from('shadow_mode_signals').insert({
+                          user_id: userId, symbol, signal_type: derivedDirection,
+                          strategy_name: `Shadow: NEAR_24H_LOW_HARD (graduation failed)`,
+                          gate_blocked_by: 'NEAR_24H_LOW_HARD',
+                          old_gate_result: 'BLOCKED', new_gate_result: 'WOULD_PASS',
+                          gate_details: { gate: 'NEAR_24H_LOW_HARD', subGate: 'GRADUATION_FAILED', distanceFromLow: distanceFromLow.toFixed(2), adx: adx.toFixed(1), adxSlope: adxSlope.toFixed(2) },
+                          confidence_score: confidence, entry_price: trendData?.currentPrice,
+                          stop_loss: _shadowSLTP.stopLoss, take_profit: _shadowSLTP.takeProfit, trend: trend || null,
+                        });
+                      }
+                    } catch (e) { /* non-critical */ }
+                  }
                   continue;
                 }
               } else if (!nearExtremeBlocked && !ltfSupportsShort) {
