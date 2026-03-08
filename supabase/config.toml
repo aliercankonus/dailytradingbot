@@ -66,3 +66,10 @@ verify_jwt = false
 enabled = true
 cron = "*/1 * * * *"
 
+[functions.evaluate-oversold-events]
+verify_jwt = false
+
+[functions.evaluate-oversold-events.schedule]
+enabled = true
+cron = "0 * * * *"
+
