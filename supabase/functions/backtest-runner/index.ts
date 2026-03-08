@@ -520,21 +520,26 @@ function evaluateProductionGates(
     return fail('COUNTER_TREND');
   }
 
-  // ===== GATE 5.5: StochRSI Directional Protection (production-accurate) =====
-  // K > 85 blocks SHORT entries, K < 15 blocks LONG entries
-  // Independent of Gate 3 (deep extreme), this catches directional mismatches
-  if (direction === 'SHORT' && stochK > 85) {
-    // Shorting into overbought only allowed if ADX >= 35 (strong downtrend confirmed)
+  // ===== GATE 5.5: StochRSI Directional Protection — SYNCED with constants (K>80/K<20) =====
+  if (direction === 'SHORT' && stochK > 80) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
-  if (direction === 'LONG' && stochK < 15) {
+  if (direction === 'LONG' && stochK < 20) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
+  }
+
+  // ===== GATE 5.6: Overbought LONG / Oversold SHORT Block (K>80 / K<20) =====
+  if (direction === 'LONG' && stochK > 80 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+    return fail('OVERBOUGHT_LONG_BLOCK');
+  }
+  if (direction === 'SHORT' && stochK < 20 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+    return fail('OVERSOLD_SHORT_BLOCK');
   }
 
   // ===== GATE 6: Momentum Direction Alignment (production-accurate: ±15 threshold) =====
@@ -787,12 +792,22 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
-  // 10. Momentum reversal exit — cut losses when trend flips (relaxed threshold: -35 to reduce premature exits)
+  // 10. Momentum reversal exit — tightened PnL threshold from -0.5% to -0.3%
   if (hoursHeld > 2) {
     if ((side === 'LONG' && momentumScore < -35 && primaryTrend === 'bearish') ||
         (side === 'SHORT' && momentumScore > 35 && primaryTrend === 'bullish')) {
-      if (pnlPercent < -0.5) {
+      if (pnlPercent < -0.3) {
         return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
+      }
+    }
+  }
+
+  // 10b. Early momentum flip — extreme momentum reversal within first 2 hours
+  if (hoursHeld > 1 && hoursHeld <= 2) {
+    if ((side === 'LONG' && momentumScore < -50) ||
+        (side === 'SHORT' && momentumScore > 50)) {
+      if (pnlPercent < -0.5) {
+        return { shouldExit: true, exitReason: 'early_momentum_flip_exit' };
       }
     }
   }
@@ -927,15 +942,19 @@ async function runBacktest(
           if (gateResult.passed && gateResult.direction) {
             const dir = gateResult.direction;
             
-            // ATR-based SL/TP (production constants)
+            // ATR-based SL/TP with max cap (prevents oversized stops on volatile altcoins)
             const slMultiplier = 1.5;
             const tpMultiplier = 2.5;
+            const maxSlPercent = 2.0; // Cap stop-loss at 2% max
             let stopLoss: number, takeProfit: number;
+            const atrStop = atr * slMultiplier;
+            const maxStop = currentPrice * (maxSlPercent / 100);
+            const effectiveStop = Math.min(atrStop, maxStop);
             if (dir === 'LONG') {
-              stopLoss = currentPrice - (atr * slMultiplier);
+              stopLoss = currentPrice - effectiveStop;
               takeProfit = currentPrice + (atr * tpMultiplier);
             } else {
-              stopLoss = currentPrice + (atr * slMultiplier);
+              stopLoss = currentPrice + effectiveStop;
               takeProfit = currentPrice - (atr * tpMultiplier);
             }
 
