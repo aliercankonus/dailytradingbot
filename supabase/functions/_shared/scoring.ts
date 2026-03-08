@@ -1259,7 +1259,7 @@ export const calculateUnifiedReversalScore = (
   });
   
   // PHASE 3: Calculate time-in-extreme penalty
-  const timeInExtremePenalty = calculateTimeInExtremePenalty(trendData, signalType);
+  const timeInExtremePenalty = calculateTimeInExtremePenalty(mfs, signalType);
   if (timeInExtremePenalty.penalty > 0) {
     reasons.push(`PHASE 3: ${timeInExtremePenalty.reason}`);
   }
