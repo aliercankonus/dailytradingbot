@@ -9,10 +9,6 @@ import {
   getAdxWeight,
   calculateUnifiedReversalScore,
   detectMarketRegime,
-  extractADX,
-  extractADXSlope,
-  extractStochRsiK,
-  extractAtrPercent,
   type UnifiedReversalResult,
   type MarketRegime
 } from "../_shared/scoring.ts";
