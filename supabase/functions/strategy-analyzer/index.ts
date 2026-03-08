@@ -11676,7 +11676,7 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               bollingerPosition
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -11787,7 +11787,7 @@ serve(async (req) => {
               priceActionOverride: priceActionMomentumOverride,
               message: "Price extremely above upper Bollinger with overbought StochRSI"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -11824,7 +11824,7 @@ serve(async (req) => {
               priceActionOverride: priceActionMomentumOverride,
               message: "Price extremely below lower Bollinger with oversold StochRSI"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -12191,7 +12191,7 @@ serve(async (req) => {
                 meanReversionBypass: false,
                 message: `Bounce probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO EXCEPTIONS`
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
