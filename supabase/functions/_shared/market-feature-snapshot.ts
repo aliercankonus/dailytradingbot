@@ -86,6 +86,7 @@ export interface MarketFeatureSnapshot {
   adx: number;
   adxSlope: number;
   adxRising: boolean;
+  adxArray: number[];     // Historical ADX values for slope persistence checks
   adx15m?: number;      // diagnostic only
   adx30m?: number;
   adx4h?: number;
