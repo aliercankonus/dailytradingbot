@@ -14018,8 +14018,8 @@ serve(async (req) => {
           // If no exception passed, block the signal
           if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive && !earlyTrendIgnitionActive) {
             // Get diagnostic info for squeeze and ignition checks
-            const squeezeCheck = isValidSqueezeBreakout(trendData, derivedDirection);
-            const ignitionCheck = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
+            const squeezeCheck = isValidSqueezeBreakout(mfs, derivedDirection);
+            const ignitionCheck = checkEarlyIgnitionException(mfs, derivedDirection, regime.regime);
             
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
