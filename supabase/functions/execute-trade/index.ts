@@ -1317,7 +1317,7 @@ serve(async (req) => {
       // FILTER 9: Wide spread protection (avoid illiquid order books)
       const maxSpreadPercent = SLIPPAGE_PROTECTION.MAX_SPREAD_PERCENT;
       if (spread > maxSpreadPercent) {
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'Wide Spread', signal, trendData, { spread, maxAllowed: maxSpreadPercent, bestBid, bestAsk });
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'Wide Spread', signal, mfs, { spread, maxAllowed: maxSpreadPercent, bestBid, bestAsk });
         throw new Error(`Order book spread too wide (${spread.toFixed(3)}% > ${maxSpreadPercent}%) - trade cancelled to avoid slippage`);
       }
       logger.validation(`✓ Spread check passed: ${spread.toFixed(4)}% < ${maxSpreadPercent}% max`, true);
