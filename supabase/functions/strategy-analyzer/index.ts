@@ -13905,7 +13905,7 @@ serve(async (req) => {
           
           // Check Early Ignition Exception if squeeze didn't pass
           if (!squeezeBreakoutActive && ADX_GATE.EARLY_IGNITION.ENABLED && isInTransitionalZone) {
-            const ignitionResult = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
+            const ignitionResult = checkEarlyIgnitionException(mfs, derivedDirection, regime.regime);
             
             if (ignitionResult.isValid) {
               // Early Ignition exception approved
