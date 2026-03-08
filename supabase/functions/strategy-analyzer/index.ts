@@ -18897,7 +18897,35 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⏱️ LTF_MICRO_TIMING - position size adjusted to ${unifiedPositionSize.toFixed(2)}% (timing score: ${ltfMicro.entryTimingScore.toFixed(0)})`);
           }
         }
-        
+
+    // ============= BATCH UPDATE LTF MICRO DATA IN TREND SNAPSHOTS =============
+    if (symbolLtfMicroMap.size > 0) {
+      const ltfMicroUpdatePromises = Array.from(symbolLtfMicroMap.entries()).map(([sym, data]) => {
+        return supabase
+          .from("trend_snapshots")
+          .select("snapshot_data")
+          .eq("user_id", userId)
+          .eq("symbol", sym)
+          .single()
+          .then(({ data: existing }) => {
+            const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+            const mergedData = { ...existingData, ltfMicroMomentum: data };
+            return supabase
+              .from("trend_snapshots")
+              .update({ snapshot_data: mergedData })
+              .eq("user_id", userId)
+              .eq("symbol", sym);
+          });
+      });
+      const ltfResults = await Promise.all(ltfMicroUpdatePromises);
+      const ltfErrors = ltfResults.filter(r => r?.error);
+      if (ltfErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache LTF micro for ${ltfErrors.length}/${symbolLtfMicroMap.size} symbols`);
+      } else {
+        logger.info(`🔬 Cached LTF micro momentum in trend_snapshots for ${symbolLtfMicroMap.size} symbols`);
+      }
+    }
+
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
