@@ -2428,6 +2428,8 @@ serve(async (req) => {
     const symbolLtfMicroMap = new Map<string, { score5m: number; direction5m: string; score1m: number; direction1m: string; ltfAlignment: number; entryTimingScore: number; microTrendConfirms: boolean; recentCandlePattern: string; isAccelerating5m: boolean; isReverting1m: boolean }>();
     // Collect micro exhaustion data for batch snapshot update (Exhaustion dashboard)
     const symbolMicroExhaustionMap = new Map<string, { score: number; detected: boolean; recommendation: string; positionMultiplier: number; momentumDecay: boolean; accelerationFlip: boolean; priceDivergence: boolean; signals: string[] }>();
+    // Collect liquidity trap data for batch snapshot update (Trap dashboard)
+    const symbolLiquidityTrapMap = new Map<string, { score: number; detected: boolean; trapType: string; recommendation: string; positionMultiplier: number; signals: string[]; wickRejection: boolean; volumeSpikeReversal: boolean; priceRejection: boolean; sweepDetected: boolean; trapDirection: string }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
