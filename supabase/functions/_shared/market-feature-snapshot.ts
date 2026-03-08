@@ -243,6 +243,9 @@ export interface MarketFeatureSnapshot {
     isStrongMove: boolean;
     canOverrideNeutralAlignment: boolean;
   };
+  
+  // === Market Regime (raw from trendData) ===
+  regime: string;
 }
 
 // ============= DEFAULTS =============
