@@ -19433,6 +19433,34 @@ serve(async (req) => {
       }
     }
 
+    // ============= BATCH UPDATE LTF MICRO DATA IN TREND SNAPSHOTS =============
+    if (symbolLtfMicroMap.size > 0) {
+      const ltfMicroUpdatePromises = Array.from(symbolLtfMicroMap.entries()).map(([sym, data]) => {
+        return supabase
+          .from("trend_snapshots")
+          .select("snapshot_data")
+          .eq("user_id", userId)
+          .eq("symbol", sym)
+          .single()
+          .then(({ data: existing }) => {
+            const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+            const mergedData = { ...existingData, ltfMicroMomentum: data };
+            return supabase
+              .from("trend_snapshots")
+              .update({ snapshot_data: mergedData })
+              .eq("user_id", userId)
+              .eq("symbol", sym);
+          });
+      });
+      const ltfResults = await Promise.all(ltfMicroUpdatePromises);
+      const ltfErrors = ltfResults.filter(r => r?.error);
+      if (ltfErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache LTF micro for ${ltfErrors.length}/${symbolLtfMicroMap.size} symbols`);
+      } else {
+        logger.info(`🔬 Cached LTF micro momentum in trend_snapshots for ${symbolLtfMicroMap.size} symbols`);
+      }
+    }
+
     // Log heartbeat and persist to database
     if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
       logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
