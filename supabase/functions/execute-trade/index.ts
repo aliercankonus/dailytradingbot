@@ -1226,11 +1226,10 @@ serve(async (req) => {
               logger.info(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
             }
           } else if (currentPrice < vwapLowerBand) {
-            const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+            const adxValue = mfs.adx;
             const ADX_EXCEPTION_THRESHOLD = VWAP_FILTER.ADX_EXCEPTION_THRESHOLD;
-            const adxRising = trendData?.momentum?.adxRising === true || 
-              (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
-            const macdHistogram = trendData?.momentum?.macdHistogram || 0;
+            const adxRising = mfs.adxSlope.isRising;
+            const macdHistogram = mfs.momentum?.macdHistogram ?? 0;
             const momentumDirectionAgrees = macdHistogram < 0;
             const hasValidException = adxValue >= ADX_EXCEPTION_THRESHOLD && (adxRising || momentumDirectionAgrees);
             const hasWeakException = adxValue >= ADX_EXCEPTION_THRESHOLD && !adxRising && !momentumDirectionAgrees;
