@@ -1557,15 +1557,15 @@ export const calculateUnifiedReversalScore = (
 // ============= MARKET REGIME DETECTION =============
 export type MarketRegime = "trending" | "ranging" | "choppy" | "volatile";
 
-export const detectMarketRegime = (trendData: any): { 
+export const detectMarketRegime = (mfs: MarketFeatureSnapshot): { 
   regime: MarketRegime; 
   tradeable: boolean; 
   reason: string 
 } => {
-  const adx = trendData?.volatility?.adx || 0;
-  const atrPercent = trendData?.volatility?.atrPercent || 0;
-  const confidence = trendData?.confidence || 0;
-  const consistency = trendData?.trueAlignment?.score || 0;
+  const adx = mfs.adx;
+  const atrPercent = mfs.atrPercent;
+  const confidence = mfs.confidence;
+  const consistency = mfs.trueAlignment.score;
   
   // Ranging market (ADX low, mixed signals)
   if (adx < MARKET_REGIME_DETECTION.RANGING_ADX_MAX && confidence < MARKET_REGIME_DETECTION.RANGING_CONFIDENCE_MAX) {
