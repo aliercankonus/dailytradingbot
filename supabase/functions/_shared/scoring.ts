@@ -4490,8 +4490,8 @@ export const deriveTradeDirection = (
     const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
     
     // Get momentum data from trendData
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-    const tier10StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    const momentumScore = mfs.smartMomentum?.score ?? 0;
+    const tier10StochK = mfs.stochRsi["1h"].k;
     
     // Check if we have strong enough momentum signal
     const absMomentum = Math.abs(momentumScore);
