@@ -1340,7 +1340,7 @@ serve(async (req) => {
     let reversalPositionMultiplier = unifiedReversalResult.positionSizeMultiplier;
     
     if (unifiedReversalResult.decision === "BLOCK") {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Unified Reversal BLOCK', signal, trendData, { reversalScore: unifiedReversalResult.score, reasons: unifiedReversalResult.reasons, adxWeight: unifiedReversalResult.adxWeight });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Unified Reversal BLOCK', signal, mfs, { reversalScore: unifiedReversalResult.score, reasons: unifiedReversalResult.reasons, adxWeight: unifiedReversalResult.adxWeight });
       throw new Error(`🛑 Unified Reversal BLOCK (${unifiedReversalResult.score}/100) - ${unifiedReversalResult.reasons.slice(0, 2).join(', ')} - trade cancelled`);
     }
     
