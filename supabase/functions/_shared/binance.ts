@@ -382,19 +382,22 @@ export async function fetchKlines(
   const ttl = getKlineCacheTTL(interval);
   
   if (cached && Date.now() - cached.ts < ttl) {
+    cacheHits++;
+    logger.debug(`CACHE_HIT ${symbol} ${interval} (age=${Math.round((Date.now() - cached.ts) / 1000)}s, ttl=${Math.round(ttl / 1000)}s)`);
     return cached.data;
   }
+  cacheMisses++;
 
   let lastError: Error | null = null;
   
   for (let attempt = 0; attempt <= retries; attempt++) {
+    await acquireFetchSlot();
     try {
-      await acquireFetchSlot();
+      const start = performance.now();
       const response = await fetchWithTimeout(
         `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
         FETCH_TIMEOUTS.klines
       );
-      releaseFetchSlot();
       
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500) {
@@ -405,20 +408,25 @@ export async function fetchKlines(
       
       const klines = await response.json();
       const result = Array.isArray(klines) ? klines : [];
+      const elapsed = Math.round(performance.now() - start);
       
       // Store in cache
       klineCache.set(cacheKey, { data: result, ts: Date.now() });
+      fetchOkCount++;
+      logger.debug(`FETCH_OK ${symbol} ${interval} ${elapsed}ms (${result.length} candles)`);
       
       return result;
     } catch (error) {
-      releaseFetchSlot();
       lastError = error instanceof Error ? error : new Error(String(error));
       const isTimeout = lastError.message.includes('BINANCE_TIMEOUT');
-      logger.warn(`${isTimeout ? '⏰' : '❌'} Failed to fetch ${interval} klines for ${symbol} (attempt ${attempt + 1}/${retries + 1}): ${lastError.message}`);
+      if (isTimeout) timeoutCount++;
+      logger.warn(`${isTimeout ? '⏰ TIMEOUT' : '❌ ERROR'} ${symbol} ${interval} attempt ${attempt + 1}/${retries + 1}: ${lastError.message}`);
       
       if (attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
       }
+    } finally {
+      releaseFetchSlot();
     }
   }
   
