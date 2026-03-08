@@ -719,8 +719,7 @@ serve(async (req) => {
     let dynamicQualityThreshold: number = QUALITY_THRESHOLDS.BASE_MIN; // Base threshold from shared constants
     
     // Extract 1h confidence for strong alignment exception
-    const confidence1h = trendData?.timeframes?.['1h']?.confidence || 
-                         trendData?.higherTimeframeFilter?.confidence1h || 0;
+    const confidence1h = mfs.timeframes['1h'].confidence || 0;
     
     // Check if this is a neutral trend scenario (for lower threshold)
     // Neutral applies when: strategy name contains "neutral" OR current trend is neutral/ranging
