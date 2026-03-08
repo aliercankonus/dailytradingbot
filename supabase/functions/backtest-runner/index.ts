@@ -949,10 +949,11 @@ async function runBacktest(
           if (gateResult.passed && gateResult.direction) {
             const dir = gateResult.direction;
             
-            // ATR-based SL/TP with max cap (prevents oversized stops on volatile altcoins)
-            const slMultiplier = 1.5;
-            const tpMultiplier = 2.5;
-            const maxSlPercent = 2.0; // Cap stop-loss at 2% max
+            // ATR-based SL/TP with SYMBOL-ADAPTIVE caps
+            const symP = getSymbolParams(symbol);
+            const slMultiplier = symP.stopLoss.atrMultiplier;
+            const tpMultiplier = symP.takeProfit.atrMultiplier;
+            const maxSlPercent = symP.stopLoss.maxCapPercent;
             let stopLoss: number, takeProfit: number;
             const atrStop = atr * slMultiplier;
             const maxStop = currentPrice * (maxSlPercent / 100);
