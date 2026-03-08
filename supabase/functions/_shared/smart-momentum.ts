@@ -61,8 +61,9 @@ export function calculateMomentumScore(
 ): MomentumScoreResult {
   const defaultMicroExhaustion: MicroExhaustionResult = {
     detected: false, score: 0, signals: [],
-    momentumDeceleration: false, volumeDryUp: false, rsiDivergence: false,
-    recommendation: "hold"
+    momentumDeceleration: false, accelerationFlip: false, priceDivergence: false,
+    volumeDryUp: false, rsiDivergence: false,
+    recommendation: "hold", positionMultiplier: 1.0
   };
   const defaultResult: MomentumScoreResult = {
     score: 0,
