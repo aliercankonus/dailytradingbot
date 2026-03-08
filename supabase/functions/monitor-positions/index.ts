@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, DYNAMIC_TRAILING_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, TRAILING_MIN_PROFIT_FLOOR, PEAK_ADAPTIVE_TRAILING, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, DYNAMIC_TRAILING_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, TRAILING_MIN_PROFIT_FLOOR, PEAK_ADAPTIVE_TRAILING, VOLATILITY_ADAPTIVE_TRAILING, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
   evaluateMicroProfitLock,
@@ -2054,7 +2054,60 @@ serve(async (req) => {
           minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier;
           positionLogger.trade(`MOMENTUM_CONTINUATION TRAILING: Wider distance ×${MOMENTUM_CONTINUATION_EXIT.TRAILING_DISTANCE_MULTIPLIER} = ${baseTrailingDistance.toFixed(2)} (decay is primary exit)`);
         } else {
-          baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
+          // ============= VOLATILITY ADAPTIVE TRAILING =============
+          // Standard ATR-based distance as baseline
+          const standardAtrDistance = atrAbsolute * userSettings.distanceMultiplier;
+          const minFloor = currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100);
+          
+          if (VOLATILITY_ADAPTIVE_TRAILING.ENABLED) {
+            // Step 1: Determine volatility regime from ATR ratio
+            const atrRatio = atrPercent / 100; // Already have atrPercent
+            let volRegime: 'LOW' | 'NORMAL' | 'HIGH';
+            let volMultiplier: number;
+            
+            if (atrRatio < VOLATILITY_ADAPTIVE_TRAILING.REGIME_THRESHOLDS.LOW_MAX) {
+              volRegime = 'LOW';
+              volMultiplier = VOLATILITY_ADAPTIVE_TRAILING.REGIME_MULTIPLIERS.LOW;
+            } else if (atrRatio < VOLATILITY_ADAPTIVE_TRAILING.REGIME_THRESHOLDS.NORMAL_MAX) {
+              volRegime = 'NORMAL';
+              volMultiplier = VOLATILITY_ADAPTIVE_TRAILING.REGIME_MULTIPLIERS.NORMAL;
+            } else {
+              volRegime = 'HIGH';
+              volMultiplier = VOLATILITY_ADAPTIVE_TRAILING.REGIME_MULTIPLIERS.HIGH;
+            }
+            
+            // Step 2: Calculate ATR-normalized adaptive distance
+            let adaptiveDistance = atrAbsolute * volMultiplier;
+            
+            // Step 3: ADX trend strength override
+            if (VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.ENABLED) {
+              const posAdx = mfsForPosition?.adx ?? 20;
+              if (posAdx >= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.STRONG_MIN_ADX) {
+                adaptiveDistance *= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.STRONG_MULTIPLIER;
+              } else if (posAdx >= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.MODERATE_MIN_ADX) {
+                adaptiveDistance *= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.MODERATE_MULTIPLIER;
+              }
+            }
+            
+            // Step 4: Apply floor and cap
+            const distanceFloor = currentPrice * (VOLATILITY_ADAPTIVE_TRAILING.MIN_DISTANCE_FLOOR_PERCENT / 100);
+            const distanceCap = currentPrice * (VOLATILITY_ADAPTIVE_TRAILING.MAX_DISTANCE_CAP_PERCENT / 100);
+            adaptiveDistance = Math.max(adaptiveDistance, distanceFloor);
+            adaptiveDistance = Math.min(adaptiveDistance, distanceCap);
+            
+            // Step 5: Final distance = max(peak_tier_distance, ATR_adaptive_distance, min_floor)
+            // peak_tier_distance is handled later by PEAK_ADAPTIVE_TRAILING (tightening)
+            // Here we use max(standard, adaptive) as the base
+            baseTrailingDistance = Math.max(standardAtrDistance, adaptiveDistance, minFloor);
+            
+            if (VOLATILITY_ADAPTIVE_TRAILING.LOG_REGIME_DECISIONS) {
+              const posAdx = mfsForPosition?.adx ?? 20;
+              positionLogger.trade(`🌊 VOL_ADAPTIVE_TRAIL: regime=${volRegime} ATR%=${(atrRatio*100).toFixed(3)}% | volMult=${volMultiplier} ADX=${posAdx.toFixed(1)} | standard=${standardAtrDistance.toFixed(2)} adaptive=${adaptiveDistance.toFixed(2)} → final=${baseTrailingDistance.toFixed(2)}`);
+            }
+          } else {
+            baseTrailingDistance = Math.max(standardAtrDistance, minFloor);
+          }
+          
           minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
           
           // ============= FIX #2: FAST PEAK VELOCITY TRAIL TIGHTENING =============

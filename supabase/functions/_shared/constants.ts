@@ -7869,16 +7869,16 @@ export const PEAK_ADAPTIVE_TRAILING = {
   // Root cause: even at 0.22% distance, a 0.5% peak trade exits at 0.28% (44% giveback)
   // Fix: shrink probe/early tiers further — target max 30-40% giveback
   TIERS: [
-    { peakThreshold: 0.20, maxDistancePercent: 0.18 },  // Was 0.25 → 0.18 (catches early)
-    { peakThreshold: 0.30, maxDistancePercent: 0.15 },  // Was 0.22 → 0.15
-    { peakThreshold: 0.50, maxDistancePercent: 0.12 },  // Was 0.18 → 0.12
-    { peakThreshold: 0.80, maxDistancePercent: 0.10 },  // Was 0.15 → 0.10
-    { peakThreshold: 1.00, maxDistancePercent: 0.08 },  // Was 0.12 → 0.08
-    { peakThreshold: 1.50, maxDistancePercent: 0.06 },  // Was 0.10 → 0.06
-    { peakThreshold: 2.00, maxDistancePercent: 0.05 },  // Was 0.08 → 0.05
+    { peakThreshold: 0.20, maxDistancePercent: 0.18 },
+    { peakThreshold: 0.30, maxDistancePercent: 0.15 },
+    { peakThreshold: 0.50, maxDistancePercent: 0.12 },
+    { peakThreshold: 0.80, maxDistancePercent: 0.10 },
+    { peakThreshold: 1.00, maxDistancePercent: 0.08 },
+    { peakThreshold: 1.50, maxDistancePercent: 0.06 },
+    { peakThreshold: 2.00, maxDistancePercent: 0.05 },
   ],
   // Default distance for peak < 0.20% (probe phase)
-  DEFAULT_DISTANCE_PERCENT: 0.25,  // Was 0.35 → 0.25
+  DEFAULT_DISTANCE_PERCENT: 0.25,
   // ADX-aware relaxation: in strong trends, allow slightly wider distance
   STRONG_TREND_RELAXATION_ENABLED: true,
   STRONG_TREND_MIN_ADX: 30,
@@ -7891,6 +7891,44 @@ export const PEAK_ADAPTIVE_TRAILING = {
   EXEMPT_MOMENTUM_CONTINUATION: true,
   // Logging
   LOG_DISTANCE_TIGHTENING: true,
+} as const;
+
+// ============= VOLATILITY ADAPTIVE TRAILING =============
+// Professional-grade trailing: ATR-normalized distance adapts to market volatility regime
+// Low vol → tighter trailing (prevent profit erosion in calm markets)
+// High vol → wider trailing (prevent premature exit in volatile markets)
+// ADX trend override → extra room for strong directional moves
+export const VOLATILITY_ADAPTIVE_TRAILING = {
+  ENABLED: true,
+  // Volatility regime thresholds (ATR / price ratio)
+  REGIME_THRESHOLDS: {
+    LOW_MAX: 0.0025,    // ATR ratio < 0.25% = low volatility
+    NORMAL_MAX: 0.006,  // ATR ratio < 0.60% = normal volatility
+    // Above NORMAL_MAX = high volatility
+  },
+  // ATR multiplier per volatility regime
+  // Lower multiplier = tighter trailing, Higher = wider
+  REGIME_MULTIPLIERS: {
+    LOW: 0.45,     // Calm market: tight trailing to capture small moves
+    NORMAL: 0.60,  // Standard market: balanced trailing
+    HIGH: 0.85,    // Volatile market: wider trailing to survive noise
+  },
+  // ADX trend strength override: strong trends need more room
+  ADX_TREND_OVERRIDE: {
+    ENABLED: true,
+    // ADX >= 32: moderate trend, widen trailing 35%
+    MODERATE_MIN_ADX: 32,
+    MODERATE_MULTIPLIER: 1.35,
+    // ADX >= 40: very strong trend, widen trailing 55%
+    STRONG_MIN_ADX: 40,
+    STRONG_MULTIPLIER: 1.55,
+  },
+  // Minimum floor: never trail closer than this % of price
+  MIN_DISTANCE_FLOOR_PERCENT: 0.06,
+  // Maximum cap: never trail wider than this % of price  
+  MAX_DISTANCE_CAP_PERCENT: 1.2,
+  // Logging
+  LOG_REGIME_DECISIONS: true,
 } as const;
 
 // ============= TRAILING STOP INLINE PARAMS (monitor-positions) =============
