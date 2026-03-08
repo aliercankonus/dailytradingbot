@@ -3837,7 +3837,7 @@ serve(async (req) => {
                     isPreStrategy: true,
                     message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Flash Crash Phase 2: ${phase2Triggered ? 'TRIGGERED' : (Object.keys(phase2Diagnostics).length > 0 ? 'EVALUATED' : 'NOT_CHECKED')}`
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -4001,7 +4001,7 @@ serve(async (req) => {
                       isPreStrategy: true,
                       message: `Pullback probability ~90%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Parabolic probe ineligible.`
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -4285,7 +4285,7 @@ serve(async (req) => {
                 microAdmissionSlopeRelatedBlock: isSlopeRelatedBlock,
                 message: `Counter-trend ${directionResult.direction.toUpperCase()} blocked: trend energy not exhausted`
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -4817,7 +4817,7 @@ serve(async (req) => {
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -6773,7 +6773,7 @@ serve(async (req) => {
                   signalTimeframe: '15m',
                 }
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -6851,7 +6851,7 @@ serve(async (req) => {
                       minAdxForCheck: TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK,
                     }
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -8680,7 +8680,7 @@ serve(async (req) => {
                 swingLow24h: priceDistance?.low24h,
                 currentPrice: trendData.currentPrice,
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -8759,7 +8759,7 @@ serve(async (req) => {
                     ltfConfirmationRequired: true,
                     wouldPassWith: `1h or 30m trend must be ${expectedLtfTrend} or neutral`,
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -8873,7 +8873,7 @@ serve(async (req) => {
                       mrProbe: true,
                       wouldPassWith: `Momentum must be less extreme (|score| <= ${mrTolerance.EXTREME_OPPOSING_THRESHOLD})`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -8911,7 +8911,7 @@ serve(async (req) => {
                       failureReasons,
                       wouldPassWith: `ADX persistence >= ${mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD} AND momentum delta improving`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -8941,7 +8941,7 @@ serve(async (req) => {
                       ltfConfirmationRequired: true,
                       wouldPassWith: `Either 1h or 30m must align with direction, OR momentum must not oppose (|score| <= ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD})`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9198,7 +9198,7 @@ serve(async (req) => {
                       relaxationApplied: nearExtremeRelaxationApplied,
                       wouldPassWith: `ADX >= ${regimeBlock.MIN_ADX_TO_BYPASS} OR momentum <= -${regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow <= -${regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9338,7 +9338,7 @@ serve(async (req) => {
                             block: `> ${graduatedMomentum.NEUTRAL_SHORT_MAX}`,
                           },
                         },
-                        trendData,
+                        mfs,
                         riskParams.ai_analysis_enabled !== false,
                         earlyOrderFlowAnalysis
                       );
@@ -9366,7 +9366,7 @@ serve(async (req) => {
                         smartMomentumScore: smartMomentum.score.toFixed(1),
                         momentumRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
                       },
-                      trendData,
+                      mfs,
                       riskParams.ai_analysis_enabled !== false,
                       earlyOrderFlowAnalysis
                     );
