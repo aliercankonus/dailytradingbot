@@ -455,6 +455,9 @@ function evaluateProductionGates(
     if (ADX_GATE.GRADUATED_TIERS.ENABLED && adxSlope > 0) {
       // Early transition probe
       adxPositionMultiplier = ADX_GATE.GRADUATED_TIERS.EARLY_TRANSITION.POSITION_MULTIPLIER;
+    } else if (adxSlope > -0.5 && adx >= 18) {
+      // RELAXED: Allow flat/slightly declining slope at ADX 18-20 with reduced size
+      adxPositionMultiplier = 0.30;
     } else {
       return fail('ADX_TOO_LOW');
     }
