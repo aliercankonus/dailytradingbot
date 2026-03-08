@@ -7500,7 +7500,7 @@ serve(async (req) => {
         } | null = null;
         
         if (MOVE_EXHAUSTION_FILTER_PARAMS.ENABLED) {
-          const priceDistance = trendData.priceDistanceFromSwing;
+          const priceDistance = priceDistanceFromSwing;
           // PHASE 3 MIGRATION: Read from snapshot
           const stochRsiK4h = mfs.stochRsi["4h"].k;
           const adxSlope = fullAdxResult.adxSlope ?? 0;
