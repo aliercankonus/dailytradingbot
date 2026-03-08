@@ -9071,3 +9071,58 @@ export const DYNAMIC_ENTRY_WINDOW = {
   
   LOG_ADAPTIVE_THRESHOLDS: true,
 } as const;
+
+// ============= LIQUIDITY SWEEP REVERSAL DETECTION (LSRD) =============
+// Professional-grade pattern: Detects when price sweeps below 24h low (or above 24h high)
+// then reverses — creating a counter-direction entry opportunity (bounce probe)
+// This converts NEAR_24H_LOW blocks into potential LONG bounce entries
+export const LIQUIDITY_SWEEP_REVERSAL = {
+  ENABLED: true,
+  
+  // ===== SWEEP DETECTION =====
+  // Minimum sweep below 24h low (ATR units) to qualify
+  MIN_SWEEP_DEPTH_ATR: 0.15,
+  // Maximum sweep depth — beyond this it's a real breakdown, not a sweep
+  MAX_SWEEP_DEPTH_ATR: 1.5,
+  // Maximum bars since sweep occurred (5m bars)
+  MAX_BARS_SINCE_SWEEP: 12,  // 60 minutes window
+  
+  // ===== REVERSAL CONFIRMATION =====
+  // Minimum reversal body size relative to sweep candle range
+  MIN_REVERSAL_BODY_RATIO: 0.4,
+  // Price must recover above the swept level
+  REQUIRE_RECOVERY_ABOVE_LEVEL: true,
+  // Minimum pin bar / engulfing pattern strength (0-100)
+  MIN_PATTERN_SCORE: 30,
+  
+  // ===== VOLUME CONFIRMATION =====
+  // Volume on reversal candle vs average
+  MIN_REVERSAL_VOLUME_RATIO: 1.3,
+  // Sweep candle should have elevated volume too
+  MIN_SWEEP_VOLUME_RATIO: 1.5,
+  
+  // ===== STRUCTURAL FILTERS =====
+  // StochRSI must be oversold for LONG bounce (or overbought for SHORT bounce)
+  MAX_STOCHRSI_FOR_LONG_BOUNCE: 30,   // K <= 30 for long bounces
+  MIN_STOCHRSI_FOR_SHORT_BOUNCE: 70,   // K >= 70 for short bounces
+  // ADX filter: don't trade bounces in very strong opposing trends
+  MAX_ADX_FOR_COUNTER_BOUNCE: 45,      // Above 45 = too strong to fade
+  MIN_ADX_FOR_BOUNCE: 15,              // Below 15 = no trend energy for bounce
+  
+  // ===== POSITION SIZING =====
+  // LSRD entries are probes — conservative sizing
+  BASE_POSITION_MULTIPLIER: 0.30,      // 30% of normal position
+  // Higher quality sweep = larger position
+  HIGH_QUALITY_MULTIPLIER: 0.45,       // Score >= 75: 45%
+  HIGH_QUALITY_THRESHOLD: 75,
+  ELITE_MULTIPLIER: 0.55,              // Score >= 90: 55%
+  ELITE_THRESHOLD: 90,
+  
+  // ===== SHADOW MODE =====
+  // When shadow mode is on, record LSRD detections for forward return analysis
+  SHADOW_STRATEGY_NAME: 'LSRD_BOUNCE_PROBE',
+  
+  // ===== LOGGING =====
+  LOG_DETECTIONS: true,
+  LOG_NEAR_MISSES: true,
+} as const;
