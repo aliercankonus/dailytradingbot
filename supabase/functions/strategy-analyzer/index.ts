@@ -10817,8 +10817,8 @@ serve(async (req) => {
                 overrideAttempted: overrideParams.ENABLED,
                 overrideConditions: overrideParams.ENABLED ? {
                   adxCheck: { value: adx, required: overrideParams.MIN_ADX, passed: adx >= overrideParams.MIN_ADX },
-                  momentumCheck: { value: trendData.momentum?.state, required: "confirmed", passed: trendData.momentum?.state === "confirmed" },
-                  stochSafe: { value: trendData.stochasticRsi?.['4h']?.k, safeForDirection: derivedDirection === "short" ? `>${overrideParams.BLOCK_IF_STOCHRSI_K_BELOW}` : `<${overrideParams.BLOCK_IF_STOCHRSI_K_ABOVE}` },
+                  momentumCheck: { value: momentum.state, required: "confirmed", passed: momentum.state === "confirmed" },
+                  stochSafe: { value: mfs.stochRsi['4h'].k, safeForDirection: derivedDirection === "short" ? `>${overrideParams.BLOCK_IF_STOCHRSI_K_BELOW}` : `<${overrideParams.BLOCK_IF_STOCHRSI_K_ABOVE}` },
                   alignment1h: { checked: true },
                   exhaustionMature: { regimeScore: smartRegime.regimeScore, threshold: overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD }
                 } : undefined
