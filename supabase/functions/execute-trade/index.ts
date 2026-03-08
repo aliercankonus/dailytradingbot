@@ -681,7 +681,7 @@ serve(async (req) => {
     
     if (adxValue < ADX_THRESHOLDS.MINIMUM) {
       logger.gate(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`, false);
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'ADX Too Low', signal, trendData, { adx: adxValue, minRequired: ADX_THRESHOLDS.MINIMUM });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'ADX Too Low', signal, mfs, { adx: adxValue, minRequired: ADX_THRESHOLDS.MINIMUM });
       throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${ADX_THRESHOLDS.MINIMUM}`);
     }
     logger.gate(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${ADX_THRESHOLDS.MINIMUM}`, true);
