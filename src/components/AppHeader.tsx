@@ -17,7 +17,7 @@ import {
   SheetContent,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings, User, Bell } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings, User, Bell, FlaskConical } from "lucide-react";
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "react-router-dom";
@@ -28,6 +28,7 @@ const navItems = [
   { label: "Analytics", to: "/performance", icon: BarChart3 },
   { label: "Markets", to: "/symbols", icon: Coins },
   { label: "Health", to: "/health", icon: HeartPulse },
+  { label: "Backtest", to: "/backtest", icon: FlaskConical },
 ];
 
 export const AppHeader = () => {

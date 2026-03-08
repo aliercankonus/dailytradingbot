@@ -68,6 +68,51 @@ export type Database = {
         }
         Relationships: []
       }
+      backtest_results: {
+        Row: {
+          config: Json
+          created_at: string | null
+          duration_ms: number | null
+          equity_curve: Json | null
+          error_message: string | null
+          gate_stats: Json | null
+          id: string
+          signals_log: Json | null
+          status: string | null
+          summary: Json | null
+          trades: Json | null
+          user_id: string
+        }
+        Insert: {
+          config: Json
+          created_at?: string | null
+          duration_ms?: number | null
+          equity_curve?: Json | null
+          error_message?: string | null
+          gate_stats?: Json | null
+          id?: string
+          signals_log?: Json | null
+          status?: string | null
+          summary?: Json | null
+          trades?: Json | null
+          user_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string | null
+          duration_ms?: number | null
+          equity_curve?: Json | null
+          error_message?: string | null
+          gate_stats?: Json | null
+          id?: string
+          signals_log?: Json | null
+          status?: string | null
+          summary?: Json | null
+          trades?: Json | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       bot_health_state: {
         Row: {
           alert_sent: boolean

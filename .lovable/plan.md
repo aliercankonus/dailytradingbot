@@ -1,145 +1,102 @@
 
 
-# Backtest Engine — Production Code Replay
+# MR Bypass in ADX Transitional Zone (18-22)
 
-## Problem
-The bot has no way to validate its signal generation, gate logic, and exit management against historical data. Currently, the only way to assess performance is live trading or shadow mode, which requires waiting days/weeks.
+## Summary
+Add Mean Reversion as the third bypass priority in the ADX transitional zone (18-22) of the strategy-analyzer, after Squeeze Expansion and Early Ignition. This implements single-bypass-per-signal enforcement using the existing `earlyMeanReversionSignal` computed upstream at line 7729.
 
-## Architecture
+## What Changes
 
-The backtest engine will **replay historical klines through the exact same production functions** — no duplicate logic. The key insight: `strategy-analyzer` already reads klines via `getKlines()` and `calculate-trend` does the same. By injecting historical klines into the `kline_cache` table for a specific time window and invoking the same edge functions, we get a true production replay.
+### File: `supabase/functions/strategy-analyzer/index.ts`
+
+**Single edit location: Lines ~10674-10676** (between Early Ignition check and the rejection block)
+
+Insert a new MR bypass check block after the Early Ignition check (line 10674) and before the "neither exception passed" rejection block (line 10676):
 
 ```text
-┌────────────────────┐
-│  backtest-runner    │  (new edge function)
-│  (orchestrator)     │
-└────────┬───────────┘
-         │
-         │ For each bar in [startTime..endTime]:
-         │
-         │ 1. Fetch historical klines from Binance
-         │    (endTime = current bar timestamp)
-         │
-         │ 2. Write to kline_cache with source='backtest'
-         │
-         │ 3. Invoke strategy-analyzer (same production code)
-         │    → generates signals (written to backtest_signals table)
-         │
-         │ 4. Simulate position management using exit-strategies logic
-         │    → tracks entries, exits, P&L
-         │
-         │ 5. Advance to next bar
-         │
-         └─→ Return full trade log + metrics
+Current flow (lines 10625-10732):
+  1. Squeeze check (10631-10651) -> sets squeezeBreakoutActive
+  2. Early Ignition check (10653-10674) -> sets earlyIgnitionActive (only if !squeezeBreakoutActive)
+  3. Rejection if neither passed (10676-10731) -> continue
+
+New flow:
+  1. Squeeze check -> sets squeezeBreakoutActive
+  2. Early Ignition check (only if !squeezeBreakoutActive) -> sets earlyIgnitionActive
+  3. NEW: MR bypass check (only if !squeezeBreakoutActive && !earlyIgnitionActive) -> sets meanReversionTransitionalActive
+  4. Rejection if none passed -> continue
 ```
 
-## Implementation Plan
+**New block to insert (between lines 10674 and 10676):**
 
-### 1. Database: `backtest_results` table
-Stores backtest run metadata and results.
+```typescript
+// 3. MEAN REVERSION BYPASS (Priority 3 - lowest)
+// Only fires if Squeeze and Early Ignition both failed
+// Uses upstream earlyMeanReversionSignal (computed at line ~7729, before ADX gate)
+let meanReversionTransitionalActive = false;
+let meanReversionTransitionalMultiplier = 1.0;
 
-```sql
-CREATE TABLE public.backtest_results (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  status TEXT DEFAULT 'running',  -- running, completed, failed
-  config JSONB NOT NULL,          -- {symbols, startDate, endDate, barInterval}
-  summary JSONB,                  -- {totalTrades, winRate, profitFactor, ...}
-  trades JSONB DEFAULT '[]',      -- [{symbol, side, entry, exit, pnl, ...}]
-  signals_log JSONB DEFAULT '[]', -- all generated+rejected signals per bar
-  duration_ms INTEGER,
-  error_message TEXT
-);
+if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone &&
+    earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
+  meanReversionTransitionalActive = true;
+  meanReversionTransitionalMultiplier = COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER; // 0.25x
 
-ALTER TABLE public.backtest_results ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can manage own backtests"
-  ON public.backtest_results FOR ALL
-  TO authenticated
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+  if (ADX_GATE_V1_1.LOG_BYPASS_SELECTION) {
+    logger.forSymbol(symbol).info(
+      `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION_BYPASS (v1.1): ADX=${adx.toFixed(1)} allowed ` +
+      `(exhaustionScore=${earlyMeanReversionSignal.exhaustionScore}, ` +
+      `direction=${earlyMeanReversionSignal.direction}, ` +
+      `${(meanReversionTransitionalMultiplier * 100).toFixed(0)}% size)`
+    );
+  }
+  perSymbolGateAttribution.set(symbol, {
+    gate: 'MEAN_REVERSION_TRANSITIONAL_V11',
+    details: `MR bypass in ADX transitional zone (score=${earlyMeanReversionSignal.exhaustionScore})`
+  });
+}
 ```
 
-### 2. Edge Function: `backtest-runner`
+**Update the rejection condition (line 10677):**
 
-Core orchestrator that:
+Change from:
+```typescript
+if (!squeezeBreakoutActive && !earlyIgnitionActive) {
+```
+To:
+```typescript
+if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
+```
 
-- Accepts `{symbols, startDate, endDate, barInterval}` from user
-- Fetches full historical klines from Binance for the period (all required timeframes: 1m, 5m, 15m, 30m, 1h, 4h)
-- Iterates bar-by-bar through time:
-  - **Slices klines** up to the current bar (simulating "what was available at that moment")
-  - **Injects into `kline_cache`** with `source='backtest'` so `getKlines()` in `strategy-analyzer` reads them
-  - **Invokes `strategy-analyzer`** with the user's real `risk_parameters` — same gates, same quality scoring, same MFS
-  - Captures generated signals
-  - **Simulates position tracking**: opens positions on signals, applies the same trailing stop / exit logic from `exit-strategies.ts` and `monitor-positions` constants
-  - Tracks P&L per trade
+**Add position size application (after line 10751):**
 
-Key design decisions:
-- Uses a **dedicated `kline_cache` key prefix** (e.g., `BACKTEST_{runId}_`) or a separate `backtest_kline_cache` table to avoid polluting live cache
-- Runs with `verify_jwt = true` — user must be authenticated
-- Rate-limited: max 1 concurrent backtest per user
-- Bar step size configurable (default: 1h bars, iterating 4h for faster runs)
+After the Early Ignition position size application block, add:
 
-### 3. Kline Data Strategy
+```typescript
+// Apply MR transitional position size reduction if active
+if (meanReversionTransitionalActive && meanReversionTransitionalMultiplier < 1.0) {
+  reversalPositionMultiplier = Math.min(reversalPositionMultiplier, meanReversionTransitionalMultiplier);
+  logger.forSymbol(symbol).info(
+    `${LOG_CATEGORIES.RISK} 🔄 MR Transitional (v1.1) - position size capped at ${(meanReversionTransitionalMultiplier * 100).toFixed(0)}%`
+  );
+}
+```
 
-Instead of injecting into live `kline_cache` (which would disrupt production), the backtest will:
+**Update rejection log `meanReversionBypass` field** in the rejection filters_status (lines 10703-10708) -- these already log MR context correctly, no change needed there.
 
-1. Pre-fetch ALL historical klines for the period from Binance (bulk fetch using `startTime`/`endTime` params)
-2. Hold them in-memory within the edge function
-3. For each simulated bar, **call the same indicator functions** directly (`buildMarketFeatureSnapshot`, `calculateMomentumScore`, `detectPullback`, etc.) with sliced kline arrays
-4. Feed the resulting MFS into the same gate/scoring pipeline that `strategy-analyzer` uses
+## Architectural Validation
 
-This avoids DB writes per bar and keeps the backtest self-contained while using identical production logic.
+| Requirement | Status |
+|---|---|
+| Lives inside ADX 18-22 only | Yes - guarded by `isInTransitionalZone` |
+| Priority order preserved | Yes - only fires when `!squeezeBreakoutActive && !earlyIgnitionActive` |
+| Single-bypass-per-signal | Yes - mutual exclusion via boolean guards; rejection uses `continue` |
+| Position multiplier isolated | Yes - uses `Math.min()` invariant, scoped to this signal |
+| MR signal computed upstream | Yes - `detectExhaustion()` at line 7729, before ADX gate at ~10580 |
 
-### 4. Position Simulation Engine
+## Technical Details
 
-Re-uses the same constants and exit logic:
-- `PEAK_ADAPTIVE_TRAILING` tiers
-- `VOLATILITY_ADAPTIVE_TRAILING` (the new system)
-- `evaluateDecayVelocity`, `evaluateProgressiveProfitLock`, `evaluateMicroProfitLock`
-- Partial TP ladder from `PARTIAL_TP_LADDER`
-- Time stops from `TIME_STOP_MULT`
-
-Each bar checks:
-- Current price vs stop loss / take profit
-- Trailing stop activation and distance
-- All exit conditions from `exit-strategies.ts`
-
-### 5. Frontend: Backtest Dashboard Page
-
-New page at `/backtest` with:
-- **Config form**: Symbol selection, date range picker, bar interval
-- **Run button**: Invokes `backtest-runner`
-- **Results table**: Shows all simulated trades with entry/exit/P&L
-- **Summary metrics**: Win rate, profit factor, max drawdown, Sharpe ratio, avg trade duration
-- **Equity curve chart**: Using recharts (already installed)
-- **Gate rejection breakdown**: Which gates blocked the most signals during the period
-
-### 6. What Stays Identical to Production
-
-| Component | Source | Backtest Usage |
-|-----------|--------|---------------|
-| Gate logic | `strategy-analyzer` constants | Same constants imported |
-| Quality scoring | `calculateQualityScore` | Same function |
-| MFS construction | `buildMarketFeatureSnapshot` | Same function with historical klines |
-| Momentum analysis | `smart-momentum.ts` | Same functions |
-| Exit strategies | `exit-strategies.ts` | Same functions |
-| Trailing stops | `PEAK_ADAPTIVE_TRAILING` + `VOLATILITY_ADAPTIVE_TRAILING` | Same constants |
-| Risk parameters | `risk_parameters` table | User's actual settings |
-
-### 7. Implementation Order
-
-1. Create `backtest_results` DB table with RLS
-2. Build `backtest-runner` edge function (orchestrator + position simulator)
-3. Build frontend Backtest page (config form + results display + equity curve)
-4. Add navigation link to backtest page
-5. Deploy and test
-
-### 8. Constraints & Limits
-
-- Maximum backtest period: 30 days (to avoid Binance rate limits and edge function timeouts)
-- Bar resolution: minimum 1h (15m would be too many iterations)
-- Edge function timeout: 60s — for longer periods, the function processes in chunks and updates `backtest_results.status` progressively
-- Binance historical klines: max 1000 per request, need pagination for longer periods
+- **Position multiplier**: `COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER` = 0.25x (25% of normal)
+- **Gate condition**: `earlyMeanReversionSignal.detected && earlyMeanReversionSignal.allowed`
+- **Gate attribution tag**: `MEAN_REVERSION_TRANSITIONAL_V11`
+- **No new constants needed** -- `BYPASS_PRIORITY_ORDER.MEAN_REVERSION: 3` already exists in `ADX_GATE_V1_1`
+- **No new imports needed** -- `COUNTER_TREND_ADMISSION` is already imported
 
