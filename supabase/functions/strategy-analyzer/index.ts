@@ -185,7 +185,9 @@ import {
   TREND_EXPANSION_EXEMPTION,
   // NEW: Risk Score Position Scaling & Dynamic Entry Window
   RISK_SCORE_SCALING,
-  DYNAMIC_ENTRY_WINDOW
+  DYNAMIC_ENTRY_WINDOW,
+  // NEW: LTF Micro Timing Gate (1m/5m entry timing quality)
+  LTF_MICRO_TIMING_GATE
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -18829,7 +18831,44 @@ serve(async (req) => {
         
         // Log unified risk calculation
         logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 💰 UNIFIED RISK: Profile=${riskProfile}, Position=${strategyPositionSize.toFixed(2)}% (base ${basePositionSize}%), SL=${stopLossPercent.toFixed(2)}% (base ${baseStopLoss}%), TP=${takeProfitPercent.toFixed(2)}% (${baseTpMultiplier}x)`);
-
+        
+        // ===== LTF MICRO TIMING GATE (1m/5m entry timing quality) =====
+        // Uses ltfMicroMomentum.entryTimingScore to adjust position sizing
+        let ltfMicroTimingMultiplier = 1.0;
+        const ltfMicro = (mfs as any).ltfMicroMomentum;
+        if (LTF_MICRO_TIMING_GATE.ENABLED && ltfMicro && typeof ltfMicro.entryTimingScore === 'number') {
+          const timingScore = ltfMicro.entryTimingScore;
+          const ltfAlign = ltfMicro.ltfAlignment ?? 0;
+          
+          if (timingScore < LTF_MICRO_TIMING_GATE.POOR_TIMING_THRESHOLD) {
+            // Poor micro-timing: reduce position by 50%
+            ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.POOR_TIMING_MULTIPLIER;
+            if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: POOR entry timing (score=${timingScore.toFixed(0)}<${LTF_MICRO_TIMING_GATE.POOR_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | 5m=${ltfMicro.direction5m}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
+            }
+          } else if (timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD) {
+            // Excellent micro-timing: boost position by 20% (with guards)
+            const adxSupports = adx >= LTF_MICRO_TIMING_GATE.MIN_ADX_FOR_BOOST;
+            const alignmentOk = !LTF_MICRO_TIMING_GATE.REQUIRE_LTF_ALIGNMENT_FOR_BOOST || ltfAlign > 0;
+            
+            if (adxSupports && alignmentOk) {
+              ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_MULTIPLIER;
+              if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: EXCELLENT entry timing (score=${timingScore.toFixed(0)}>${LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | ADX=${adx.toFixed(1)}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
+              }
+            } else {
+              if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: HIGH score=${timingScore.toFixed(0)} but boost blocked (ADX=${adx.toFixed(1)}${adxSupports ? '✓' : '✗'}, align=${ltfAlign.toFixed(2)}${alignmentOk ? '✓' : '✗'})`);
+              }
+            }
+          }
+          
+          if (ltfMicroTimingMultiplier !== 1.0) {
+            unifiedPositionSize *= ltfMicroTimingMultiplier;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⏱️ LTF_MICRO_TIMING - position size adjusted to ${unifiedPositionSize.toFixed(2)}% (timing score: ${ltfMicro.entryTimingScore.toFixed(0)})`);
+          }
+        }
+        
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
