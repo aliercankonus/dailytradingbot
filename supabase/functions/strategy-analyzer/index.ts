@@ -10800,7 +10800,7 @@ serve(async (req) => {
         // This allows mean reversion to suggest LONG when direction would be SHORT at extreme oversold
         // PRE-RECOVERY MR OVERRIDE: When in pre-recovery with extreme exhaustion opposite to trend,
         // allow direction flip with stacked position sizing (~32.5% of normal)
-        const earlyMeanReversionSignal = MEAN_REVERSION_CONFIG.ENABLED ? detectExhaustion(trendData) : null;
+        const earlyMeanReversionSignal = MEAN_REVERSION_CONFIG.ENABLED ? detectExhaustion(mfs) : null;
         let meanReversionDirectionFlipApplied = false;
         let originalDerivedDirection = derivedDirection;
         let preRecoveryMROverrideApplied = false;
