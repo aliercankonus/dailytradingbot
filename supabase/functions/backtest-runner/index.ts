@@ -523,25 +523,27 @@ function evaluateProductionGates(
     return fail('COUNTER_TREND');
   }
 
-  // ===== GATE 5.5: StochRSI Directional Protection — SYNCED with constants (K>80/K<20) =====
-  if (direction === 'SHORT' && stochK > 80) {
+  // ===== GATE 5.5: StochRSI Directional Protection — SYMBOL-ADAPTIVE =====
+  const obThreshold = sp.gates.STOCHRSI_LONG_OVERBOUGHT;
+  const osThreshold = sp.gates.STOCHRSI_SHORT_OVERSOLD;
+  if (direction === 'SHORT' && stochK > obThreshold) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
-  if (direction === 'LONG' && stochK < 20) {
+  if (direction === 'LONG' && stochK < osThreshold) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
 
-  // ===== GATE 5.6: Overbought LONG / Oversold SHORT Block (K>80 / K<20) =====
-  if (direction === 'LONG' && stochK > 80 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+  // ===== GATE 5.6: Overbought LONG / Oversold SHORT Block — SYMBOL-ADAPTIVE =====
+  if (direction === 'LONG' && stochK > obThreshold && adx < ADX_THRESHOLDS.VERY_STRONG) {
     return fail('OVERBOUGHT_LONG_BLOCK');
   }
-  if (direction === 'SHORT' && stochK < 20 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+  if (direction === 'SHORT' && stochK < osThreshold && adx < ADX_THRESHOLDS.VERY_STRONG) {
     return fail('OVERSOLD_SHORT_BLOCK');
   }
 
