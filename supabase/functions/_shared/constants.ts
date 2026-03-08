@@ -3315,10 +3315,12 @@ export const LTF_MICRO_TIMING_GATE = {
   POOR_TIMING_THRESHOLD: 30,
   POOR_TIMING_MULTIPLIER: 0.50,  // 50% position reduction
   
-  // ===== EXCELLENT TIMING BOOST =====
-  // When entryTimingScore > this threshold, boost position
-  EXCELLENT_TIMING_THRESHOLD: 70,
-  EXCELLENT_TIMING_MULTIPLIER: 1.20,  // 20% position boost
+  // ===== EXCELLENT TIMING BOOST (graduated) =====
+  // When entryTimingScore > threshold, boost position with graduated tiers
+  GOOD_TIMING_THRESHOLD: 70,
+  GOOD_TIMING_MULTIPLIER: 1.10,      // 10% boost for score 70-80
+  EXCELLENT_TIMING_THRESHOLD: 80,
+  EXCELLENT_TIMING_MULTIPLIER: 1.20,  // 20% boost for score 80+
   
   // ===== MODERATE TIMING (no change) =====
   // Scores between 30-70 get no adjustment (1.0x)
