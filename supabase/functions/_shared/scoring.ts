@@ -3417,11 +3417,9 @@ export const deriveTradeDirection = (
     const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
     
     // Get 4h StochRSI K value early for absolute extreme check
-    const stochK4hEarly = trendData.stochasticRsi?.['4h']?.k ?? 
-                     trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
-    const adxValueEarly = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
-    const momentumSlopeEarly = trendData.smartMomentum?.components?.macdSlope ?? 
-                               trendData.momentum?.macdSlope ?? 0;
+    const stochK4hEarly = mfs.stochRsi['4h'].k;
+    const adxValueEarly = mfs.adx;
+    const momentumSlopeEarly = mfs.smartMomentum?.components?.macdSlope ?? 0;
     
     // ===== ABSOLUTE EXTREME STOCHRSI BYPASS (K >= 98 or K <= 2) =====
     // True statistical exhaustion - allow in EARLY_TREND with basic conditions
