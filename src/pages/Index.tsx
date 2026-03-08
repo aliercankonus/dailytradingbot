@@ -179,8 +179,9 @@ const Index = () => {
 
           <TabsContent value="monitor">
             <Tabs value={monitorSubTab} onValueChange={setMonitorSubTab} className="space-y-4">
-              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-5 h-8">
+              <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-6 h-8">
                 <TabsTrigger value="momentum" className="min-w-[5rem] flex-shrink-0 text-xs">Momentum</TabsTrigger>
+                <TabsTrigger value="ltf-micro" className="min-w-[5rem] flex-shrink-0 text-xs">LTF Micro</TabsTrigger>
                 <TabsTrigger value="regime" className="min-w-[4.5rem] flex-shrink-0 text-xs">Regime</TabsTrigger>
                 <TabsTrigger value="modules" className="min-w-[4.5rem] flex-shrink-0 text-xs">Modules</TabsTrigger>
                 <TabsTrigger value="opportunity" className="min-w-[5.5rem] flex-shrink-0 text-xs">Opportunity</TabsTrigger>
