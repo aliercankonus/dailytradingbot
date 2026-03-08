@@ -491,6 +491,8 @@ export function buildMarketFeatureSnapshot(
     
     // Momentum
     momentumState: extractMomentumState(trendData),
+    momentumScore: momentum.score ?? 0,
+    prevMomentumScore: momentum.prevScore ?? momentum.score ?? 0,
     momentumConfirms: momentum.confirms ?? false,
     macdExpanding: momentum.macdExpanding ?? false,
     macdStrong: momentum.macdStrong ?? false,
