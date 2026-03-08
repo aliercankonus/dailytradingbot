@@ -477,6 +477,7 @@ export function calculateMomentumScore(
     isWeakening,
     isExhausted,
     isTransitioning,
+    microExhaustion,
     components: defaultResult.components,
     overextensionATR: Math.round(overextensionATR * 100) / 100,
     reasons
