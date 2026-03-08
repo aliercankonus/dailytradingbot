@@ -250,7 +250,7 @@ export const determineAdaptiveDirection = (
   // ===== CASE 6: Mean reversion in low ADX environment =====
   if (adx < ADX_THRESHOLDS.WEAK && reversalScore < 30) {
     // Only allow mean reversion at extremes
-    if (stochRsiK <= 15 && momentumState !== 'exhausted') {
+    if (stochRsiK <= 20 && momentumState !== 'exhausted') {
       return {
         direction: 'long',
         confidence: 55,
