@@ -9940,8 +9940,8 @@ serve(async (req) => {
              const earlyQualityFactors: QualityFactors = {
                adxScore: getAdxScore(adx),
                momentumScore: getMomentumScore(momentum, adx, smartAdxRising),
-               alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
-               technicalScore: getTechnicalScore(trendData, trend, symbol),
+                alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, mfs),
+                technicalScore: getTechnicalScore(mfs, trend, symbol),
                entryTimingScore: 10, // Conservative default before pullback analysis
                volumeScore: getVolumeScore(mfs, trend),
                orderFlowScore: 0,
