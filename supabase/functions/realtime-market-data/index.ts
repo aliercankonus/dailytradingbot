@@ -232,7 +232,7 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onmessage = (event) => {
+      binanceTickerSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           
@@ -273,7 +273,7 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onerror = (error: Event | ErrorEvent) => {
+      binanceTickerSocket.onerror = (error: Event | ErrorEvent) => {
         const errorDetail = error instanceof ErrorEvent 
           ? `message=${error.message || 'unknown'} type=${error.type}` 
           : `type=${error.type}`;
