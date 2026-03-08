@@ -1299,7 +1299,7 @@ serve(async (req) => {
     logger.info(`💱 Slippage Check: Signal Entry=$${signalEntryPrice.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${priceDeviation.toFixed(3)}%`);
 
     if (priceDeviation > maxSlippagePercent) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Price Slippage', signal, trendData, { priceDeviation, maxAllowed: maxSlippagePercent, signalEntryPrice, currentPrice });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Price Slippage', signal, mfs, { priceDeviation, maxAllowed: maxSlippagePercent, signalEntryPrice, currentPrice });
       throw new Error(`Price moved ${priceDeviation.toFixed(2)}% since signal (max ${maxSlippagePercent}%) - trade cancelled to avoid slippage`);
     }
     logger.validation(`✓ Pre-trade slippage check passed: ${priceDeviation.toFixed(3)}% < ${maxSlippagePercent}% max`, true);
