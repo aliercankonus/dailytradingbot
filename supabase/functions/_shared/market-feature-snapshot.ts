@@ -145,6 +145,8 @@ export interface MarketFeatureSnapshot {
   
   // === Momentum ===
   momentumState: MomentumState | string;
+  momentumScore: number;
+  prevMomentumScore: number;
   momentumConfirms: boolean;
   macdExpanding: boolean;
   macdStrong: boolean;
