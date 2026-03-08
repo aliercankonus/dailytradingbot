@@ -524,7 +524,18 @@ function evaluateProductionGates(
   let strategyName = 'TREND_CONTINUATION';
   if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
   if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
-  if (mfs.isCompressed) strategyName = 'SQUEEZE_BREAKOUT';
+  if (mfs.isCompressed) {
+    // SQUEEZE_BREAKOUT requires directional confirmation: MACD expanding in trade direction
+    const macdHist = mfs.macdHistogram;
+    const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
+                                 (direction === 'SHORT' && macdHist < 0 && mfs.macdExpanding);
+    if (squeezeDirConfirmed) {
+      strategyName = 'SQUEEZE_BREAKOUT';
+    } else {
+      // No direction confirmation after squeeze — block entry
+      return fail('SQUEEZE_NO_DIRECTION');
+    }
+  }
 
   return {
     passed: true,
