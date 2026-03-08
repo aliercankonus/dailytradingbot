@@ -5841,8 +5841,8 @@ serve(async (req) => {
                                   (klineData.length > 0 ? parseFloat(klineData[klineData.length - 1][4]) : 0);
               
               // Get price change from 24h high/low based on direction
-              const priceHigh24h = trendData.priceChange?.high24h ?? latestPrice;
-              const priceLow24h = trendData.priceChange?.low24h ?? latestPrice;
+              const priceHigh24h = mfs.high24h || latestPrice;
+              const priceLow24h = mfs.low24h || latestPrice;
               
               if (derivedDirection === 'short' && latestPrice > 0) {
                 // For SHORT: Check if price dropped significantly from 24h high
