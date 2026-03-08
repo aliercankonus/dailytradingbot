@@ -4303,8 +4303,8 @@ export const PRICE_ACTION_EARLY_ENTRY_PARAMS = {
   REQUIRE_DIRECTION_MATCH: true,
   
   // StochRSI limits - don't enter at extremes even with price action
-  MAX_STOCHRSI_FOR_LONG: 85,  // Still some room before extreme
-  MIN_STOCHRSI_FOR_SHORT: 15,
+  MAX_STOCHRSI_FOR_LONG: 80,  // Tightened from 85 — root cause of overbought LONG losses
+  MIN_STOCHRSI_FOR_SHORT: 20, // Tightened from 15 — root cause of oversold SHORT losses
   
   // Position sizing for early entries (conservative)
   POSITION_SIZE_MULTIPLIER: 0.50,  // 50% position
