@@ -12,6 +12,7 @@ import {
   QUALITY_THRESHOLDS, TRADING_FEE_PARAMS,
   NEAR_EXTREME_PROTECTION_GATE, MOVE_EXHAUSTION_FILTER_PARAMS,
   MOMENTUM_SCORE_COMPONENTS,
+  getSymbolParams, BTC_PARAMS, ALTCOIN_PARAMS,
 } from "../_shared/constants.ts";
 import { calculateFeeAwarePnL, evaluateDecayVelocity, evaluateProgressiveProfitLock,
   evaluateMicroProfitLock, type PositionContext, type MarketContext, type UserExitSettings
