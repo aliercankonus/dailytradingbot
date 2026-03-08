@@ -459,27 +459,33 @@ class RejectionBuffer {
     });
 
     const newEntries: typeof this.buffer = [];
-    const touchIds: string[] = [];
+    const touchEntries: { id: string; trend_data: any }[] = [];
 
     for (const entry of this.buffer) {
       const key = `${entry.symbol}::${entry.rejection_reason}`;
       const existingId = recentMap.get(key);
       if (existingId) {
-        // Same reason still active — just refresh the timestamp
-        touchIds.push(existingId);
+        // Same reason still active — refresh timestamp + update trend_data with latest MFS
+        touchEntries.push({ id: existingId, trend_data: entry.trend_data ?? null });
       } else {
         newEntries.push(entry);
       }
     }
 
-    // Batch-update checked_at for unchanged rejections so timestamps stay fresh
-    if (touchIds.length > 0) {
-      const { error: touchError } = await supabase
-        .from("signal_rejection_log")
-        .update({ checked_at: new Date().toISOString() })
-        .in("id", touchIds);
-      if (touchError) {
-        logger.warn(`Rejection timestamp refresh failed: ${touchError.message}`);
+    // Batch-update checked_at and trend_data for unchanged rejections
+    if (touchEntries.length > 0) {
+      const now = new Date().toISOString();
+      // Update each entry individually to set per-record trend_data
+      const touchPromises = touchEntries.map(({ id, trend_data }) =>
+        supabase
+          .from("signal_rejection_log")
+          .update({ checked_at: now, trend_data })
+          .eq("id", id)
+      );
+      const touchResults = await Promise.all(touchPromises);
+      const touchErrors = touchResults.filter(r => r.error);
+      if (touchErrors.length > 0) {
+        logger.warn(`Rejection timestamp refresh failed for ${touchErrors.length}/${touchEntries.length} entries`);
       }
     }
 
