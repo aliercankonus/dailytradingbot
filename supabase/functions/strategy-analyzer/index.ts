@@ -15439,7 +15439,7 @@ serve(async (req) => {
         // Allows signals when 4h is neutral but lower TFs are aligned
         // Now requires: ADX >= 23 (lowered from 25), persistence >= 3 bars, volume confirmation
         // FIX: Added HTF alignment check to prevent counter-trend entries
-        const microTrend = trendData.microTrend;
+        // microTrend already declared from MFS shim (line ~3022)
         
         // Get 4h trend direction for counter-trend validation
         const htfTrend4hForMicroTrend = htfTrend4h || "neutral";
