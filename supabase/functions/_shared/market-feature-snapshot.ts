@@ -110,6 +110,8 @@ export interface StochRsiFeatures {
   k: number;
   d: number;
   signal: string;
+  prevK: number;       // Previous K value for momentum delta
+  kArray: number[];    // K history for temporal analysis
 }
 
 export interface BarsAtExtremeFeatures {
