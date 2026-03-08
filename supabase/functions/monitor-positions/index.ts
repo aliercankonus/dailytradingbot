@@ -443,6 +443,19 @@ serve(async (req) => {
       }
     }
     logger.info(`📊 Loaded ${trendDataMap.size}/${symbols.length} trend snapshots from cache`);
+    
+    // ============= BUILD MFS PER SYMBOL =============
+    // Single extraction point for all market features — replaces individual extractor calls
+    const mfsMap = new Map<string, MarketFeatureSnapshot>();
+    for (const [sym, td] of trendDataMap.entries()) {
+      try {
+        const mfs = buildMarketFeatureSnapshot(sym, td);
+        mfsMap.set(sym, mfs);
+      } catch (mfsBuildErr) {
+        logger.forSymbol(sym).warn(`Failed to build MFS from cached trend data: ${mfsBuildErr}`);
+      }
+    }
+    logger.info(`📊 Built MFS for ${mfsMap.size}/${trendDataMap.size} symbols`);
     for (const position of positions) {
       const currentPrice = priceMap.get(position.symbol);
       if (currentPrice === undefined || currentPrice === null) continue;
