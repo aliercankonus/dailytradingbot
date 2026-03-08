@@ -73,6 +73,9 @@ interface BacktestPosition {
   atrAtEntry: number;
   atrPercentAtEntry: number;
   strategyName: string;
+  entryMomentumScore: number;
+  entryStochK: number;
+  entryAdx: number;
 }
 
 interface EquityPoint {
