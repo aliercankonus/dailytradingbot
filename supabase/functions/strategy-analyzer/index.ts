@@ -7508,7 +7508,7 @@ serve(async (req) => {
           // The 4-State regime classifier uses trendData.volatility.adxSlope (e.g., 1.06 for BTC)
           // but fullAdxResult.adxSlope can differ significantly (e.g., -0.48). Use regime slope
           // for checks that condition on regime === 'BREAKOUT_SETUP'.
-          const regimeConsistentAdxSlope = trendData.volatility?.adxSlope ?? adxSlope;
+          const regimeConsistentAdxSlope = mfs.adxSlope;
           
           let moveExhaustionBlocked = false;
           let moveExhaustionReason = '';
