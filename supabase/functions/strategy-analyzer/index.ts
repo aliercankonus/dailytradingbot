@@ -4683,9 +4683,10 @@ serve(async (req) => {
           };
           
           const earlyIgnitionResult = detectEarlyIgnitionEntry(
-            trendData,
+            mfs,
             earlyIgnitionHistData?.klines || [],
             volumeInfo
+          );
           );
           
           if (earlyIgnitionResult.isValid && earlyIgnitionResult.direction) {

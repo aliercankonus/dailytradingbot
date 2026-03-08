@@ -2115,7 +2115,7 @@ export interface EarlyIgnitionEntryResult {
 }
 
 export const detectEarlyIgnitionEntry = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   klineData: any[],  // Recent klines for range detection
   volumeData: { ratio: number; zScore?: number; spike?: boolean }
 ): EarlyIgnitionEntryResult => {
@@ -2168,26 +2168,21 @@ export const detectEarlyIgnitionEntry = (
     checkDetails,
   });
   
-  if (!trendData) {
-    return createResult(false, null, 1.0, 1.0, ["No trend data"]);
+  if (!mfs) {
+    return createResult(false, null, 1.0, 1.0, ["No MFS data"]);
   }
   
-  const bollinger = trendData?.bollingerBands || {};
-  const volatility = trendData?.volatility || {};
-  const timeframes = trendData?.timeframes || {};
-  const stochRsi = trendData?.stochasticRsi || {};
-  
-  const adx = volatility.adx || 0;
-  const adxSlope = volatility.adxSlope ?? 0;
+  // MFS MIGRATION: All reads from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
   checkDetails.adxValue = adx;
   checkDetails.adxSlope = adxSlope;
   checkDetails.adxSlopeRising = adxSlope >= P.MIN_ADX_SLOPE_RISING;
   
   // ===== CONDITION 1: BB Squeeze (compression detected) =====
-  const bb4h = bollinger['4h'] || {};
-  const bb1h = bollinger['1h'] || {};
-  const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
-  const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
+  // MFS MIGRATION: Read Bollinger data from MFS
+  const squeeze4h = mfs.bollinger['4h'].squeeze;
+  const squeeze1h = mfs.bollinger['1h'].squeeze;
   const hadRecentSqueeze = squeeze4h || squeeze1h;
   
   checkDetails.hadRecentSqueeze = hadRecentSqueeze;
@@ -2199,20 +2194,18 @@ export const detectEarlyIgnitionEntry = (
   reasons.push(`BB squeeze detected on ${checkDetails.squeezeTimeframe}`);
   
   // ===== CONDITION 2: BB Width Expanding (breakout starting) =====
-  const currentWidth = bb1h.bandwidth || bb4h.bandwidth || 0;
-  const widthHistory = volatility.bandwidthHistory || [];
+  // MFS MIGRATION: Read bandwidth from MFS Bollinger features
+  const currentWidth = mfs.bollinger['1h'].bandwidth || mfs.bollinger['4h'].bandwidth || 0;
+  // NOTE: bandwidthHistory is not available in MFS — use fallback heuristic
   let widthExpanding = false;
   let widthExpansionPercent = 0;
   
-  if (widthHistory.length >= 3) {
-    const avgPriorWidth = widthHistory.slice(0, 3).reduce((a: number, b: number) => a + b, 0) / 3;
-    if (avgPriorWidth > 0 && currentWidth > avgPriorWidth) {
-      widthExpansionPercent = ((currentWidth - avgPriorWidth) / avgPriorWidth) * 100;
-      widthExpanding = widthExpansionPercent >= 10;
-    }
-  } else if (bb1h.widthExpanding || volatility.widthExpanding) {
-    widthExpanding = true;
-    widthExpansionPercent = 15;
+  // Without bandwidth history, use squeeze intensity as a proxy for expansion
+  const squeezeIntensity4h = mfs.bollinger['4h'].squeezeIntensity || 0;
+  if (squeezeIntensity4h > 0 && currentWidth > 0) {
+    // If squeeze was intense but bandwidth is now measurable, expansion is likely
+    widthExpanding = squeezeIntensity4h >= 30;
+    widthExpansionPercent = squeezeIntensity4h > 0 ? Math.min(50, squeezeIntensity4h * 0.5) : 0;
   }
   
   checkDetails.widthExpanding = widthExpanding;
@@ -2297,7 +2290,7 @@ export const detectEarlyIgnitionEntry = (
       }
     }
   } else {
-    const percentB1h = bb1h.percentB ?? 50;
+    const percentB1h = mfs.bollinger['1h'].percentB ?? 50;
     if (percentB1h >= 85) {
       rangeBreakDirection = "long";
       rangeBreakPercent = (percentB1h - 80) / 20 * 0.5;
@@ -2317,7 +2310,7 @@ export const detectEarlyIgnitionEntry = (
   reasons.push(`Range break ${rangeBreakDirection.toUpperCase()}: ${rangeBreakPercent.toFixed(2)}%`);
   
   // ===== CONDITION 6: StochRSI Safety =====
-  const stochK4h = stochRsi['4h']?.k ?? 50;
+  const stochK4h = mfs.stochRsi['4h'].k ?? 50;
   checkDetails.stochRsiK = stochK4h;
   
   if (stochK4h <= P.TIER_0_BLOCK_K_FLOOR || stochK4h >= P.TIER_0_BLOCK_K_CEILING) {
@@ -2338,8 +2331,8 @@ export const detectEarlyIgnitionEntry = (
   reasons.push(`StochRSI K=${stochK4h.toFixed(1)} safe for ${rangeBreakDirection}`);
   
   // ===== HTF CHECK: Must NOT oppose =====
-  const trend4h = timeframes['4h']?.trend || "neutral";
-  const conf4h = timeframes['4h']?.confidence || 50;
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const conf4h = mfs.timeframes['4h'].confidence || 50;
   
   const htfOpposing = (rangeBreakDirection === "long" && trend4h === "bearish" && conf4h >= P.HTF_OPPOSING_CONFIDENCE_THRESHOLD) ||
                       (rangeBreakDirection === "short" && trend4h === "bullish" && conf4h >= P.HTF_OPPOSING_CONFIDENCE_THRESHOLD);
@@ -2960,7 +2953,7 @@ export const deriveTradeDirection = (
     // Add StochRSI extremes as bias input to weighted sum
     let stochBias = 0;
     if (P.ENABLE_STOCHRSI_BIAS) {
-      const stochK4h = extractStochRsiK(trendData, '4h');
+      const stochK4h = mfs.stochRsi['4h'].k;
       if (stochK4h >= (P.STOCHRSI_OVERBOUGHT_K || 90)) {
         stochBias = -(P.STOCHRSI_BIAS_WEIGHT || 0.10);  // Overbought = bearish bias
         reasons.push(`STOCHRSI BIAS: K=${stochK4h.toFixed(0)} >= ${P.STOCHRSI_OVERBOUGHT_K || 90} → ${(stochBias * 100).toFixed(0)}% bearish bias`);
@@ -2974,7 +2967,7 @@ export const deriveTradeDirection = (
     // ===== PHASE 3: MOMENTUM WEIGHT IN DIRECTION DERIVATION =====
     // Factor momentum score into direction confidence - opposing momentum reduces certainty
     // This prevents deriving LONG when momentum is strongly bearish (-22)
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const momentumScore = mfs.smartMomentum?.score ?? 0;
     let momentumAdjustment = 0;
     let momentumImpact: MomentumTier = 'neutral';
     let momentumConfidenceReduction = 0;
@@ -2992,11 +2985,11 @@ export const deriveTradeDirection = (
       // When momentum is extreme (+50+) but price impulse confirms the opposing direction,
       // this is a lag problem: indicators haven't caught up to a sharp price reversal.
       // Allow micro position (0.20x) instead of full block.
-      const smartMomentumData = trendData.smartMomentum;
-      const vetoAdx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 0;
+      const smartMomentumData = mfs.smartMomentum;
+      const vetoAdx = mfs.adx;
       const vetoPriceImpulse = Math.abs(smartMomentumData?.components?.priceImpulse ?? 0);
-      const vetoAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
-      const veto4hTrend = trendData.timeframes?.['4h']?.trend || 'neutral';
+      const vetoAdxSlope = mfs.adxSlope;
+      const veto4hTrend = mfs.timeframes['4h'].trend || 'neutral';
       
       // Check if price impulse opposes the momentum (confirming lag)
       // For SHORT veto (momentum +50+): price must be dropping (impulse > 0 means price moved, 4h bearish)
@@ -3167,7 +3160,7 @@ export const deriveTradeDirection = (
     let persistenceBonus = 0;
     if (GATE_RELAXATION_FLAGS.DIRECTION_PERSISTENCE) {
       // Check if direction has been stable for N candles (from trend data if available)
-      const directionStableBars = trendData.momentum?.directionStableBars ?? 0;
+      const directionStableBars = mfs.directionStableBars ?? 0;
       if (directionStableBars >= P.PERSISTENCE_BARS) {
         persistenceBonus = P.PERSISTENCE_BONUS;
         reasons.push(`PERSISTENCE BONUS: Direction stable for ${directionStableBars} bars → +${(persistenceBonus * 100).toFixed(0)}% threshold reduction`);
@@ -3197,10 +3190,10 @@ export const deriveTradeDirection = (
     // Conditions: directionNullified + baseWeightedSum had valid direction + ADX >= 25 + |priceImpulse| >= 2
     let structuralDirectionRescued = false;
     if (directionNullified && baseDirection) {
-      const smartMomentum = trendData.smartMomentum;
-      const rescueAdx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 0;
+      const smartMomentum = mfs.smartMomentum;
+      const rescueAdx = mfs.adx;
       const rescuePriceImpulse = Math.abs(smartMomentum?.components?.priceImpulse ?? 0);
-      const rescueAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      const rescueAdxSlope = mfs.adxSlope;
       
       if (rescueAdx >= 25 && rescuePriceImpulse >= 2 && rescueAdxSlope >= 0) {
         // Price impulse confirms direction, ADX confirms energy — rescue with micro position
@@ -3424,11 +3417,9 @@ export const deriveTradeDirection = (
     const ER = EXHAUSTION_REVERSAL_OVERRIDE_PARAMS;
     
     // Get 4h StochRSI K value early for absolute extreme check
-    const stochK4hEarly = trendData.stochasticRsi?.['4h']?.k ?? 
-                     trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
-    const adxValueEarly = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
-    const momentumSlopeEarly = trendData.smartMomentum?.components?.macdSlope ?? 
-                               trendData.momentum?.macdSlope ?? 0;
+    const stochK4hEarly = mfs.stochRsi['4h'].k;
+    const adxValueEarly = mfs.adx;
+    const momentumSlopeEarly = mfs.smartMomentum?.components?.macdSlope ?? 0;
     
     // ===== ABSOLUTE EXTREME STOCHRSI BYPASS (K >= 98 or K <= 2) =====
     // True statistical exhaustion - allow in EARLY_TREND with basic conditions
@@ -3464,8 +3455,8 @@ export const deriveTradeDirection = (
     const slopeIsFlattening = Math.abs(momentumSlopeEarly) < contextualExtremeMaxSlope;
     
     // Additional deceleration evidence: ADX slope declining or flat, or momentum score weakening
-    const adxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
-    const momentumDecelerating = adxSlope <= 0 || momentumSlopeEarly <= 0;
+    const adxSlopeLocal = mfs.adxSlope;
+    const momentumDecelerating = adxSlopeLocal <= 0 || momentumSlopeEarly <= 0;
     const decelRequirementMet = !contextualExtremeRequireDecel || momentumDecelerating;
     
     const contextualExtremeBypass = contextualExtremeEnabled &&
