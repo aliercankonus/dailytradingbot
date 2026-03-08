@@ -142,9 +142,9 @@ export function evaluateDecayVelocity(
   const decayVelocity = decayPercent / minutesSincePeak;
 
   // Tier determination
-  const posAdx = extractADX(market.trendData);
-  const { slope: adxSlope } = extractADXSlope(market.trendData);
-  const primaryTrend = market.trendData?.primaryTrend || "ranging";
+  const posAdx = market.adx;
+  const adxSlope = market.adxSlope;
+  const primaryTrend = market.primaryTrend || "ranging";
   const isAligned =
     (position.side === "BUY" && primaryTrend === "bullish") ||
     (position.side === "SELL" && primaryTrend === "bearish");
