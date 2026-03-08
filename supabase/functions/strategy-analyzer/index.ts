@@ -13781,7 +13781,7 @@ serve(async (req) => {
                 message: `No exceptions below ADX ${ADX_GATE.HARD_FLOOR}. Wait for market energy to build.`
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -14126,7 +14126,7 @@ serve(async (req) => {
                     : 'Conditions not met for transition expansion bypass',
                 }
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -14445,7 +14445,7 @@ serve(async (req) => {
                 trend1h: htfTrend1h
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -14840,7 +14840,7 @@ serve(async (req) => {
                 trend,
                 confidence
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -14952,7 +14952,7 @@ serve(async (req) => {
                   trend,
                   confidence
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false
               );
               continue;
@@ -15185,7 +15185,7 @@ serve(async (req) => {
                     consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
                   }
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false
               );
               continue;
