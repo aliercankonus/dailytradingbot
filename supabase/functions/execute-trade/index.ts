@@ -1354,7 +1354,7 @@ serve(async (req) => {
     const capitulationProbe = signal.indicators?.capitulationBounceProbe;
     
     // Calculate ATR percent for stop/TP calculations
-    const atrPercentForProbes = trendData?.volatility?.atrPercent ?? 1.5;
+    const atrPercentForProbes = mfs.atrPercent || 1.5;
     
     if (flashCrashProbe?.active) {
       // FLASH CRASH BOUNCE: Ultra-tight stop, wider TP
