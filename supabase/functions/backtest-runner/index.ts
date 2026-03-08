@@ -608,8 +608,8 @@ function evaluateProductionGates(
   const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
   const qualityScore = qualityResult.score;
 
-  // Hard floor: block all trades with quality < 40 regardless of other factors
-  if (qualityScore < 40) {
+  // Hard floor — SYMBOL-ADAPTIVE quality minimum
+  if (qualityScore < sp.gates.MIN_QUALITY_SCORE) {
     return fail('LOW_QUALITY_HARD_FLOOR');
   }
 
