@@ -2453,11 +2453,12 @@ serve(async (req) => {
       regimeVal: string,
       trendVal: string,
       price: number,
-      atrVal: number
+      atrVal: number,
+      skipStochFilter: boolean = false
     ) => {
       try {
-        // Skip if K >= 15 (only track deep oversold/overbought events)
-        if (stochK >= 15) return;
+        // Skip if K >= 15 for stoch-based gates; location-based gates (NEAR_24H_LOW) bypass this filter
+        if (!skipStochFilter && stochK >= 15) return;
         
         // 6h cooldown dedup check
         const cacheKey = `${sym}_oversold`;
