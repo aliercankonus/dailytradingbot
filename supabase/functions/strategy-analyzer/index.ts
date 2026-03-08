@@ -2421,6 +2421,8 @@ serve(async (req) => {
     const symbolRegimeMap = new Map<string, string>();
     // Collect order flow analysis + price closes for batch snapshot update (cached Order Flow dashboard)
     const symbolOrderFlowMap = new Map<string, { orderFlow: OrderFlowAnalysis; closes: number[]; direction: "long" | "short"; directionSource: string }>();
+    // Collect LTF micro momentum data for batch snapshot update (LTF dashboard)
+    const symbolLtfMicroMap = new Map<string, { score5m: number; direction5m: string; score1m: number; direction1m: string; ltfAlignment: number; entryTimingScore: number; microTrendConfirms: boolean; recentCandlePattern: string; isAccelerating5m: boolean; isReverting1m: boolean }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
