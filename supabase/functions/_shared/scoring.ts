@@ -2115,7 +2115,7 @@ export interface EarlyIgnitionEntryResult {
 }
 
 export const detectEarlyIgnitionEntry = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   klineData: any[],  // Recent klines for range detection
   volumeData: { ratio: number; zScore?: number; spike?: boolean }
 ): EarlyIgnitionEntryResult => {
@@ -2168,17 +2168,13 @@ export const detectEarlyIgnitionEntry = (
     checkDetails,
   });
   
-  if (!trendData) {
-    return createResult(false, null, 1.0, 1.0, ["No trend data"]);
+  if (!mfs) {
+    return createResult(false, null, 1.0, 1.0, ["No MFS data"]);
   }
   
-  const bollinger = trendData?.bollingerBands || {};
-  const volatility = trendData?.volatility || {};
-  const timeframes = trendData?.timeframes || {};
-  const stochRsi = trendData?.stochasticRsi || {};
-  
-  const adx = volatility.adx || 0;
-  const adxSlope = volatility.adxSlope ?? 0;
+  // MFS MIGRATION: All reads from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
   checkDetails.adxValue = adx;
   checkDetails.adxSlope = adxSlope;
   checkDetails.adxSlopeRising = adxSlope >= P.MIN_ADX_SLOPE_RISING;
