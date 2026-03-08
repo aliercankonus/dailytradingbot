@@ -2816,7 +2816,7 @@ export const deriveTradeDirection = (
          // SAFEGUARD: Only amplify when there's a committed directional lean, NOT noise.
          // During compression breakouts ADX spikes from range contraction before price commits,
          // so we require: (1) minimum bias floor, (2) RSI+MACD agreement (same sign)
-         const adxVal = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+         const adxVal = adx;
          const preBias = combinedBias * uncertaintyBoost;
          const rsiAndMacdAgree = (rsiBias > 0 && macdBias >= 0) || (rsiBias < 0 && macdBias <= 0) || Math.abs(macdBias) < 0.01;
          const hasCommittedLean = Math.abs(preBias) >= 0.10 && rsiAndMacdAgree;
