@@ -1758,8 +1758,8 @@ serve(async (req) => {
               const minutesToPeak = (peakReachedAtDate.getTime() - openedAtDate.getTime()) / (1000 * 60);
               
               if (minutesToPeak < LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_MAX_MINUTES && minutesToPeak > 0) {
-                // Check additional conditions: ADX slope flattening
-                const { slope: fastPeakAdxSlope } = extractADXSlope(trendDataForPosition);
+                // MFS MIGRATION: Use MFS for ADX slope
+                const fastPeakAdxSlope = mfsForPosition?.adxSlope ?? 0;
                 const adxFlattening = !LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_REQUIRE_ADX_SLOPE_FLAT || 
                                       fastPeakAdxSlope < LOW_CONFIDENCE_STANDARD_EXIT.FAST_PEAK_ADX_SLOPE_THRESHOLD;
                 
