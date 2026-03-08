@@ -54,27 +54,26 @@ export interface BreakoutModeResult {
   skipDivergenceGate: boolean;
 }
 
-export const detectBreakoutMode = (trendData: any): BreakoutModeResult => {
+export const detectBreakoutMode = (mfs: MarketFeatureSnapshot): BreakoutModeResult => {
   const reasons: string[] = [];
   let confidence = 0;
   
-  if (!trendData) {
-    return { isActive: false, confidence: 0, reasons: ["No trend data"], stochRsiPenaltyMultiplier: 1.0, skipDivergenceGate: false };
+  if (!mfs) {
+    return { isActive: false, confidence: 0, reasons: ["No MFS data"], stochRsiPenaltyMultiplier: 1.0, skipDivergenceGate: false };
   }
   
-  const bollinger = trendData?.bollingerBands || {};
-  const squeeze4h = bollinger['4h']?.squeeze || false;
-  const squeezePercent4h = bollinger['4h']?.squeezePercent || 0;
-  const squeeze1h = bollinger['1h']?.squeeze || false;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const squeeze4h = mfs.bollinger["4h"].squeeze;
+  const squeezePercent4h = mfs.bollinger["4h"].squeezeIntensity || 0;
+  const squeeze1h = mfs.bollinger["1h"].squeeze;
   
-  const momentum = trendData?.momentum || {};
-  const momentumState = momentum.state || "none";
-  const macdExpanding = momentum.macdExpanding || false;
-  const volumeConfirms = momentum.volumeConfirms || false;
-  const volumeRatio = trendData?.volatility?.volumeRatio || 1.0;
+  const momentumState = mfs.momentumState || "none";
+  const macdExpanding = mfs.macdExpanding;
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeRatio = mfs.volume["1h"].volumeRatio || 1.0;
   
-  const adx = trendData?.volatility?.adx || 0;
-  const adxRising = trendData?.volatility?.adxRising || false;
+  const adx = mfs.adx;
+  const adxRising = mfs.adxRising;
   
   // CORE BREAKOUT CONDITIONS:
   // 1. Squeeze is active (either 4h or 1h)
