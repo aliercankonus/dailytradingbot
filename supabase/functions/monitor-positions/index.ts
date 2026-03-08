@@ -1085,9 +1085,17 @@ serve(async (req) => {
       let meanReversionExitReason = "";
       
       if (isMeanReversion && MEAN_REVERSION_CONFIG.ENABLED) {
+        const mrMarket: ExitMarketContext = {
+          currentPrice, pnlPercent, atrPercent,
+          atr: atrData?.atr || currentPrice * 0.02,
+          adx: mfsForPosition?.adx ?? 20,
+          adxSlope: mfsForPosition?.adxSlope ?? 0,
+          primaryTrend: mfsForPosition?.primaryTrend || trendDataForPosition?.primaryTrend || "ranging",
+          momentumScore: mfsForPosition?.smartMomentum?.score ?? trendDataForPosition?.momentum?.score ?? 0,
+        };
         const mrResult = evaluateMeanReversionExit(
           { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
-          { currentPrice, pnlPercent, atrPercent, atr: atrData?.atr || currentPrice * 0.02, trendData: trendDataForPosition } as ExitMarketContext,
+          mrMarket,
           positionAgeMinutes,
         );
         
@@ -1140,9 +1148,17 @@ serve(async (req) => {
           ? MOMENTUM_CONTINUATION_EXIT.DECAY_ACTIVATION_PERCENT 
           : userSettings.activationPercent;
         
+        const decayMarket: ExitMarketContext = {
+          currentPrice, pnlPercent, atrPercent,
+          atr: atrData?.atr || currentPrice * 0.02,
+          adx: mfsForPosition?.adx ?? 20,
+          adxSlope: mfsForPosition?.adxSlope ?? 0,
+          primaryTrend: mfsForPosition?.primaryTrend || trendDataForPosition?.primaryTrend || "ranging",
+          momentumScore: mfsForPosition?.smartMomentum?.score ?? trendDataForPosition?.momentum?.score ?? 0,
+        };
         const decayResult = evaluateDecayVelocity(
           { ...position, side: position.side as "BUY" | "SELL", peak_pnl_percent: newPeakPnl } as ExitPositionContext,
-          { currentPrice, pnlPercent, atrPercent, atr: atrData?.atr || currentPrice * 0.02, trendData: trendDataForPosition } as ExitMarketContext,
+          decayMarket,
           { activationPercent: decayActivationOverride, trailingAggressiveness: userSettings.trailingAggressiveness, progressiveLockEnabled: userSettings.progressiveLockEnabled, stalePeakProtectionEnabled: userSettings.stalePeakProtectionEnabled, decayVelocityExitEnabled: userSettings.decayVelocityExitEnabled },
         );
         

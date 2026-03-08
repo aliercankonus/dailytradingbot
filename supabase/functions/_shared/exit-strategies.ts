@@ -18,7 +18,7 @@ import {
   STALE_PEAK_BONUS_PARAMS,
   MODERATE_EXHAUSTION_EXIT_PARAMS,
 } from "./constants.ts";
-import { extractADX, extractADXSlope } from "./scoring.ts";
+// MFS migration: extractADX/extractADXSlope removed — MarketContext now carries pre-extracted fields
 
 // ──────────────────────────────────────────────
 // Shared types
@@ -46,7 +46,13 @@ export interface MarketContext {
   pnlPercent: number;
   atrPercent: number;
   atr: number;
-  trendData: any; // snapshot_data from trend_snapshots
+  // MFS-backed fields (pre-extracted by caller)
+  adx: number;
+  adxSlope: number;
+  primaryTrend: string;
+  momentumScore: number;
+  /** @deprecated kept for backward compat — callers should migrate to direct fields */
+  trendData?: any;
 }
 
 export interface UserExitSettings {
@@ -136,9 +142,9 @@ export function evaluateDecayVelocity(
   const decayVelocity = decayPercent / minutesSincePeak;
 
   // Tier determination
-  const posAdx = extractADX(market.trendData);
-  const { slope: adxSlope } = extractADXSlope(market.trendData);
-  const primaryTrend = market.trendData?.primaryTrend || "ranging";
+  const posAdx = market.adx;
+  const adxSlope = market.adxSlope;
+  const primaryTrend = market.primaryTrend || "ranging";
   const isAligned =
     (position.side === "BUY" && primaryTrend === "bullish") ||
     (position.side === "SELL" && primaryTrend === "bearish");
@@ -357,8 +363,8 @@ export function evaluateMeanReversionExit(
   }
 
   // Trend continuation failure
-  const posAdx = extractADX(market.trendData);
-  const { slope: mrAdxSlope } = extractADXSlope(market.trendData);
+  const posAdx = market.adx;
+  const mrAdxSlope = market.adxSlope;
   if (posAdx >= MEAN_REVERSION_CONFIG.LONG.MAX_ADX && mrAdxSlope > 0.5 && market.pnlPercent < 0) {
     return { shouldExit: true, exitReason: "mean_reversion_trend_continuation", suggestedStopLoss, newMaeAtr };
   }
@@ -366,7 +372,7 @@ export function evaluateMeanReversionExit(
   // Moderate exhaustion momentum invalidation
   const isModerateExhaustion = position.strategy_name?.includes("MR_MODERATE_EXHAUSTION");
   if (isModerateExhaustion) {
-    const momentumScore = market.trendData?.momentum?.score ?? 0;
+    const momentumScore = market.momentumScore ?? 0;
     const momentumFloor = MEAN_REVERSION_CONFIG.MODERATE_EXHAUSTION?.INVALIDATION_MOMENTUM_FLOOR ?? 30;
     const isLong = position.side === "BUY";
     const invalidated = isLong ? momentumScore < momentumFloor : momentumScore > -momentumFloor;
