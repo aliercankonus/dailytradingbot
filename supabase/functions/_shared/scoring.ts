@@ -720,48 +720,42 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
 
 // ============= ALIGNMENT SCORE (0-14 points) =============
 // Directional consistency with strong 1h trend credit
+// MFS MIGRATED: Now reads from MarketFeatureSnapshot
 export const getAlignmentScore = (
   confidence: number, 
   consistency: number, 
   aligned: boolean, 
-  trendData: any
+  mfs: MarketFeatureSnapshot
 ): number => {
   let score = 0;
   
-  const tf = trendData?.timeframes;
-  const trend4h = tf?.['4h']?.trend || "neutral";
-  const trend1h = tf?.['1h']?.trend || "neutral";
-  const trend30m = tf?.['30m']?.trend || "neutral";
-  const conf1h = tf?.['1h']?.confidence || 50;
-  const conf4h = tf?.['4h']?.confidence || 50;
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
+  const trend30m = mfs.timeframes['30m'].trend || "neutral";
+  const conf1h = mfs.timeframes['1h'].confidence || 50;
+  const adx = mfs.adx;
   
   // Full alignment bonus (0-8)
   if (aligned) {
     score += ALIGNMENT_SCORE_PARAMS.FULL_ALIGNMENT_SCORE;
-  } else if (tf) {
-    // ============= STRONG 1H TREND CREDIT (NEW) =============
-    const ASP = ALIGNMENT_SCORE_PARAMS;
-    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= ASP.STRONG_1H_MIN_CONFIDENCE) {
-      score += ASP.STRONG_1H_NEUTRAL_4H_SCORE;
+  } else {
+    const ASP2 = ALIGNMENT_SCORE_PARAMS;
+    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= ASP2.STRONG_1H_MIN_CONFIDENCE) {
+      score += ASP2.STRONG_1H_NEUTRAL_4H_SCORE;
     }
-    // 4h neutral with 1h+30m aligned = partial alignment
     else if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
-      score += ASP.PARTIAL_ALIGNMENT_SCORE;
+      score += ASP2.PARTIAL_ALIGNMENT_SCORE;
     }
-    // 1h and 30m agree but different from 4h
     else if (trend1h === trend30m && trend1h !== "neutral") {
-      score += ASP.LOWER_TF_ALIGNMENT_SCORE;
+      score += ASP2.LOWER_TF_ALIGNMENT_SCORE;
     }
-    // Strong 1h alone (without 30m confirmation) still gets some credit
-    else if (trend1h !== "neutral" && conf1h >= ASP.STRONG_1H_ALONE_MIN_CONFIDENCE) {
-      score += ASP.STRONG_1H_ALONE_SCORE;
+    else if (trend1h !== "neutral" && conf1h >= ASP2.STRONG_1H_ALONE_MIN_CONFIDENCE) {
+      score += ASP2.STRONG_1H_ALONE_SCORE;
     }
   }
   
   // ============= PHASE 4 FIX: LOADING ZONE BONUS =============
-  const stochRsi1h = trendData?.stochasticRsi?.['1h'];
-  const stochK1h = stochRsi1h?.k ?? 50;
+  const stochK1h = mfs.stochRsi['1h'].k;
   const ASP = ALIGNMENT_SCORE_PARAMS;
   
   if (stochK1h >= ASP.LOADING_ZONE_WIDE_K_MIN && stochK1h <= ASP.LOADING_ZONE_WIDE_K_MAX && adx >= ASP.LOADING_ZONE_WIDE_ADX_MIN) {
@@ -770,7 +764,7 @@ export const getAlignmentScore = (
     score += ASP.LOADING_ZONE_NARROW_BONUS;
   }
   
-  // ============= 1H CONFIDENCE BONUS (NEW) =============
+  // ============= 1H CONFIDENCE BONUS =============
   if (conf1h >= ASP.VERY_STRONG_1H_CONFIDENCE) {
     score += ASP.VERY_STRONG_1H_BONUS;
   } else if (conf1h >= ASP.STRONG_1H_CONFIDENCE) {
