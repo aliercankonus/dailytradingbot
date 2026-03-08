@@ -305,6 +305,90 @@ export type Database = {
         }
         Relationships: []
       }
+      oversold_event_study: {
+        Row: {
+          adx: number | null
+          adx_slope: number | null
+          created_at: string | null
+          evaluated: boolean | null
+          evaluated_at: string | null
+          event_time: string
+          gate_name: string | null
+          id: string
+          mae: number | null
+          mfe: number | null
+          momentum_score: number | null
+          price: number
+          primary_trend: string | null
+          regime: string | null
+          ret_12h: number | null
+          ret_24h: number | null
+          ret_6h: number | null
+          shadow_entry_price: number | null
+          shadow_exit_reason: string | null
+          shadow_pnl_percent: number | null
+          shadow_sl: number | null
+          shadow_tp: number | null
+          stoch_k: number | null
+          symbol: string
+          user_id: string
+        }
+        Insert: {
+          adx?: number | null
+          adx_slope?: number | null
+          created_at?: string | null
+          evaluated?: boolean | null
+          evaluated_at?: string | null
+          event_time?: string
+          gate_name?: string | null
+          id?: string
+          mae?: number | null
+          mfe?: number | null
+          momentum_score?: number | null
+          price: number
+          primary_trend?: string | null
+          regime?: string | null
+          ret_12h?: number | null
+          ret_24h?: number | null
+          ret_6h?: number | null
+          shadow_entry_price?: number | null
+          shadow_exit_reason?: string | null
+          shadow_pnl_percent?: number | null
+          shadow_sl?: number | null
+          shadow_tp?: number | null
+          stoch_k?: number | null
+          symbol: string
+          user_id: string
+        }
+        Update: {
+          adx?: number | null
+          adx_slope?: number | null
+          created_at?: string | null
+          evaluated?: boolean | null
+          evaluated_at?: string | null
+          event_time?: string
+          gate_name?: string | null
+          id?: string
+          mae?: number | null
+          mfe?: number | null
+          momentum_score?: number | null
+          price?: number
+          primary_trend?: string | null
+          regime?: string | null
+          ret_12h?: number | null
+          ret_24h?: number | null
+          ret_6h?: number | null
+          shadow_entry_price?: number | null
+          shadow_exit_reason?: string | null
+          shadow_pnl_percent?: number | null
+          shadow_sl?: number | null
+          shadow_tp?: number | null
+          stoch_k?: number | null
+          symbol?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       portfolio_performance_history: {
         Row: {
           avg_loss: number | null
