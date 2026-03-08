@@ -803,6 +803,28 @@ export function buildMarketFeatureSnapshot(
     
     // Top-level volume ratio
     volumeRatio: trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0,
+    
+    // Liquidity Trap (populated by strategy-analyzer, persisted in snapshot_data)
+    ...(trendData?.liquidityTrap ? {
+      liquidityTrap: {
+        detected: trendData.liquidityTrap.detected ?? false,
+        score: trendData.liquidityTrap.score ?? 0,
+        trapType: trendData.liquidityTrap.trapType ?? 'none',
+        signals: trendData.liquidityTrap.signals ?? [],
+        wickRejection: trendData.liquidityTrap.wickRejection ?? false,
+        volumeSpikeReversal: trendData.liquidityTrap.volumeSpikeReversal ?? false,
+        priceRejection: trendData.liquidityTrap.priceRejection ?? false,
+        sweepDetected: trendData.liquidityTrap.sweepDetected ?? false,
+        recommendation: trendData.liquidityTrap.recommendation ?? 'hold',
+        positionMultiplier: trendData.liquidityTrap.positionMultiplier ?? 1.0,
+        trapDirection: trendData.liquidityTrap.trapDirection ?? 'neutral',
+      },
+    } : {}),
+    
+    // Micro Exhaustion (populated by strategy-analyzer, persisted in snapshot_data)
+    ...(trendData?.microExhaustion ? {
+      microExhaustion: trendData.microExhaustion,
+    } : {}),
   };
 }
 
