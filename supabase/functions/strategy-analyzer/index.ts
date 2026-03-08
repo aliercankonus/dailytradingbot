@@ -3059,8 +3059,8 @@ serve(async (req) => {
         // Uses 15m klines for momentum granularity, but ADX gate values remain from 1h
         const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, adxRising, earlyATR, adxSlope);
         
-        // INJECT into trendData so deriveTradeDirection can access it
-        // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
+        // INJECT into trendData for legacy code paths that still read from it
+        // deriveTradeDirection now reads from MFS directly
         trendData.smartMomentum = earlySmartMomentum;
         
         // UPDATE snapshot with smartMomentum (was unavailable at initial build)
