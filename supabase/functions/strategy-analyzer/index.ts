@@ -2320,7 +2320,7 @@ serve(async (req) => {
         };
       } catch (error) {
         logger.forSymbol(symbol).debug(`Failed to fetch LTF klines: ${error}`);
-        return { klines5m: [], prices5m: [], klines1m: [], prices1m: [] };
+        return { klines5m: [], prices5m: [], klines1m: [], prices1m: [], rawKlines5m: [], rawPrices5m: [] };
       }
     };
 
