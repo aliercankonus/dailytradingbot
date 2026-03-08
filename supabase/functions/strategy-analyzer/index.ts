@@ -18952,7 +18952,22 @@ serve(async (req) => {
           }
         }
 
-        // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion)
+        // ============= LIQUIDITY TRAP POSITION SIZING =============
+        // v1.0: Reduce/block position size when liquidity trap is detected on LTF
+        // >60 score → 0.6x, >75 → 0.4x, >85 → block (0.0x clamped to min 0.2)
+        const trapEntry = mfs?.liquidityTrap;
+        if (trapEntry && trapEntry.detected && trapEntry.positionMultiplier < 1.0) {
+          const prevSize = unifiedPositionSize;
+          unifiedPositionSize *= trapEntry.positionMultiplier;
+          
+          if (trapEntry.recommendation === "block_entry") {
+            logger.forSymbol(symbol).warn(`🪤 LIQUIDITY_TRAP_BLOCK: score=${trapEntry.score}, type=${trapEntry.trapType}, signals=[${trapEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${trapEntry.positionMultiplier})`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🪤 LIQUIDITY_TRAP_SIZING: score=${trapEntry.score}, type=${trapEntry.trapType}, signals=[${trapEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${trapEntry.positionMultiplier})`);
+          }
+        }
+
+        // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion + trap)
         unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
 
         // Map "neutral" to "ranging" for database enum compatibility
