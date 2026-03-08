@@ -1155,13 +1155,12 @@ serve(async (req) => {
               logger.info(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
             }
           } else if (currentPrice > vwapUpperBand) {
-            const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+            const adxValue = mfs.adx;
             const ADX_EXCEPTION_THRESHOLD = VWAP_FILTER.ADX_EXCEPTION_THRESHOLD;
             
             // Smart guards: ADX rising OR momentum direction agrees with trade
-            const adxRising = trendData?.momentum?.adxRising === true || 
-              (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
-            const macdHistogram = trendData?.momentum?.macdHistogram || 0;
+            const adxRising = mfs.adxSlope.isRising;
+            const macdHistogram = mfs.momentum?.macdHistogram ?? 0;
             const momentumDirectionAgrees = macdHistogram > 0; // LONG needs positive MACD histogram
             
             // Valid exception: ADX >= 25 AND (ADX rising OR momentum agrees)
