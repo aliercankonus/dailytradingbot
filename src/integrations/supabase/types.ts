@@ -179,6 +179,36 @@ export type Database = {
         }
         Relationships: []
       }
+      kline_cache: {
+        Row: {
+          candle_count: number
+          candles: Json
+          id: string
+          interval: string
+          source: string
+          symbol: string
+          updated_at: string
+        }
+        Insert: {
+          candle_count?: number
+          candles?: Json
+          id?: string
+          interval?: string
+          source?: string
+          symbol: string
+          updated_at?: string
+        }
+        Update: {
+          candle_count?: number
+          candles?: Json
+          id?: string
+          interval?: string
+          source?: string
+          symbol?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       market_regime_history: {
         Row: {
           adx: number | null
