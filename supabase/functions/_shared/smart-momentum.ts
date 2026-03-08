@@ -312,104 +312,154 @@ export function calculateMomentumScore(
   if (isExhausted) reasons.push("🛑 Trend EXHAUSTED");
   // Note: isAccelerating reason is pushed inside the EMA(3) block above
 
-  // ============= v4.0: MICRO MOMENTUM EXHAUSTION DETECTOR =============
-  // Detects trend exhaustion via 3 independent signals:
-  // 1. Momentum Deceleration: EMA(3) slope reversing against trend
-  // 2. Volume Dry-Up: Volume declining over last 5 bars while price extends
-  // 3. RSI Divergence: Price making new high/low but RSI failing to confirm
-  // Scoring: Each signal contributes 0-33 points → total 0-100
+  // ============= v5.0: MICRO MOMENTUM EXHAUSTION DETECTOR =============
+  // Institutional-style momentum exhaustion detection using 3 signals:
+  // 1. Momentum Decay: EMA(3)-smoothed momentum score declining
+  // 2. Acceleration Flip: Rate of change of momentum turned negative
+  // 3. Price Divergence: Price making new high/low while momentum fades
+  // Score: decay=30, acceleration=30, priceDivergence=40 → total 0-100
+  // Position sizing: >70→0.65x, >85→0.4x, >90→soft block
   const microExhaustion: MicroExhaustionResult = { ...defaultMicroExhaustion };
   
-  if (Math.abs(totalScore) >= 10 && macdResult.histogramArray.length >= 6) {
-    const hist = macdResult.histogramArray;
-    const priceNorm = prices[prices.length - 1] || 1;
+  if (macdResult.histogramArray.length >= 8 && prices.length >= 8) {
     let exhaustionScore = 0;
     
-    // Signal 1: Momentum Deceleration (0-35 points)
-    // Uses same EMA(3) kernel but checks for momentum peak + declining slope
-    const d1 = ((hist[hist.length - 3] - hist[hist.length - 4]) / priceNorm) * 10000;
-    const d2 = ((hist[hist.length - 2] - hist[hist.length - 3]) / priceNorm) * 10000;
-    const d3 = ((hist[hist.length - 1] - hist[hist.length - 2]) / priceNorm) * 10000;
-    const emaDecelSlope = (d1 * 1 + d2 * 2 + d3 * 4) / 7;
+    // Build a momentum score series from MACD histogram (proxy for momentum)
+    // Then apply EMA(3) smoothing to reduce single-candle noise
+    const hist = macdResult.histogramArray;
+    const priceNorm = prices[prices.length - 1] || 1;
     
-    // Bullish trend decelerating (slope turning negative) or bearish trend decelerating (slope turning positive)
-    const isMomDecel = (totalScore > 0 && emaDecelSlope < -0.3) || (totalScore < 0 && emaDecelSlope > 0.3);
-    if (isMomDecel) {
-      const decelMagnitude = Math.abs(emaDecelSlope);
-      exhaustionScore += Math.min(35, decelMagnitude * 10);
-      microExhaustion.momentumDeceleration = true;
-      microExhaustion.signals.push(`momentum_decel: slope=${emaDecelSlope.toFixed(2)}`);
+    // Normalized momentum series (last 8 bars)
+    const momSeries: number[] = [];
+    for (let i = Math.max(0, hist.length - 8); i < hist.length; i++) {
+      momSeries.push((hist[i] / priceNorm) * 10000);
     }
     
-    // Signal 2: Volume Dry-Up (0-30 points)
-    // Compare average volume of last 3 bars vs previous 5 bars
-    if (klines.length >= 10) {
-      const recentVols = klines.slice(-3).map((k: any) => parseFloat(k[5]) || 0);
-      const priorVols = klines.slice(-8, -3).map((k: any) => parseFloat(k[5]) || 0);
-      const avgRecent = recentVols.reduce((a: number, b: number) => a + b, 0) / recentVols.length;
-      const avgPrior = priorVols.reduce((a: number, b: number) => a + b, 0) / priorVols.length;
-      
-      if (avgPrior > 0) {
-        const volRatio = avgRecent / avgPrior;
-        // Volume declining below 70% of prior average = dry-up signal
-        if (volRatio < 0.70) {
-          const dryUpIntensity = Math.min(30, ((0.70 - volRatio) / 0.40) * 30);
-          exhaustionScore += dryUpIntensity;
-          microExhaustion.volumeDryUp = true;
-          microExhaustion.signals.push(`vol_dryup: ratio=${volRatio.toFixed(2)}`);
-        }
+    // EMA(3) smoothing on momentum series
+    const emaSmoothed: number[] = [];
+    if (momSeries.length >= 3) {
+      const k = 2 / (3 + 1); // EMA(3) multiplier
+      emaSmoothed.push(momSeries[0]);
+      for (let i = 1; i < momSeries.length; i++) {
+        emaSmoothed.push(momSeries[i] * k + emaSmoothed[i - 1] * (1 - k));
       }
     }
     
-    // Signal 3: RSI Divergence (0-35 points)
-    // Price making new high but RSI making lower high (bearish divergence)
-    // Price making new low but RSI making higher low (bullish divergence)
-    const rsiArr = calculateRSIArray(prices, 14);
-    if (rsiArr.length >= 10 && prices.length >= 10) {
-      const pricesRecent = prices.slice(-5);
-      const pricesPrior = prices.slice(-10, -5);
-      const rsiRecent = rsiArr.slice(-5);
-      const rsiPrior = rsiArr.slice(-10, -5);
+    if (emaSmoothed.length >= 3) {
+      const momNow = emaSmoothed[emaSmoothed.length - 1];
+      const momPrev = emaSmoothed[emaSmoothed.length - 2];
+      const momPrev2 = emaSmoothed[emaSmoothed.length - 3];
       
-      if (totalScore > 0) {
-        // Bullish trend: check for bearish divergence (price higher high, RSI lower high)
-        const priceNewHigh = Math.max(...pricesRecent) > Math.max(...pricesPrior);
-        const rsiLowerHigh = Math.max(...rsiRecent) < Math.max(...rsiPrior);
-        if (priceNewHigh && rsiLowerHigh) {
-          const rsiDelta = Math.max(...rsiPrior) - Math.max(...rsiRecent);
-          exhaustionScore += Math.min(35, rsiDelta * 2);
-          microExhaustion.rsiDivergence = true;
-          microExhaustion.signals.push(`bearish_div: RSI_Δ=${rsiDelta.toFixed(1)}`);
+      const acceleration = momNow - momPrev;
+      const prevAcceleration = momPrev - momPrev2;
+      
+      // Signal 1: Momentum Decay (0-30 points)
+      // EMA-smoothed momentum declining in the direction of trend
+      const isBullishTrend = totalScore > 0;
+      const isBearishTrend = totalScore < 0;
+      const momentumDecaying = (isBullishTrend && momNow < momPrev) || 
+                               (isBearishTrend && momNow > momPrev);
+      
+      if (momentumDecaying && Math.abs(totalScore) >= 8) {
+        const decayMagnitude = Math.abs(momNow - momPrev);
+        const decayPoints = Math.min(30, decayMagnitude * 8);
+        exhaustionScore += decayPoints;
+        microExhaustion.momentumDeceleration = true;
+        microExhaustion.signals.push(`momentum_decay: now=${momNow.toFixed(2)} prev=${momPrev.toFixed(2)} Δ=${(momNow - momPrev).toFixed(2)}`);
+      }
+      
+      // Signal 2: Acceleration Flip (0-30 points)
+      // The rate of change of momentum has turned against the trend
+      const accelFlip = (isBullishTrend && acceleration < 0) || 
+                        (isBearishTrend && acceleration > 0);
+      // Stronger signal if acceleration was positive and flipped
+      const wasPositive = (isBullishTrend && prevAcceleration > 0) || 
+                          (isBearishTrend && prevAcceleration < 0);
+      
+      if (accelFlip && Math.abs(totalScore) >= 8) {
+        const accelMag = Math.abs(acceleration);
+        let accelPoints = Math.min(25, accelMag * 8);
+        // Bonus if acceleration flipped from positive → confirms deceleration onset
+        if (wasPositive) accelPoints = Math.min(30, accelPoints + 5);
+        exhaustionScore += accelPoints;
+        microExhaustion.accelerationFlip = true;
+        microExhaustion.signals.push(`accel_flip: acc=${acceleration.toFixed(2)} prev_acc=${prevAcceleration.toFixed(2)}${wasPositive ? ' (flipped)' : ''}`);
+      }
+      
+      // Signal 3: Price Divergence / Price Making New Extreme (0-40 points)
+      // Price is near/at new high/low while momentum fading → classic divergence
+      if (prices.length >= 10) {
+        const recentPrices = prices.slice(-5);
+        const priorPrices = prices.slice(-10, -5);
+        const recentHigh = Math.max(...recentPrices);
+        const recentLow = Math.min(...recentPrices);
+        const priorHigh = Math.max(...priorPrices);
+        const priorLow = Math.min(...priorPrices);
+        const currentPrice = prices[prices.length - 1];
+        
+        let priceDivergenceDetected = false;
+        
+        if (isBullishTrend) {
+          // Price making new high (within 0.2% tolerance) while momentum declining
+          const priceMakingHigh = currentPrice >= recentHigh * 0.998 && recentHigh >= priorHigh * 0.998;
+          if (priceMakingHigh && momentumDecaying) {
+            // Score based on how much momentum has decayed relative to price extension
+            const priceExtension = ((recentHigh - priorHigh) / priorHigh) * 100;
+            const momDecayPct = momPrev > 0 ? ((momPrev - momNow) / Math.abs(momPrev)) * 100 : 0;
+            const divPoints = Math.min(40, (momDecayPct * 0.5 + priceExtension * 5));
+            exhaustionScore += Math.max(0, divPoints);
+            priceDivergenceDetected = true;
+            microExhaustion.signals.push(`price_div: price_ext=${priceExtension.toFixed(2)}% mom_decay=${momDecayPct.toFixed(1)}%`);
+          }
+        } else if (isBearishTrend) {
+          // Price making new low while bearish momentum declining
+          const priceMakingLow = currentPrice <= recentLow * 1.002 && recentLow <= priorLow * 1.002;
+          if (priceMakingLow && momentumDecaying) {
+            const priceExtension = ((priorLow - recentLow) / priorLow) * 100;
+            const momDecayPct = momPrev < 0 ? ((Math.abs(momPrev) - Math.abs(momNow)) / Math.abs(momPrev)) * 100 : 0;
+            const divPoints = Math.min(40, (momDecayPct * 0.5 + priceExtension * 5));
+            exhaustionScore += Math.max(0, divPoints);
+            priceDivergenceDetected = true;
+            microExhaustion.signals.push(`price_div: price_ext=${priceExtension.toFixed(2)}% mom_decay=${momDecayPct.toFixed(1)}%`);
+          }
         }
-      } else if (totalScore < 0) {
-        // Bearish trend: check for bullish divergence (price lower low, RSI higher low)
-        const priceNewLow = Math.min(...pricesRecent) < Math.min(...pricesPrior);
-        const rsiHigherLow = Math.min(...rsiRecent) > Math.min(...rsiPrior);
-        if (priceNewLow && rsiHigherLow) {
-          const rsiDelta = Math.min(...rsiRecent) - Math.min(...rsiPrior);
-          exhaustionScore += Math.min(35, rsiDelta * 2);
-          microExhaustion.rsiDivergence = true;
-          microExhaustion.signals.push(`bullish_div: RSI_Δ=${rsiDelta.toFixed(1)}`);
-        }
+        
+        microExhaustion.priceDivergence = priceDivergenceDetected;
+        // Legacy compat: map priceDivergence to rsiDivergence for downstream consumers
+        microExhaustion.rsiDivergence = priceDivergenceDetected;
       }
     }
     
-    // Combine signals → recommendation
+    // Combine signals → score, recommendation, and position multiplier
     microExhaustion.score = Math.min(100, Math.round(exhaustionScore));
-    const signalCount = [microExhaustion.momentumDeceleration, microExhaustion.volumeDryUp, microExhaustion.rsiDivergence].filter(Boolean).length;
+    const signalCount = [microExhaustion.momentumDeceleration, microExhaustion.accelerationFlip, microExhaustion.priceDivergence].filter(Boolean).length;
+    // Legacy compat
+    microExhaustion.volumeDryUp = microExhaustion.accelerationFlip;
     
+    // Position multiplier based on score (continuous, not tier-based)
+    if (exhaustionScore > 90) {
+      microExhaustion.positionMultiplier = 0.35; // Soft block territory
+    } else if (exhaustionScore > 85) {
+      microExhaustion.positionMultiplier = 0.40;
+    } else if (exhaustionScore > 70) {
+      microExhaustion.positionMultiplier = 0.65;
+    } else {
+      microExhaustion.positionMultiplier = 1.0;
+    }
+    
+    // Recommendation tiers (for monitor-positions exit logic)
     if (signalCount >= 3 && exhaustionScore >= 60) {
       microExhaustion.detected = true;
       microExhaustion.recommendation = "exit_full";
-      reasons.push(`🔥 MICRO_EXHAUSTION (${microExhaustion.score}): ALL 3 signals — ${microExhaustion.signals.join(', ')}`);
+      reasons.push(`🔥 MICRO_EXHAUSTION v5 (${microExhaustion.score}): ALL 3 signals — ${microExhaustion.signals.join(', ')}`);
     } else if (signalCount >= 2 && exhaustionScore >= 40) {
       microExhaustion.detected = true;
       microExhaustion.recommendation = "exit_partial";
-      reasons.push(`⚡ MICRO_EXHAUSTION (${microExhaustion.score}): ${signalCount}/3 signals — ${microExhaustion.signals.join(', ')}`);
+      reasons.push(`⚡ MICRO_EXHAUSTION v5 (${microExhaustion.score}): ${signalCount}/3 — ${microExhaustion.signals.join(', ')}`);
     } else if (signalCount >= 1 && exhaustionScore >= 25) {
       microExhaustion.detected = true;
       microExhaustion.recommendation = "tighten_stop";
-      reasons.push(`⚠️ MICRO_EXHAUSTION (${microExhaustion.score}): ${signalCount}/3 signals — ${microExhaustion.signals.join(', ')}`);
+      reasons.push(`⚠️ MICRO_EXHAUSTION v5 (${microExhaustion.score}): ${signalCount}/3 — ${microExhaustion.signals.join(', ')}`);
     }
   }
 
