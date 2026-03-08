@@ -5399,6 +5399,7 @@ serve(async (req) => {
               symbol,
               rejection_reason: AGE_DECAY.HARD_BLOCK_REASON,
               filters_status: {
+                gate: 'REGIME_AGE_EXHAUSTED',
                 regimeAge,
                 regime: fourStateRegime.regime,
                 adxSlopeSmoothed: currentAdxSlopeSmoothed,
@@ -6031,6 +6032,7 @@ serve(async (req) => {
             symbol,
             `Market regime not tradeable: ${regimeEnhanced.reason}`,
             { 
+              gate: gateType,
               regime: regimeEnhanced.regime, 
               regimeScore: regimeEnhanced.regimeScore,
               allowedSetups: regimeEnhanced.allowedSetups,

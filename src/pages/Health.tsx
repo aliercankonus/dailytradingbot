@@ -1,4 +1,5 @@
 import { AppHeader } from "@/components/AppHeader";
+import OversoldBounceWidget from "@/components/OversoldBounceWidget";
 import { Activity, AlertTriangle, Clock, Radio, CheckCircle2, XCircle, Timer, TrendingUp, BarChart3 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -310,6 +311,8 @@ const Health = () => {
             )}
           </CardContent>
         </Card>
+        
+        <OversoldBounceWidget />
       </main>
     </div>
   );
