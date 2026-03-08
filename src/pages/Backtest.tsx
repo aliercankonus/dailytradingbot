@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { useSymbolsContext } from "@/contexts/SymbolsContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell } from "recharts";
 import { FlaskConical, Play, Loader2, TrendingUp, TrendingDown, Target, Shield, Clock, BarChart3 } from "lucide-react";
 
 interface BacktestSummary {
