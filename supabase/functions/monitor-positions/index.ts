@@ -1279,6 +1279,24 @@ serve(async (req) => {
                 positionLogger.error(`Error applying micro exhaustion stop for ${position.id}: ${stopError}`);
               } else {
                 updatedStopLossMap.set(position.id, newStopLoss!);
+                
+                // Send notification for partial exhaustion tightening
+                if (riskParams?.email_notifications_enabled) {
+                  supabase.functions.invoke("send-notification", {
+                    body: {
+                      type: "micro_exhaustion_exit",
+                      symbol: position.symbol,
+                      side: position.side,
+                      price: currentPrice,
+                      pnlPercent,
+                      newStopLoss: exhaustionStop,
+                      exhaustionScore: exhaustionScore,
+                      exhaustionSignals: microExh.signals || [],
+                      exhaustionAction: "exit_partial",
+                      tradeId: position.id,
+                    }
+                  }).catch(e => positionLogger.error(`Notification error: ${e}`));
+                }
               }
             }
           }
