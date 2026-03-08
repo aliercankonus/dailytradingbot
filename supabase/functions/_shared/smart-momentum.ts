@@ -2910,8 +2910,19 @@ export function detectLiquidityTrap(
   const signals: string[] = [];
   const len = klines.length;
   
-  // Parse last 5 candles for pattern analysis
-  const recentCandles = klines.slice(-5).map(k => {
+  // === LIVE CANDLE AGE FILTER ===
+  // Last candle may be a live (forming) candle — ignore if < 90s old to avoid noise
+  const lastRawCandle = klines[klines.length - 1];
+  const candleOpenTime = parseFloat(lastRawCandle[0] ?? lastRawCandle.openTime ?? 0);
+  const candleAgeMs = candleOpenTime > 0 ? Date.now() - candleOpenTime : Infinity;
+  const MIN_CANDLE_AGE_MS = 90_000; // 90 seconds
+  const isLiveCandleTooYoung = candleAgeMs < MIN_CANDLE_AGE_MS && candleAgeMs >= 0;
+  
+  // If live candle is too young, analyze only closed candles (exclude last)
+  const analysisKlines = isLiveCandleTooYoung ? klines.slice(-6, -1) : klines.slice(-5);
+  
+  // Parse candles for pattern analysis
+  const recentCandles = analysisKlines.map(k => {
     const o = parseFloat(k[1] ?? k.open ?? 0);
     const h = parseFloat(k[2] ?? k.high ?? 0);
     const l = parseFloat(k[3] ?? k.low ?? 0);
@@ -2920,10 +2931,23 @@ export function detectLiquidityTrap(
     return { o, h, l, c, v, body: Math.abs(c - o), range: h - l };
   });
   
+  if (recentCandles.length < 2) return defaultResult;
+  
   const lastCandle = recentCandles[recentCandles.length - 1];
   const prevCandle = recentCandles[recentCandles.length - 2];
   
   if (!lastCandle || !prevCandle || lastCandle.range <= 0) return defaultResult;
+  
+  // === WICK-TO-BODY RATIO GATE ===
+  // Institutional traps typically show wick/body > 2.0
+  // For single-candle wick rejection, require minimum wick/body ratio
+  const MIN_WICK_BODY_RATIO = 2.0;
+  const lastCandleWickBodyRatio = lastCandle.body > 0
+    ? Math.max(
+        lastCandle.h - Math.max(lastCandle.o, lastCandle.c),
+        Math.min(lastCandle.o, lastCandle.c) - lastCandle.l
+      ) / lastCandle.body
+    : Infinity; // Doji = treat as valid wick
   
   // Calculate average volume from last 20 candles
   const volumeLookback = Math.min(20, klines.length);
@@ -2958,18 +2982,18 @@ export function detectLiquidityTrap(
   const lowerWickRatio = lowerWick / lastCandle.range;
   
   let wickRejection = false;
-  if (direction === "long" && upperWickRatio > 0.6 && bodyRatio < 0.3) {
+  if (direction === "long" && upperWickRatio > 0.6 && bodyRatio < 0.3 && lastCandleWickBodyRatio >= MIN_WICK_BODY_RATIO) {
     // Long upper wick with tiny body = bullish rejection → bull trap
     const wickPoints = Math.min(25, Math.round(upperWickRatio * 35));
     trapScore += wickPoints;
     wickRejection = true;
-    signals.push(`WICK_REJECTION_UPPER: ${(upperWickRatio * 100).toFixed(0)}% wick (+${wickPoints})`);
-  } else if (direction === "short" && lowerWickRatio > 0.6 && bodyRatio < 0.3) {
+    signals.push(`WICK_REJECTION_UPPER: ${(upperWickRatio * 100).toFixed(0)}% wick, w/b=${lastCandleWickBodyRatio.toFixed(1)} (+${wickPoints})`);
+  } else if (direction === "short" && lowerWickRatio > 0.6 && bodyRatio < 0.3 && lastCandleWickBodyRatio >= MIN_WICK_BODY_RATIO) {
     // Long lower wick with tiny body = bearish rejection → bear trap
     const wickPoints = Math.min(25, Math.round(lowerWickRatio * 35));
     trapScore += wickPoints;
     wickRejection = true;
-    signals.push(`WICK_REJECTION_LOWER: ${(lowerWickRatio * 100).toFixed(0)}% wick (+${wickPoints})`);
+    signals.push(`WICK_REJECTION_LOWER: ${(lowerWickRatio * 100).toFixed(0)}% wick, w/b=${lastCandleWickBodyRatio.toFixed(1)} (+${wickPoints})`);
   }
   // Also check prev candle for 2-bar wick rejection pattern
   if (!wickRejection && prevCandle.range > 0) {
