@@ -4069,8 +4069,8 @@ export const deriveTradeDirection = (
   
   // ============= PRIORITY 2.3: CONSECUTIVE CANDLE MOMENTUM OVERRIDE =============
   // When 1h has 5+ consecutive candles in the same direction, allow signal even if 4h is neutral
-  const consecutiveBars1h = trendData.momentum?.consecutiveBars1h ?? 0;
-  const consecutiveBars30m = trendData.momentum?.consecutiveBars30m ?? 0;
+  const consecutiveBars1h = mfs.consecutiveBars1h;
+  const consecutiveBars30m = mfs.consecutiveBars30m;
   
   if (
     trend4h === "neutral" &&
