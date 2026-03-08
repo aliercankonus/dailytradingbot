@@ -3405,8 +3405,8 @@ export const QUIET_TREND_PARAMS = {
   // ===== VOLUME & STOCHRSI SAFETY =====
   REQUIRE_VOLUME_CONFIRM: true,     // Volume should support direction
   BLOCK_IF_STOCHRSI_EXTREME: true,  // Don't chase at absolute extremes
-  MAX_STOCHRSI_K_LONG: 85,          // Don't chase overbought for longs
-  MIN_STOCHRSI_K_SHORT: 15,         // Don't chase oversold for shorts
+  MAX_STOCHRSI_K_LONG: 80,          // Don't chase overbought for longs (tightened from 85)
+  MIN_STOCHRSI_K_SHORT: 20,         // Don't chase oversold for shorts (tightened from 15)
   
   // ===== POSITION SIZING (Conservative) =====
   POSITION_SIZE_MULTIPLIER: 0.50,   // 50% position size for safety
