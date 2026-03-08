@@ -1297,7 +1297,7 @@ export const calculateUnifiedReversalScore = (
   }
   
   // 2. StochRSI EXTREME ZONES (0-50 points) - INCREASED from 0-25 for extreme readings
-  const k4h = stoch4h.k ?? 50;
+  const k4h = mfs.stochRsi['4h'].k;
   let rawStochZoneScore = 0;
   
   // NEW: Use high reversal thresholds from constants (default 95 for overbought, 5 for oversold)
