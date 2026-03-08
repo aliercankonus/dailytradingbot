@@ -10463,7 +10463,7 @@ serve(async (req) => {
             const dirWeightedScore = directionCtx?.weightedScore ?? 0;
             const bypassEligible = Math.abs(dirWeightedScore) > 0.10;
             
-            logger.forSymbol(symbol).info(
+            logger.forSymbol(symbol).debug(
               `${LOG_CATEGORIES.GATE} 📊 RANGE_REGIME_EVAL: ` +
               `trendNeutral=${trendIsNeutral}, momentumNoEdge=${momentumHasNoEdge}(${momentumState}), ` +
               `adxTooLow=${adxTooLow}(${adx.toFixed(1)}<${hardBlock.MAX_ADX}), ` +
