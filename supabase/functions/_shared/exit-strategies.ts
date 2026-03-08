@@ -363,8 +363,8 @@ export function evaluateMeanReversionExit(
   }
 
   // Trend continuation failure
-  const posAdx = extractADX(market.trendData);
-  const { slope: mrAdxSlope } = extractADXSlope(market.trendData);
+  const posAdx = market.adx;
+  const mrAdxSlope = market.adxSlope;
   if (posAdx >= MEAN_REVERSION_CONFIG.LONG.MAX_ADX && mrAdxSlope > 0.5 && market.pnlPercent < 0) {
     return { shouldExit: true, exitReason: "mean_reversion_trend_continuation", suggestedStopLoss, newMaeAtr };
   }
