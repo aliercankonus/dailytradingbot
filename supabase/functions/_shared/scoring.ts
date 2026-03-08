@@ -3491,30 +3491,28 @@ export const deriveTradeDirection = (
       const absoluteExtremePositionMult = ER.ABSOLUTE_EXTREME_POSITION_MULT ?? 0.30;
       const contextualExtremePositionMult = (ER as any).CONTEXTUAL_EXTREME_POSITION_MULT ?? 0.25;
       const decliningStrongTrendPositionMult = 0.20; // Most conservative: STRONG_TREND still active
-      // Get 4h StochRSI K value
-      const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
-                       trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+      // Get 4h StochRSI K value — MFS direct
+      const stochK4h = mfs.stochRsi["4h"].k;
       
-      // Get Bollinger %B (4h preferred, fall back to 1h)
-      const percentB4h = trendData.bollingerBands?.['4h']?.percentB ?? 50;
-      const percentB1h = trendData.bollingerBands?.['1h']?.percentB ?? 50;
+      // Get Bollinger %B (4h preferred, fall back to 1h) — MFS direct
+      const percentB4h = mfs.bollinger["4h"].percentB ?? 50;
+      const percentB1h = mfs.bollinger["1h"].percentB ?? 50;
       const percentB = percentB4h !== 50 ? percentB4h : percentB1h;
       
-      // Get momentum data
-      const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-      const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? 
-                            trendData.momentum?.macdSlope ?? 0;
-      const macdHist = trendData.momentum?.macdHistogram ?? 0;
-      const prevMacdHist = trendData.momentum?.prevMacdHistogram ?? macdHist;
+      // Get momentum data — MFS direct
+      const momentumScore = mfs.smartMomentum?.score ?? 0;
+      const momentumSlope = mfs.smartMomentum?.components?.macdSlope ?? 0;
+      const macdHist = mfs.macdHistogram;
+      const prevMacdHist = mfs.prevMacdHistogram ?? macdHist;
       const macdImproving = macdHist > prevMacdHist;
       const macdDeclining = macdHist < prevMacdHist;
       
-      // Get ADX slope for acceleration check
-      const erAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      // Get ADX slope for acceleration check — MFS direct
+      const erAdxSlope = mfs.adxSlope;
       
-      // Get volume/expansion data
-      const volumeRatio = trendData.volume?.ratio ?? trendData.volatility?.volumeRatio ?? 1.0;
-      const squeezeJustReleased = trendData.squeeze?.justReleased ?? false;
+      // Get volume/expansion data — MFS direct
+      const volumeRatio = mfs.volume["1h"].volumeRatio;
+      const squeezeJustReleased = mfs.squeezeJustReleased;
       const isExpansion = (volumeRatio > ER.MAX_VOLUME_RATIO) || 
                           (ER.BLOCK_ON_SQUEEZE_RELEASE && squeezeJustReleased);
       
@@ -3524,8 +3522,8 @@ export const deriveTradeDirection = (
       const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
       const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
       
-      // Get ADX value for high ADX + declining check
-      const adxValue = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+      // Get ADX value — MFS direct
+      const adxValue = mfs.adx;
       
       // ===== CHECK FOR LONG EXHAUSTION REVERSAL =====
       // Path 1: Deep oversold (StochRSI K <= 10 AND %B <= 20)
