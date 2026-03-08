@@ -1233,6 +1233,23 @@ serve(async (req) => {
               positionLogger.error(`Error closing position ${position.id} on micro exhaustion: ${closeError}`);
             } else {
               closedPositions.push({ id: position.id, symbol: position.symbol, side: position.side, reason: "micro_exhaustion_full_exit", pnlPercent: feeAwarePnL.netPnlPercent });
+              
+              // Send notification for full exhaustion exit
+              if (riskParams?.email_notifications_enabled) {
+                supabase.functions.invoke("send-notification", {
+                  body: {
+                    type: "micro_exhaustion_exit",
+                    symbol: position.symbol,
+                    side: position.side,
+                    price: currentPrice,
+                    pnlPercent: feeAwarePnL.netPnlPercent,
+                    exhaustionScore: exhaustionScore,
+                    exhaustionSignals: microExh.signals || [],
+                    exhaustionAction: "exit_full",
+                    tradeId: position.id,
+                  }
+                }).catch(e => positionLogger.error(`Notification error: ${e}`));
+              }
             }
             continue; // Skip further processing
           }
