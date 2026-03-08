@@ -2693,10 +2693,9 @@ export const deriveTradeDirection = (
     return { direction: null, confidence: 0, source: "none", reasons: ["No trend data"] };
   }
   
-  // ============= MFS ADAPTER LAYER =============
-  // Map MFS fields to local variables matching old trendData access patterns.
-  // This allows the 2000+ lines of tier logic below to remain unchanged.
-  // Future: inline these directly once migration is validated.
+  // ============= MFS DIRECT FIELD ACCESS =============
+  // All indicator reads use MarketFeatureSnapshot fields directly.
+  // Legacy trendData shim has been fully removed.
   const timeframes = mfs.timeframes;
   const trend4h = timeframes['4h']?.trend || "neutral";
   const trend1h = timeframes['1h']?.trend || "neutral";
