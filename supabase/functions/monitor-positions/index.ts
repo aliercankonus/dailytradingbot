@@ -1796,7 +1796,8 @@ serve(async (req) => {
               
               // ADX-aware relaxation: wider distance in strong trends
               if (PEAK_ADAPTIVE_TRAILING.STRONG_TREND_RELAXATION_ENABLED) {
-                const { adx: peakAdx } = extractADX(trendDataForPosition);
+                // MFS MIGRATION: Use MFS for ADX
+                const peakAdx = mfsForPosition?.adx ?? 20;
                 if (peakAdx >= PEAK_ADAPTIVE_TRAILING.VERY_STRONG_TREND_MIN_ADX) {
                   maxDistance *= PEAK_ADAPTIVE_TRAILING.VERY_STRONG_TREND_DISTANCE_MULTIPLIER;
                 } else if (peakAdx >= PEAK_ADAPTIVE_TRAILING.STRONG_TREND_MIN_ADX) {
