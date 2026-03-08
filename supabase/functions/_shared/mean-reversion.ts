@@ -427,10 +427,10 @@ export function classifyTrendPhase(mfs: MarketFeatureSnapshot): 'RANGE' | 'EARLY
  * Classifies the expansion state based on volume and squeeze indicators
  * Independent of trend phase for clean separation of concerns
  */
-export function classifyExpansionState(trendData: any): 'NORMAL' | 'EXPANSION' | 'BREAKOUT' {
-  const volumeRatio = trendData?.volume?.ratio ?? 1.0;
-  const squeezeReleased = trendData?.squeeze?.justReleased ?? false;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+export function classifyExpansionState(mfs: MarketFeatureSnapshot): 'NORMAL' | 'EXPANSION' | 'BREAKOUT' {
+  const volumeRatio = mfs.volume['1h'].volumeRatio;
+  const squeezeReleased = mfs.squeezeJustReleased;
+  const adxSlope = mfs.adxSlope;
   
   // BREAKOUT: Very high volume spike
   if (volumeRatio >= EXPANSION_GATE.BREAKOUT.VOLUME_SPIKE_MIN) {
