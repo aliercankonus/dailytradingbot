@@ -3057,8 +3057,8 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // Minimum ADX required - LOWERED from 25 to 23
     MIN_ADX: 23,
     // StochRSI must be below this (not overbought - reversal risk) - NORMAL mode
-    // RELAXED: Raised from 70 to 85 - overbought in bullish trend is momentum continuation
-    MAX_STOCHRSI_K: 85,
+    // Tightened from 85 to 80 — overbought LONG entries are top root cause of losses
+    MAX_STOCHRSI_K: 80,
     // STRONG TREND EXCEPTION: When ADX >= this, allow higher StochRSI
     // PHASE 1 FIX: LOWERED from 25 to 20 - ADX 20-25 is gap zone where good signals get blocked
     STRONG_TREND_ADX_THRESHOLD: 20,
@@ -3405,8 +3405,8 @@ export const QUIET_TREND_PARAMS = {
   // ===== VOLUME & STOCHRSI SAFETY =====
   REQUIRE_VOLUME_CONFIRM: true,     // Volume should support direction
   BLOCK_IF_STOCHRSI_EXTREME: true,  // Don't chase at absolute extremes
-  MAX_STOCHRSI_K_LONG: 85,          // Don't chase overbought for longs
-  MIN_STOCHRSI_K_SHORT: 15,         // Don't chase oversold for shorts
+  MAX_STOCHRSI_K_LONG: 80,          // Don't chase overbought for longs (tightened from 85)
+  MIN_STOCHRSI_K_SHORT: 20,         // Don't chase oversold for shorts (tightened from 15)
   
   // ===== POSITION SIZING (Conservative) =====
   POSITION_SIZE_MULTIPLIER: 0.50,   // 50% position size for safety
@@ -3614,8 +3614,8 @@ export const PRE_MOMENTUM_STOCHRSI_PARAMS = {
   
   // ===== STOCHRSI THRESHOLDS =====
   // Relaxed threshold for SHORT to catch more moves like AVAX (K=15.7)
-  MAX_STOCHRSI_K_FOR_SHORT: 18,   // K < 18 = oversold zone, allow SHORT (was 15)
-  MIN_STOCHRSI_K_FOR_LONG: 82,    // K > 82 = overbought zone, allow LONG (was 85)
+  MAX_STOCHRSI_K_FOR_SHORT: 20,   // K < 20 = oversold zone, allow SHORT (tightened from 18)
+  MIN_STOCHRSI_K_FOR_LONG: 80,    // K > 80 = overbought zone, allow LONG (tightened from 82)
   
   // ===== ADX REQUIREMENTS =====
   // Must have some trend strength (not completely flat)
@@ -4303,8 +4303,8 @@ export const PRICE_ACTION_EARLY_ENTRY_PARAMS = {
   REQUIRE_DIRECTION_MATCH: true,
   
   // StochRSI limits - don't enter at extremes even with price action
-  MAX_STOCHRSI_FOR_LONG: 85,  // Still some room before extreme
-  MIN_STOCHRSI_FOR_SHORT: 15,
+  MAX_STOCHRSI_FOR_LONG: 80,  // Tightened from 85 — root cause of overbought LONG losses
+  MIN_STOCHRSI_FOR_SHORT: 20, // Tightened from 15 — root cause of oversold SHORT losses
   
   // Position sizing for early entries (conservative)
   POSITION_SIZE_MULTIPLIER: 0.50,  // 50% position
@@ -4370,8 +4370,8 @@ export const MARKET_REGIME_CLASSIFIER = {
     NORMAL: {
       bollingerMaxPercentB: 90,
       bollingerMinPercentB: 10,
-      stochRsiMaxK: 85,
-      stochRsiMinK: 15,
+      stochRsiMaxK: 80,
+      stochRsiMinK: 20,
       momentumScoreMinimum: 5,           // Standard momentum requirement
       qualityBoost: 0,
       positionMultiplier: 1.0,
@@ -4482,7 +4482,7 @@ export const FOUR_STATE_REGIME = {
     LOW_ATR_MULTIPLIER: 0.7,  // ATR < 70% of historical = compressed
     // HARD BLOCK - no entries at all (except MR probes with strict conditions)
     ALLOW_MR_BYPASS: true,
-    MR_BYPASS_MIN_STOCHRSI_DISTANCE: 15,  // StochRSI K must be < 15 or > 85 for MR
+    MR_BYPASS_MIN_STOCHRSI_DISTANCE: 20,  // StochRSI K must be < 20 or > 80 for MR (was 15/85)
   },
   
   // ===== INLINE THRESHOLDS (extracted from classify4StateRegime) =====
@@ -5704,7 +5704,7 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // Even with relaxation, require StochRSI runway
     REQUIRE_STOCHRSI_RUNWAY: true,
     STOCHRSI_RUNWAY_MIN_K_FOR_SHORT: 10,  // LOWERED: Was 15 → 10 (synced with K floor fix v2)
-    STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 85,   // K must be <= 85 for continued long
+    STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 80,   // K must be <= 80 for continued long (tightened from 85)
     
     // Graduated relaxation slope check (matches ADX_SLOPE_GRADUATED philosophy)
     // Instead of binary block, slope determines relaxation DEGREE
@@ -5814,10 +5814,10 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // ADX slope must be <= 0 (flat or declining) - trend energy decay required
     MAX_ADX_SLOPE: 0,
     // StochRSI extremes required for counter-trend entry
-    // LONG bounce: K must be < 15 (oversold)
-    LONG_MAX_K_FOR_EXCEPTION: 15,
-    // SHORT fade: K must be > 85 (overbought)
-    SHORT_MIN_K_FOR_EXCEPTION: 85,
+    // LONG bounce: K must be < 20 (oversold) — widened from 15
+    LONG_MAX_K_FOR_EXCEPTION: 20,
+    // SHORT fade: K must be > 80 (overbought) — widened from 85
+    SHORT_MIN_K_FOR_EXCEPTION: 80,
     // Position size for mean reversion exceptions (probe size)
     POSITION_SIZE: 0.25,
     // Minimum move percentage before mean reversion is allowed
@@ -7455,12 +7455,11 @@ export const STOCHRSI_RUNWAY_GATE = {
   // Prevents shorting deep oversold after 3% drops, or longing deep overbought after 3% rallies
   DEEP_EXHAUSTION_COMPOUND: {
     ENABLED: true,
-    // SHORT: Block when K < 15 AND moveFromHigh > 2%
-    // RELAXED: was 12, raised to 15 to catch AVAX(K=14), SOL(K=3.7) etc.
-    SHORT_MAX_K: 15,
+    // SHORT: Block when K < 20 AND moveFromHigh > 2% (tightened from 15)
+    SHORT_MAX_K: 20,
     SHORT_MIN_MOVE_PERCENT: 2.0,
-    // LONG: Block when K > 85 AND moveFromLow > 2%
-    LONG_MIN_K: 85,
+    // LONG: Block when K > 80 AND moveFromLow > 2% (tightened from 85)
+    LONG_MIN_K: 80,
     LONG_MIN_MOVE_PERCENT: 2.0,
     // Position multiplier if ADX is very high (probe instead of block)
     // RELAXED: Lowered from 35 to 30 — AVAX(ADX=34), XRP(ADX=33) were being hard-blocked
