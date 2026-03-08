@@ -9832,9 +9832,11 @@ serve(async (req) => {
                                   });
                                 }
                               }
+                            } else {
+                              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 💧 LSRD EVAL (EXPANDED): score=${lsrdResult2.score}/${LIQUIDITY_SWEEP_REVERSAL.MIN_PATTERN_SCORE} pattern=${lsrdResult2.patternType || 'none'} sweep=${lsrdResult2.sweepDepthATR?.toFixed(2) ?? '0'}ATR recovery=${lsrdResult2.recoveryPercent?.toFixed(2) ?? '0'}% vol=${lsrdResult2.volumeConfirmed} | ${lsrdResult2.signals.slice(0, 3).join('; ')}`);
                             }
                           }
-                        } catch (lsrdErr) { /* non-critical */ }
+                        } catch (lsrdErr) { logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} 💧 LSRD error: ${lsrdErr}`); }
                       }
                       
                       // Shadow tracking for NEAR_24H_LOW_HARD (expanded opposing momentum)
