@@ -18,7 +18,7 @@ import {
   STALE_PEAK_BONUS_PARAMS,
   MODERATE_EXHAUSTION_EXIT_PARAMS,
 } from "./constants.ts";
-import { extractADX, extractADXSlope } from "./scoring.ts";
+// MFS migration: extractADX/extractADXSlope removed — MarketContext now carries pre-extracted fields
 
 // ──────────────────────────────────────────────
 // Shared types
