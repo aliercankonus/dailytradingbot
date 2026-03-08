@@ -17,7 +17,7 @@ entryTimingScore = 50 (baseline) + htfAlignBonus + accelBonus + momMagBonus + al
 | HTF Alignment | ~35% | -15 to +20 | Does 5m/1m agree with primary trend? |
 | 5m Acceleration | ~25% | 0 to +20 | Is 5m momentum accelerating toward HTF? |
 | 5m Momentum Magnitude | ~25% | -15 to +15 | How strong is 5m directional score? |
-| 1m/5m Alignment | ~15% | -10 to +10 | Do 1m and 5m timeframes agree? |
+| 1m/5m Alignment | ~10% | -6 to +6 | Do 1m and 5m timeframes agree? (reduced from ±10 to ±6 to avoid double counting with boost guard) |
 
 ### Score Examples
 
