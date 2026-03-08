@@ -186,76 +186,31 @@ export function checkVolatilityContracting(
  * @returns Object with flip status and confidence score
  */
 export function checkLtfStructureFlip(
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   direction: 'long' | 'short'
 ): { flipped: boolean; score: number; details: string } {
-  const tf15m = trendData?.timeframes?.['15m'];
-  const tf30m = trendData?.timeframes?.['30m'];
+  const tf15m = mfs.timeframes['15m'];
+  const tf30m = mfs.timeframes['30m'];
   
   let score = 0;
   const details: string[] = [];
   
   if (direction === 'long') {
-    // For LONG: Look for Higher Low + Higher High (bullish structure)
-    
-    // Check 15m
-    if (tf15m?.structure?.higherLow) {
-      score += 5;
-      details.push('15m HL');
-    }
-    if (tf15m?.structure?.higherHigh) {
-      score += 5;
-      details.push('15m HH');
-    }
-    
-    // Check 30m (weighted slightly higher)
-    if (tf30m?.structure?.higherLow) {
-      score += 6;
-      details.push('30m HL');
-    }
-    if (tf30m?.structure?.higherHigh) {
-      score += 6;
-      details.push('30m HH');
-    }
-    
-    // Alternative: Check trend direction flip
-    if (tf15m?.trend === 'bullish' || tf15m?.indicators?.trend === 'bullish') {
+    // Alternative: Check trend direction flip (structure fields not available via MFS)
+    if (tf15m.trend === 'bullish') {
       score += 4;
       details.push('15m bullish');
     }
-    if (tf30m?.trend === 'bullish' || tf30m?.indicators?.trend === 'bullish') {
+    if (tf30m.trend === 'bullish') {
       score += 5;
       details.push('30m bullish');
     }
   } else {
-    // For SHORT: Look for Lower High + Lower Low (bearish structure)
-    
-    // Check 15m
-    if (tf15m?.structure?.lowerHigh) {
-      score += 5;
-      details.push('15m LH');
-    }
-    if (tf15m?.structure?.lowerLow) {
-      score += 5;
-      details.push('15m LL');
-    }
-    
-    // Check 30m (weighted slightly higher)
-    if (tf30m?.structure?.lowerHigh) {
-      score += 6;
-      details.push('30m LH');
-    }
-    if (tf30m?.structure?.lowerLow) {
-      score += 6;
-      details.push('30m LL');
-    }
-    
-    // Alternative: Check trend direction flip
-    if (tf15m?.trend === 'bearish' || tf15m?.indicators?.trend === 'bearish') {
+    if (tf15m.trend === 'bearish') {
       score += 4;
       details.push('15m bearish');
     }
-    if (tf30m?.trend === 'bearish' || tf30m?.indicators?.trend === 'bearish') {
+    if (tf30m.trend === 'bearish') {
       score += 5;
       details.push('30m bearish');
     }
