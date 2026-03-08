@@ -2290,7 +2290,7 @@ export const detectEarlyIgnitionEntry = (
       }
     }
   } else {
-    const percentB1h = bb1h.percentB ?? 50;
+    const percentB1h = mfs.bollinger['1h'].percentB ?? 50;
     if (percentB1h >= 85) {
       rangeBreakDirection = "long";
       rangeBreakPercent = (percentB1h - 80) / 20 * 0.5;
