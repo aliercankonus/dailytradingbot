@@ -1276,7 +1276,7 @@ export const calculateUnifiedReversalScore = (
   };
   
   // 1. StochRSI CROSS SIGNALS (0-50 points) - PHASE 2: Apply cap
-  const stochSignals = countOpposingStochSignals(trendData, signalType);
+  const stochSignals = countOpposingStochSignals(mfs, signalType);
   let rawStochCrossScore = 0;
   
   if (stochSignals.opposingCrossCount >= 3) {
