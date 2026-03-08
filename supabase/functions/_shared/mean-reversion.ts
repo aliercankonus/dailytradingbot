@@ -238,7 +238,7 @@ export function checkLtfStructureFlip(
  * @returns CounterTrendAdmissionResult with pass/fail and detailed diagnostics
  */
 export function evaluateCounterTrendAdmission(
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   derivedDirection: 'long' | 'short',
   htfTrend: string
 ): CounterTrendAdmissionResult {
@@ -246,19 +246,17 @@ export function evaluateCounterTrendAdmission(
   const failureReasons: string[] = [];
   const triggers: string[] = [];
   
-  // Extract indicators
-  const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
-  const adxArray = trendData?.volatility?.adxArray ?? [];
-  const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                 trendData?.stochasticRsi?.['4h']?.k ?? 
-                 trendData?.stochasticRsi?.aggregated?.k ?? 50;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  const adxArray = mfs.adxArray;
+  const stochK = mfs.stochRsi['4h'].k;
   
-  // Volatility data
-  const currentBbWidth = trendData?.bollingerBands?.['4h']?.width ?? null;
-  const prevBbWidth = trendData?.bollingerBands?.['4h']?.prevWidth ?? null;
-  const currentAtr = trendData?.volatility?.atr ?? trendData?.atr ?? null;
-  const prevAtr = trendData?.volatility?.prevAtr ?? null;
+  // Volatility data from MFS
+  const currentBbWidth = mfs.bollinger['4h'].bandwidth || null;
+  const prevBbWidth: number | null = null; // prevWidth not available in MFS — permissive fallback
+  const currentAtr = mfs.atr || null;
+  const prevAtr: number | null = null; // prevAtr not available in MFS — permissive fallback
   
   // Determine if this is a counter-trend entry
   const isCounterTrend = (
