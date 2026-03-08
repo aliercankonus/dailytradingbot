@@ -4280,7 +4280,7 @@ export const deriveTradeDirection = (
       (trend1h === "neutral" && conf1h >= 50 && conf1h <= 65);
     
     const inferred1hDirection = trend1h !== "neutral" ? trend1h : 
-      (trendData.momentum?.confirms && trendData.momentum?.state !== "none" ? 
+      (mfs.momentumConfirms && mfs.momentumState !== "none" ? 
         (trend30m === "bullish" ? "bullish" : "bearish") : null);
     
     const is1hNotConflicting = 
