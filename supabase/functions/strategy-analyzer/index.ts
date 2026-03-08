@@ -216,6 +216,8 @@ import {
   checkMomentumDirectionAlignment,
   // NEW: Trend Continuation Pullback (EMA-based re-entry in decelerating trends)
   detectTrendContinuationPullback,
+  // NEW: Liquidity Trap Detector (fake breakout, stop hunt, bull/bear trap)
+  detectLiquidityTrap,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
@@ -225,7 +227,8 @@ import {
   type ADXExhaustionResult,
   type BollingerPriceActionResult,
   type MomentumFlipResult,
-  type TrendContinuationPullbackResult
+  type TrendContinuationPullbackResult,
+  type LiquidityTrapResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
