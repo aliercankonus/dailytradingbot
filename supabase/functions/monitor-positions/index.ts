@@ -2432,8 +2432,8 @@ serve(async (req) => {
           // StochRSI filter for hedge opening - prevent hedges at extreme levels
           // For LONG: Don't hedge when K < OVERSOLD (price likely to bounce up)
           // For SHORT: Don't hedge when K > OVERBOUGHT (price likely to drop)
-          const stochRsi4h = trendData.stochasticRsi?.["4h"] || trendData.stochasticRsi?.aggregated || {};
-          const stochRsiK4h = stochRsi4h?.k ?? 50;
+          // MFS MIGRATION: Use MFS for StochRSI 4h instead of raw trendData access
+          const stochRsiK4h = mfsForPosition?.stochRsi?.["4h"]?.k ?? 50;
           const shouldBlockHedgeByStochRsi = isLong 
             ? stochRsiK4h < STOCHRSI_THRESHOLDS.OVERSOLD
             : stochRsiK4h > STOCHRSI_THRESHOLDS.OVERBOUGHT;
