@@ -4983,12 +4983,7 @@ export const calculateQualityScore = (
   
   // PHASE 1 FIX: Pass adxSlope to getMomentumScore for momentum floor calculation
   const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData, adxSlope);
-  // Build trendData shim for getAlignmentScore and getTechnicalScore (legacy functions)
-  const trendDataShim = {
-    confidence,
-    trueAlignment: mfs.trueAlignment,
-    isAligned: aligned,
-  };
+  // MFS MIGRATED: getAlignmentScore and getTechnicalScore now accept MFS directly
   // MFS MIGRATED: getAlignmentScore and getTechnicalScore now accept MFS directly
   const alignmentScore = getAlignmentScore(confidence, consistency, aligned, mfs);
   const technicalScore = getTechnicalScore(mfs, effectiveTrend, symbol);
