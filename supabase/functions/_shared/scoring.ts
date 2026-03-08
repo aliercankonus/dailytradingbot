@@ -1202,136 +1202,42 @@ interface ReversalScoreOptions {
 }
 
 export const calculateUnifiedReversalScore = (
-  trendData: any, 
+  mfs: MarketFeatureSnapshot, 
   signalType: string,
   symbol: string = "unknown",
   options: ReversalScoreOptions = {},
-  mfs?: MarketFeatureSnapshot
 ): UnifiedReversalResult => {
   const reasons: string[] = [];
   let totalScore = 0;
   
-  if (!trendData) {
+  if (!mfs) {
     return { 
       score: 0, 
       decision: "NORMAL", 
       positionSizeMultiplier: 1.0, 
-      reasons: ['No trend data'], 
+      reasons: ['No MFS data'], 
       adxWeight: 1.0 
     };
   }
   
   // PHASE 1: Get ADX phase info for context-aware scoring
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+  const adx = mfs.adx;
   const adxPhaseInfo = getAdxPhaseInfo(adx);
   
   // PHASE 1: Detect breakout mode for StochRSI penalty reduction
-  // MFS MIGRATION: detectBreakoutMode now requires MFS. Build minimal shim if not provided.
-  let breakoutMfs: MarketFeatureSnapshot;
-  if (mfs) {
-    breakoutMfs = mfs;
-  } else {
-    // Compatibility shim: construct minimal MFS from trendData for detectBreakoutMode
-    const bollinger = trendData?.bollingerBands || {};
-    const momentum = trendData?.momentum || {};
-    breakoutMfs = {
-      symbol: symbol,
-      currentPrice: 0,
-      timestamp: '',
-      primaryTrend: 'neutral',
-      confidence: 0,
-      isAligned: false,
-      trendConsistency: 0,
-      adx: adx,
-      adxSlope: trendData?.volatility?.adxSlope ?? 0,
-      adxRising: trendData?.volatility?.adxRising ?? false,
-      stochRsi: {
-        "15m": { k: 50, d: 50 },
-        "30m": { k: 50, d: 50 },
-        "1h": { k: 50, d: 50 },
-        "4h": { k: trendData?.stochasticRsi?.['4h']?.k ?? 50, d: trendData?.stochasticRsi?.['4h']?.d ?? 50 },
-      },
-      bollinger: {
-        "15m": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: false, squeezeIntensity: 0, pricePosition: "middle" },
-        "30m": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: false, squeezeIntensity: 0, pricePosition: "middle" },
-        "1h": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: bollinger['1h']?.squeeze || false, squeezeIntensity: bollinger['1h']?.squeezePercent || 0, pricePosition: "middle" },
-        "4h": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: bollinger['4h']?.squeeze || false, squeezeIntensity: bollinger['4h']?.squeezePercent || 0, pricePosition: "middle" },
-        squeezeActive: bollinger['4h']?.squeeze || bollinger['1h']?.squeeze || false,
-        squeezeBreakoutPotential: false,
-      },
-      volume: {
-        "15m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "30m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "1h": { volumeRatio: trendData?.volatility?.volumeRatio || 1.0, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "4h": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        confirmsDirection: false,
-        hasRangeExpansion1h: false,
-      },
-      momentumState: momentum.state || "none",
-      momentumConfirms: momentum.confirms || false,
-      macdExpanding: momentum.macdExpanding || false,
-      macdStrong: false,
-      macdHistogram: 0,
-      macdDirectionAligned: false,
-      volumeConfirms: momentum.volumeConfirms || false,
-      adxRisingMomentum: false,
-      fakeBreakoutRisk: false,
-      genuineMomentum: false,
-      consecutiveBars1h: 0,
-      consecutiveBars15m: 0,
-      consecutiveBars30m: 0,
-      atr: 0,
-      atrPercent: 0,
-      relativeATR: 1,
-      historicalATRAvg: 0,
-      isCompressed: false,
-      volatilityNormal: true,
-      isRanging: false,
-      timeframes: {
-        "15m": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-        "30m": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-        "1h": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-        "4h": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-      },
-      distanceFromHighPercent: 0, distanceFromLowPercent: 0,
-      atrNormalizedFromHigh: 0, atrNormalizedFromLow: 0,
-      high24h: 0, low24h: 0,
-      priceChange4h: 0, priceChange24h: 0,
-      inPullback: false, pullbackPercent: 0, pullbackConditionsMet: false,
-      microTrend: { hasMicroTrend: false, direction: "neutral", confidence: 0, alignment: 0, reason: "" },
-      stealthTrend: { detected: false, direction: "neutral", driftPercent: 0, driftDuration: 0, adxBypassAllowed: false, htfBypassAllowed: false, stealthScore: 0, positionMultiplier: 1, stopMultiplier: 1, reason: "" },
-      neutralPersistence: { isCurrentlyNeutral: false, durationMinutes: 0, confidenceBonus: 0, reason: "" },
-      marketStructureValid: false, marketStructureConfidence: 0,
-      trueAlignment: { score: 0, tf4hConfidence: 0, tf1hConfidence: 0, adxContribution: 0, totalWeightedConfidence: 0, neutralCapped: false, breakdown: {}, weightedComponents: {} },
-      diPlus: 25, diMinus: 25, diSeparation: 0,
-      priceActionMomentum: { hasStrongMove: false, direction: "neutral", movePercent: 0, isStrongMove: false, canOverrideNeutralAlignment: false },
-      regime: trendData?.regime?.regime || 'RANGING',
-      directionStableBars: 0,
-      momentumDirection: "neutral",
-      prevMacdHistogram: 0,
-      squeezeJustReleased: false,
-    } as MarketFeatureSnapshot;
-  }
-  const breakoutMode = detectBreakoutMode(breakoutMfs);
+  const breakoutMode = detectBreakoutMode(mfs);
   
-  const momentum = trendData?.momentum || {};
-  const stochRSI = trendData?.stochasticRsi || {};
-  const aggregated = stochRSI.aggregated || {};
-  const tf = trendData?.timeframes || {};
-  const tf1h = tf['1h'] || {};
-  const tf4h = tf['4h'] || {};
-  const volatility = trendData?.volatility || {};
-  const indicators = trendData?.indicators || {};
-  const rsi = tf1h.indicators?.rsi || indicators.rsi || 50;
+  // MFS MIGRATION: All indicator reads from MarketFeatureSnapshot
+  const momentumConfirms = mfs.momentumConfirms;
+  const momentumState = mfs.momentumState || "none";
+  const macdExpanding = mfs.macdExpanding;
+  const rsi = mfs.timeframes['1h'].rsi || 50;
   
   const isLong = signalType === "bullish" || signalType === "long";
-  const trend1h = tf1h.trend || "neutral";
-  const trend4h = tf4h.trend || "neutral";
-  const stoch4h = stochRSI['4h'] || {};
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
   
   // RSI pullback + momentum check for StochRSI conflict resolution
-  const momentumConfirms = momentum.confirms ?? false;
-  const momentumState = momentum.state || "none";
   const isMomentumConfirmed = (momentumState === "confirmed" || momentumState === "building") && momentumConfirms;
   
   const rsiIndicatesPullback = isLong 
@@ -1341,8 +1247,7 @@ export const calculateUnifiedReversalScore = (
   const reduceStochZonePenalty = rsiIndicatesPullback && isMomentumConfirmed;
   
   // PHASE 2: Get context for component caps
-  const trend30m = tf['30m']?.trend || "neutral";
-  const macdExpanding = momentum.macdExpanding ?? false;
+  const trend30m = mfs.timeframes['30m'].trend || "neutral";
   const hasPartialAlignment = (trend1h === trend30m && trend1h !== "neutral");
   
   const componentCaps = getComponentCaps({
