@@ -653,6 +653,10 @@ export function buildMarketFeatureSnapshot(
         score: smartMom.microExhaustion.score,
         recommendation: smartMom.microExhaustion.recommendation,
         signals: smartMom.microExhaustion.signals,
+        positionMultiplier: smartMom.microExhaustion.positionMultiplier ?? 1.0,
+        momentumDeceleration: smartMom.microExhaustion.momentumDeceleration ?? false,
+        accelerationFlip: smartMom.microExhaustion.accelerationFlip ?? false,
+        priceDivergence: smartMom.microExhaustion.priceDivergence ?? false,
       } : undefined,
       components: smartMom.components ? {
         macdSlope: smartMom.components.macdSlope ?? 0,
