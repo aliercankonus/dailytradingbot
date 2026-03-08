@@ -510,12 +510,38 @@ function evaluateProductionGates(
     return fail('COUNTER_TREND');
   }
 
-  // ===== GATE 6: Momentum Direction Alignment =====
-  if (direction === 'LONG' && momentumResult.score < -30) {
-    return fail('MOMENTUM_OPPOSING');
+  // ===== GATE 5.5: StochRSI Directional Protection (production-accurate) =====
+  // K > 85 blocks SHORT entries, K < 15 blocks LONG entries
+  // Independent of Gate 3 (deep extreme), this catches directional mismatches
+  if (direction === 'SHORT' && stochK > 85) {
+    // Shorting into overbought only allowed if ADX >= 35 (strong downtrend confirmed)
+    if (adx < ADX_THRESHOLDS.VERY_STRONG) {
+      return fail('STOCHRSI_DIRECTIONAL_BLOCK');
+    }
+    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
-  if (direction === 'SHORT' && momentumResult.score > 30) {
-    return fail('MOMENTUM_OPPOSING');
+  if (direction === 'LONG' && stochK < 15) {
+    if (adx < ADX_THRESHOLDS.VERY_STRONG) {
+      return fail('STOCHRSI_DIRECTIONAL_BLOCK');
+    }
+    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
+  }
+
+  // ===== GATE 6: Momentum Direction Alignment (production-accurate: ±15 threshold) =====
+  if (direction === 'LONG' && momentumResult.score < -15) {
+    // Allow structural acceleration bypass: ADX >= 30, slope >= 0.3
+    if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
+    } else {
+      return fail('MOMENTUM_OPPOSING');
+    }
+  }
+  if (direction === 'SHORT' && momentumResult.score > 15) {
+    if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
+    } else {
+      return fail('MOMENTUM_OPPOSING');
+    }
   }
 
   // ===== GATE 7: StochRSI Oversold/Overbought Protection =====
@@ -734,8 +760,9 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'time_stop_24h' };
   }
 
-  // 9. Moderate exhaustion exit — OPTIMIZED: lower floor (was 0.50)
-  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
+  // 9. Moderate exhaustion exit — OPTIMIZED: higher peak threshold, less aggressive ratio
+  // Only trigger when peak was meaningful AND drawdown from peak is severe
+  if (position.peakPnl > 0.60 && pnlPercent < position.peakPnl * 0.15) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
