@@ -149,18 +149,16 @@ export interface TimeInExtremePenalty {
 }
 
 export const calculateTimeInExtremePenalty = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   signalType: string
 ): TimeInExtremePenalty => {
-  const stochRsi = trendData?.stochasticRsi || {};
-  const barsAtExtreme = stochRsi.barsAtExtreme || {};
-  const barsAtExtreme1h = barsAtExtreme['1h'] || { barsOverbought: 0, barsOversold: 0 };
-  const barsAtExtreme4h = barsAtExtreme['4h'] || { barsOverbought: 0, barsOversold: 0 };
+  const barsAtExtreme1h = mfs.barsAtExtreme['1h'];
+  const barsAtExtreme4h = mfs.barsAtExtreme['4h'];
   
   const isLong = signalType === "bullish" || signalType === "long";
   
   // Get ADX for dynamic threshold calculation
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+  const adx = mfs.adx;
   
   // PHASE 4: Dynamic thresholds based on ADX
   // Stronger trends allow more bars at extreme before penalty kicks in
@@ -1055,7 +1053,6 @@ const calculateSeparatedRisk = (
     timeframeScore: number;
     volumeScore: number;
   },
-  trendData: any,
   signalType: string
 ): SeparatedRiskResult => {
   const continuationReasons: string[] = [];
@@ -1158,15 +1155,14 @@ const calculateSeparatedRisk = (
 };
 
 // Helper: Count StochRSI signals opposing the intended trade direction
-const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
+const countOpposingStochSignals = (mfs: MarketFeatureSnapshot, intendedDirection: string): {
   opposingCrossCount: number;
   extremeCount: number;
   crossTimeframes: string[];
   extremeTimeframes: string[];
 } => {
-  const stochRsi = trendData?.stochasticRsi || {};
-  const aggregated = stochRsi.aggregated || {};
-  const timeframes = ['4h', '1h', '30m', '15m'];
+  const aggregated = mfs.stochRsiAggregated;
+  const timeframes = ['4h', '1h', '30m', '15m'] as const;
   
   let opposingCrossCount = 0;
   let extremeCount = 0;
@@ -1176,19 +1172,17 @@ const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
   const isLong = intendedDirection === "bullish" || intendedDirection === "long";
   
   if (isLong) {
-    opposingCrossCount = aggregated.bearishCrossCount || 0;
-    extremeCount = aggregated.overboughtCount || 0;
+    opposingCrossCount = aggregated.bearishCrossCount;
+    extremeCount = aggregated.overboughtCount;
   } else {
-    opposingCrossCount = aggregated.bullishCrossCount || 0;
-    extremeCount = aggregated.oversoldCount || 0;
+    opposingCrossCount = aggregated.bullishCrossCount;
+    extremeCount = aggregated.oversoldCount;
   }
   
   for (const tf of timeframes) {
-    const tfData = stochRsi[tf];
-    if (!tfData) continue;
-    
-    const k = tfData.k ?? 50;
-    const signal = tfData.signal || "neutral";
+    const tfData = mfs.stochRsi[tf];
+    const k = tfData.k;
+    const signal = tfData.signal;
     
     if (isLong) {
       if (signal === "bearish_cross") crossTimeframes.push(tf);
@@ -1208,136 +1202,42 @@ interface ReversalScoreOptions {
 }
 
 export const calculateUnifiedReversalScore = (
-  trendData: any, 
+  mfs: MarketFeatureSnapshot, 
   signalType: string,
   symbol: string = "unknown",
   options: ReversalScoreOptions = {},
-  mfs?: MarketFeatureSnapshot
 ): UnifiedReversalResult => {
   const reasons: string[] = [];
   let totalScore = 0;
   
-  if (!trendData) {
+  if (!mfs) {
     return { 
       score: 0, 
       decision: "NORMAL", 
       positionSizeMultiplier: 1.0, 
-      reasons: ['No trend data'], 
+      reasons: ['No MFS data'], 
       adxWeight: 1.0 
     };
   }
   
   // PHASE 1: Get ADX phase info for context-aware scoring
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+  const adx = mfs.adx;
   const adxPhaseInfo = getAdxPhaseInfo(adx);
   
   // PHASE 1: Detect breakout mode for StochRSI penalty reduction
-  // MFS MIGRATION: detectBreakoutMode now requires MFS. Build minimal shim if not provided.
-  let breakoutMfs: MarketFeatureSnapshot;
-  if (mfs) {
-    breakoutMfs = mfs;
-  } else {
-    // Compatibility shim: construct minimal MFS from trendData for detectBreakoutMode
-    const bollinger = trendData?.bollingerBands || {};
-    const momentum = trendData?.momentum || {};
-    breakoutMfs = {
-      symbol: symbol,
-      currentPrice: 0,
-      timestamp: '',
-      primaryTrend: 'neutral',
-      confidence: 0,
-      isAligned: false,
-      trendConsistency: 0,
-      adx: adx,
-      adxSlope: trendData?.volatility?.adxSlope ?? 0,
-      adxRising: trendData?.volatility?.adxRising ?? false,
-      stochRsi: {
-        "15m": { k: 50, d: 50 },
-        "30m": { k: 50, d: 50 },
-        "1h": { k: 50, d: 50 },
-        "4h": { k: trendData?.stochasticRsi?.['4h']?.k ?? 50, d: trendData?.stochasticRsi?.['4h']?.d ?? 50 },
-      },
-      bollinger: {
-        "15m": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: false, squeezeIntensity: 0, pricePosition: "middle" },
-        "30m": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: false, squeezeIntensity: 0, pricePosition: "middle" },
-        "1h": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: bollinger['1h']?.squeeze || false, squeezeIntensity: bollinger['1h']?.squeezePercent || 0, pricePosition: "middle" },
-        "4h": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: bollinger['4h']?.squeeze || false, squeezeIntensity: bollinger['4h']?.squeezePercent || 0, pricePosition: "middle" },
-        squeezeActive: bollinger['4h']?.squeeze || bollinger['1h']?.squeeze || false,
-        squeezeBreakoutPotential: false,
-      },
-      volume: {
-        "15m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "30m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "1h": { volumeRatio: trendData?.volatility?.volumeRatio || 1.0, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "4h": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        confirmsDirection: false,
-        hasRangeExpansion1h: false,
-      },
-      momentumState: momentum.state || "none",
-      momentumConfirms: momentum.confirms || false,
-      macdExpanding: momentum.macdExpanding || false,
-      macdStrong: false,
-      macdHistogram: 0,
-      macdDirectionAligned: false,
-      volumeConfirms: momentum.volumeConfirms || false,
-      adxRisingMomentum: false,
-      fakeBreakoutRisk: false,
-      genuineMomentum: false,
-      consecutiveBars1h: 0,
-      consecutiveBars15m: 0,
-      consecutiveBars30m: 0,
-      atr: 0,
-      atrPercent: 0,
-      relativeATR: 1,
-      historicalATRAvg: 0,
-      isCompressed: false,
-      volatilityNormal: true,
-      isRanging: false,
-      timeframes: {
-        "15m": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-        "30m": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-        "1h": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-        "4h": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
-      },
-      distanceFromHighPercent: 0, distanceFromLowPercent: 0,
-      atrNormalizedFromHigh: 0, atrNormalizedFromLow: 0,
-      high24h: 0, low24h: 0,
-      priceChange4h: 0, priceChange24h: 0,
-      inPullback: false, pullbackPercent: 0, pullbackConditionsMet: false,
-      microTrend: { hasMicroTrend: false, direction: "neutral", confidence: 0, alignment: 0, reason: "" },
-      stealthTrend: { detected: false, direction: "neutral", driftPercent: 0, driftDuration: 0, adxBypassAllowed: false, htfBypassAllowed: false, stealthScore: 0, positionMultiplier: 1, stopMultiplier: 1, reason: "" },
-      neutralPersistence: { isCurrentlyNeutral: false, durationMinutes: 0, confidenceBonus: 0, reason: "" },
-      marketStructureValid: false, marketStructureConfidence: 0,
-      trueAlignment: { score: 0, tf4hConfidence: 0, tf1hConfidence: 0, adxContribution: 0, totalWeightedConfidence: 0, neutralCapped: false, breakdown: {}, weightedComponents: {} },
-      diPlus: 25, diMinus: 25, diSeparation: 0,
-      priceActionMomentum: { hasStrongMove: false, direction: "neutral", movePercent: 0, isStrongMove: false, canOverrideNeutralAlignment: false },
-      regime: trendData?.regime?.regime || 'RANGING',
-      directionStableBars: 0,
-      momentumDirection: "neutral",
-      prevMacdHistogram: 0,
-      squeezeJustReleased: false,
-    } as MarketFeatureSnapshot;
-  }
-  const breakoutMode = detectBreakoutMode(breakoutMfs);
+  const breakoutMode = detectBreakoutMode(mfs);
   
-  const momentum = trendData?.momentum || {};
-  const stochRSI = trendData?.stochasticRsi || {};
-  const aggregated = stochRSI.aggregated || {};
-  const tf = trendData?.timeframes || {};
-  const tf1h = tf['1h'] || {};
-  const tf4h = tf['4h'] || {};
-  const volatility = trendData?.volatility || {};
-  const indicators = trendData?.indicators || {};
-  const rsi = tf1h.indicators?.rsi || indicators.rsi || 50;
+  // MFS MIGRATION: All indicator reads from MarketFeatureSnapshot
+  const momentumConfirms = mfs.momentumConfirms;
+  const momentumState = mfs.momentumState || "none";
+  const macdExpanding = mfs.macdExpanding;
+  const rsi = mfs.timeframes['1h'].rsi || 50;
   
   const isLong = signalType === "bullish" || signalType === "long";
-  const trend1h = tf1h.trend || "neutral";
-  const trend4h = tf4h.trend || "neutral";
-  const stoch4h = stochRSI['4h'] || {};
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
   
   // RSI pullback + momentum check for StochRSI conflict resolution
-  const momentumConfirms = momentum.confirms ?? false;
-  const momentumState = momentum.state || "none";
   const isMomentumConfirmed = (momentumState === "confirmed" || momentumState === "building") && momentumConfirms;
   
   const rsiIndicatesPullback = isLong 
@@ -1347,8 +1247,7 @@ export const calculateUnifiedReversalScore = (
   const reduceStochZonePenalty = rsiIndicatesPullback && isMomentumConfirmed;
   
   // PHASE 2: Get context for component caps
-  const trend30m = tf['30m']?.trend || "neutral";
-  const macdExpanding = momentum.macdExpanding ?? false;
+  const trend30m = mfs.timeframes['30m'].trend || "neutral";
   const hasPartialAlignment = (trend1h === trend30m && trend1h !== "neutral");
   
   const componentCaps = getComponentCaps({
@@ -1360,7 +1259,7 @@ export const calculateUnifiedReversalScore = (
   });
   
   // PHASE 3: Calculate time-in-extreme penalty
-  const timeInExtremePenalty = calculateTimeInExtremePenalty(trendData, signalType);
+  const timeInExtremePenalty = calculateTimeInExtremePenalty(mfs, signalType);
   if (timeInExtremePenalty.penalty > 0) {
     reasons.push(`PHASE 3: ${timeInExtremePenalty.reason}`);
   }
@@ -1377,7 +1276,7 @@ export const calculateUnifiedReversalScore = (
   };
   
   // 1. StochRSI CROSS SIGNALS (0-50 points) - PHASE 2: Apply cap
-  const stochSignals = countOpposingStochSignals(trendData, signalType);
+  const stochSignals = countOpposingStochSignals(mfs, signalType);
   let rawStochCrossScore = 0;
   
   if (stochSignals.opposingCrossCount >= 3) {
@@ -1398,7 +1297,7 @@ export const calculateUnifiedReversalScore = (
   }
   
   // 2. StochRSI EXTREME ZONES (0-50 points) - INCREASED from 0-25 for extreme readings
-  const k4h = stoch4h.k ?? 50;
+  const k4h = mfs.stochRsi['4h'].k;
   let rawStochZoneScore = 0;
   
   // NEW: Use high reversal thresholds from constants (default 95 for overbought, 5 for oversold)
@@ -1512,10 +1411,10 @@ export const calculateUnifiedReversalScore = (
   
   // 4. MACD ALIGNMENT (0-15 points) - PHASE 2: Apply cap
   let rawMacdScore = 0;
-  if (momentum.hasDivergence) {
+  if (mfs.hasDivergence) {
     rawMacdScore += REVERSAL_CROSS_SCORES.DIVERGENCE;
     reasons.push("MACD divergence detected");
-  } else if (!momentum.macdDirectionAligned) {
+  } else if (!mfs.macdDirectionAligned) {
     rawMacdScore += REVERSAL_CROSS_SCORES.DIRECTION_MISALIGNED;
     reasons.push("MACD direction misaligned");
   } else if (!macdExpanding) {
@@ -1558,19 +1457,19 @@ export const calculateUnifiedReversalScore = (
   }
   
   // 6. VOLUME CONFIRMATION (reduces score if confirming)
-  const volumeConfirms = momentum.volumeConfirms ?? false;
-  const volumeBoost = momentum.volumeBoost ?? 1.0;
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeRatio1h = mfs.volume['1h'].volumeRatio;
   
-  if (volumeConfirms && volumeBoost > 1.3) {
+  if (volumeConfirms && volumeRatio1h > 1.3) {
     breakdown.volumeScore = REVERSAL_CROSS_SCORES.VOLUME_CONFIRMS;
     reasons.push(`Volume confirms - risk reduced`);
-  } else if (!volumeConfirms && volatility.volumeRatio < 0.5) {
+  } else if (!volumeConfirms && volumeRatio1h < 0.5) {
     breakdown.volumeScore = REVERSAL_CROSS_SCORES.LOW_VOLUME;
     reasons.push("Low volume - reduced conviction");
   }
   
   // PHASE 2: Calculate separated risk scores BEFORE final decision
-  const separatedRisk = calculateSeparatedRisk(breakdown, trendData, signalType);
+  const separatedRisk = calculateSeparatedRisk(breakdown, signalType);
   
   // PHASE 4: Apply overall StochRSI contribution cap
   // Sum all StochRSI-related components and cap at MAX_STOCHRSI_PENALTY (20)

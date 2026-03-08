@@ -34,6 +34,19 @@ export interface TimeframeFeatures {
 export interface StochRsiFeatures {
   k: number;
   d: number;
+  signal: string;
+}
+
+export interface BarsAtExtremeFeatures {
+  barsOverbought: number;
+  barsOversold: number;
+}
+
+export interface StochRsiAggregated {
+  bearishCrossCount: number;
+  bullishCrossCount: number;
+  overboughtCount: number;
+  oversoldCount: number;
 }
 
 // ============= BOLLINGER FEATURE SET =============
@@ -85,6 +98,13 @@ export interface MarketFeatureSnapshot {
     "4h": StochRsiFeatures;
   };
   
+  stochRsiAggregated: StochRsiAggregated;
+  
+  barsAtExtreme: {
+    "1h": BarsAtExtremeFeatures;
+    "4h": BarsAtExtremeFeatures;
+  };
+  
   // === Timeframe Trends ===
   timeframes: {
     "15m": TimeframeFeatures;
@@ -129,6 +149,7 @@ export interface MarketFeatureSnapshot {
   macdStrong: boolean;
   macdHistogram: number;
   macdDirectionAligned: boolean;
+  hasDivergence: boolean;
   volumeConfirms: boolean;
   adxRisingMomentum: boolean;
   fakeBreakoutRisk: boolean;
@@ -249,7 +270,9 @@ export interface MarketFeatureSnapshot {
 }
 
 // ============= DEFAULTS =============
-const defaultStochRsi: StochRsiFeatures = { k: 50, d: 50 };
+const defaultStochRsi: StochRsiFeatures = { k: 50, d: 50, signal: "neutral" };
+
+const defaultBarsAtExtreme: BarsAtExtremeFeatures = { barsOverbought: 0, barsOversold: 0 };
 
 const defaultBollinger: BollingerFeatures = {
   upper: 0, middle: 0, lower: 0,
@@ -283,11 +306,38 @@ export function buildMarketFeatureSnapshot(
   const adxSlopeResult = extractADXSlope(trendData);
   
   // === StochRSI (all timeframes) ===
+  const extractStochTF = (tf: '15m' | '30m' | '1h' | '4h'): StochRsiFeatures => ({
+    k: extractStochRsiK(trendData, tf),
+    d: extractStochRsiD(trendData, tf),
+    signal: trendData?.stochasticRsi?.[tf]?.signal ?? "neutral",
+  });
   const stochRsi = {
-    "15m": { k: extractStochRsiK(trendData, '15m'), d: extractStochRsiD(trendData, '15m') },
-    "30m": { k: extractStochRsiK(trendData, '30m'), d: extractStochRsiD(trendData, '30m') },
-    "1h": { k: extractStochRsiK(trendData, '1h'), d: extractStochRsiD(trendData, '1h') },
-    "4h": { k: extractStochRsiK(trendData, '4h'), d: extractStochRsiD(trendData, '4h') },
+    "15m": extractStochTF('15m'),
+    "30m": extractStochTF('30m'),
+    "1h": extractStochTF('1h'),
+    "4h": extractStochTF('4h'),
+  };
+  
+  // === StochRSI Aggregated ===
+  const stochAgg = trendData?.stochasticRsi?.aggregated || {};
+  const stochRsiAggregated: StochRsiAggregated = {
+    bearishCrossCount: stochAgg.bearishCrossCount ?? 0,
+    bullishCrossCount: stochAgg.bullishCrossCount ?? 0,
+    overboughtCount: stochAgg.overboughtCount ?? 0,
+    oversoldCount: stochAgg.oversoldCount ?? 0,
+  };
+  
+  // === Bars at Extreme ===
+  const barsAtExtremeRaw = trendData?.stochasticRsi?.barsAtExtreme || {};
+  const barsAtExtreme = {
+    "1h": {
+      barsOverbought: barsAtExtremeRaw['1h']?.barsOverbought ?? 0,
+      barsOversold: barsAtExtremeRaw['1h']?.barsOversold ?? 0,
+    },
+    "4h": {
+      barsOverbought: barsAtExtremeRaw['4h']?.barsOverbought ?? 0,
+      barsOversold: barsAtExtremeRaw['4h']?.barsOversold ?? 0,
+    },
   };
   
   // === Timeframe features ===
@@ -391,6 +441,8 @@ export function buildMarketFeatureSnapshot(
     
     // StochRSI
     stochRsi,
+    stochRsiAggregated,
+    barsAtExtreme,
     
     // Timeframes
     timeframes: {
@@ -436,6 +488,7 @@ export function buildMarketFeatureSnapshot(
     macdStrong: momentum.macdStrong ?? false,
     macdHistogram: momentum.macdHistogram ?? 0,
     macdDirectionAligned: momentum.macdDirectionAligned ?? false,
+    hasDivergence: momentum.hasDivergence ?? false,
     volumeConfirms: momentum.volumeConfirms ?? false,
     adxRisingMomentum: momentum.adxRising ?? false,
     fakeBreakoutRisk: momentum.fakeBreakoutRisk ?? false,
