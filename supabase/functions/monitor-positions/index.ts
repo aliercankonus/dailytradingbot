@@ -45,11 +45,12 @@ interface TrueAlignmentData {
   isWeak: boolean;     // Weak/neutral alignment
 }
 
-function extractTrueAlignment(trendData: any): TrueAlignmentData | null {
-  const alignment = trendData?.trueAlignment;
-  if (!alignment) return null;
+function extractTrueAlignmentFromMFS(mfs: MarketFeatureSnapshot | undefined): TrueAlignmentData | null {
+  if (!mfs) return null;
+  const alignment = mfs.trueAlignment;
+  if (!alignment || (alignment.score === 0 && alignment.tf4hConfidence === 0)) return null;
   
-  const weighted = alignment.weightedComponents || {};
+  const weighted = alignment.weightedComponents || {} as any;
   const tf4hWeighted = weighted.tf4hWeighted ?? 0;
   const tf1hWeighted = weighted.tf1hWeighted ?? 0;
   const adxContribution = alignment.adxContribution ?? 0;
@@ -69,9 +70,7 @@ function extractTrueAlignment(trendData: any): TrueAlignmentData | null {
       volumeWeighted: weighted.volumeWeighted ?? 0,
     },
     neutralCapped,
-    // Premium: Strong 4H AND 1H alignment with good ADX contribution
     isPremium: tf4hWeighted >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_TF4H_WEIGHTED && tf1hWeighted >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_TF1H_WEIGHTED && adxContribution >= HTF_ALIGNMENT_EXIT.PREMIUM_MIN_ADX_CONTRIBUTION,
-    // Weak: Neutral capped OR very low 4H confidence
     isWeak: neutralCapped || tf4hConfidence < HTF_ALIGNMENT_EXIT.WEAK_MAX_TF4H_CONFIDENCE,
   };
 }
