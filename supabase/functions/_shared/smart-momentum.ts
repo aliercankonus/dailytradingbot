@@ -15,6 +15,16 @@ import { ADX_THRESHOLDS, ADX_EXHAUSTION_PARAMS, MOMENTUM_SCORE_COMPONENTS, DYNAM
 // - 5-phase state machine (strong_bullish, bullish, transition_up, transition_down, strong_bearish)
 export type MomentumPhase = "strong_bullish" | "bullish" | "transition_up" | "neutral" | "transition_down" | "bearish" | "strong_bearish";
 
+export interface MicroExhaustionResult {
+  detected: boolean;
+  score: number;                    // 0-100: exhaustion severity
+  signals: string[];                // Which signals triggered
+  momentumDeceleration: boolean;    // EMA(3) slope reversing
+  volumeDryUp: boolean;             // Volume declining in trend direction
+  rsiDivergence: boolean;           // Price making new extreme but RSI not confirming
+  recommendation: "hold" | "tighten_stop" | "exit_partial" | "exit_full";
+}
+
 export interface MomentumScoreResult {
   score: number;                    // -100 to +100
   direction: "bullish" | "bearish" | "neutral";
@@ -23,6 +33,7 @@ export interface MomentumScoreResult {
   isWeakening: boolean;
   isExhausted: boolean;
   isTransitioning: boolean;        // v2.0: true when EMA spread narrowing toward crossover
+  microExhaustion: MicroExhaustionResult; // v4.0: multi-signal exhaustion detection
   components: {
     emaSpreadRoC: number;          // Rate of change of EMA spread
     rsiMomentum: number;           // RSI directional momentum
@@ -43,6 +54,11 @@ export function calculateMomentumScore(
   currentATR: number,
   adxSlope: number = 0
 ): MomentumScoreResult {
+  const defaultMicroExhaustion: MicroExhaustionResult = {
+    detected: false, score: 0, signals: [],
+    momentumDeceleration: false, volumeDryUp: false, rsiDivergence: false,
+    recommendation: "hold"
+  };
   const defaultResult: MomentumScoreResult = {
     score: 0,
     direction: "neutral",
@@ -51,6 +67,7 @@ export function calculateMomentumScore(
     isWeakening: false,
     isExhausted: false,
     isTransitioning: false,
+    microExhaustion: defaultMicroExhaustion,
     components: { emaSpreadRoC: 0, rsiMomentum: 0, macdSlope: 0, adxTrend: 0, transitionBonus: 0, priceImpulse: 0 },
     overextensionATR: 0,
     reasons: []
@@ -289,6 +306,107 @@ export function calculateMomentumScore(
   if (isExhausted) reasons.push("🛑 Trend EXHAUSTED");
   // Note: isAccelerating reason is pushed inside the EMA(3) block above
 
+  // ============= v4.0: MICRO MOMENTUM EXHAUSTION DETECTOR =============
+  // Detects trend exhaustion via 3 independent signals:
+  // 1. Momentum Deceleration: EMA(3) slope reversing against trend
+  // 2. Volume Dry-Up: Volume declining over last 5 bars while price extends
+  // 3. RSI Divergence: Price making new high/low but RSI failing to confirm
+  // Scoring: Each signal contributes 0-33 points → total 0-100
+  const microExhaustion: MicroExhaustionResult = { ...defaultMicroExhaustion };
+  
+  if (Math.abs(totalScore) >= 10 && macdResult.histogramArray.length >= 6) {
+    const hist = macdResult.histogramArray;
+    const priceNorm = prices[prices.length - 1] || 1;
+    let exhaustionScore = 0;
+    
+    // Signal 1: Momentum Deceleration (0-35 points)
+    // Uses same EMA(3) kernel but checks for momentum peak + declining slope
+    const d1 = ((hist[hist.length - 3] - hist[hist.length - 4]) / priceNorm) * 10000;
+    const d2 = ((hist[hist.length - 2] - hist[hist.length - 3]) / priceNorm) * 10000;
+    const d3 = ((hist[hist.length - 1] - hist[hist.length - 2]) / priceNorm) * 10000;
+    const emaDecelSlope = (d1 * 1 + d2 * 2 + d3 * 4) / 7;
+    
+    // Bullish trend decelerating (slope turning negative) or bearish trend decelerating (slope turning positive)
+    const isMomDecel = (totalScore > 0 && emaDecelSlope < -0.3) || (totalScore < 0 && emaDecelSlope > 0.3);
+    if (isMomDecel) {
+      const decelMagnitude = Math.abs(emaDecelSlope);
+      exhaustionScore += Math.min(35, decelMagnitude * 10);
+      microExhaustion.momentumDeceleration = true;
+      microExhaustion.signals.push(`momentum_decel: slope=${emaDecelSlope.toFixed(2)}`);
+    }
+    
+    // Signal 2: Volume Dry-Up (0-30 points)
+    // Compare average volume of last 3 bars vs previous 5 bars
+    if (klines.length >= 10) {
+      const recentVols = klines.slice(-3).map((k: any) => parseFloat(k[5]) || 0);
+      const priorVols = klines.slice(-8, -3).map((k: any) => parseFloat(k[5]) || 0);
+      const avgRecent = recentVols.reduce((a: number, b: number) => a + b, 0) / recentVols.length;
+      const avgPrior = priorVols.reduce((a: number, b: number) => a + b, 0) / priorVols.length;
+      
+      if (avgPrior > 0) {
+        const volRatio = avgRecent / avgPrior;
+        // Volume declining below 70% of prior average = dry-up signal
+        if (volRatio < 0.70) {
+          const dryUpIntensity = Math.min(30, ((0.70 - volRatio) / 0.40) * 30);
+          exhaustionScore += dryUpIntensity;
+          microExhaustion.volumeDryUp = true;
+          microExhaustion.signals.push(`vol_dryup: ratio=${volRatio.toFixed(2)}`);
+        }
+      }
+    }
+    
+    // Signal 3: RSI Divergence (0-35 points)
+    // Price making new high but RSI making lower high (bearish divergence)
+    // Price making new low but RSI making higher low (bullish divergence)
+    const rsiArr = calculateRSIArray(prices, 14);
+    if (rsiArr.length >= 10 && prices.length >= 10) {
+      const pricesRecent = prices.slice(-5);
+      const pricesPrior = prices.slice(-10, -5);
+      const rsiRecent = rsiArr.slice(-5);
+      const rsiPrior = rsiArr.slice(-10, -5);
+      
+      if (totalScore > 0) {
+        // Bullish trend: check for bearish divergence (price higher high, RSI lower high)
+        const priceNewHigh = Math.max(...pricesRecent) > Math.max(...pricesPrior);
+        const rsiLowerHigh = Math.max(...rsiRecent) < Math.max(...rsiPrior);
+        if (priceNewHigh && rsiLowerHigh) {
+          const rsiDelta = Math.max(...rsiPrior) - Math.max(...rsiRecent);
+          exhaustionScore += Math.min(35, rsiDelta * 2);
+          microExhaustion.rsiDivergence = true;
+          microExhaustion.signals.push(`bearish_div: RSI_Δ=${rsiDelta.toFixed(1)}`);
+        }
+      } else if (totalScore < 0) {
+        // Bearish trend: check for bullish divergence (price lower low, RSI higher low)
+        const priceNewLow = Math.min(...pricesRecent) < Math.min(...pricesPrior);
+        const rsiHigherLow = Math.min(...rsiRecent) > Math.min(...rsiPrior);
+        if (priceNewLow && rsiHigherLow) {
+          const rsiDelta = Math.min(...rsiRecent) - Math.min(...rsiPrior);
+          exhaustionScore += Math.min(35, rsiDelta * 2);
+          microExhaustion.rsiDivergence = true;
+          microExhaustion.signals.push(`bullish_div: RSI_Δ=${rsiDelta.toFixed(1)}`);
+        }
+      }
+    }
+    
+    // Combine signals → recommendation
+    microExhaustion.score = Math.min(100, Math.round(exhaustionScore));
+    const signalCount = [microExhaustion.momentumDeceleration, microExhaustion.volumeDryUp, microExhaustion.rsiDivergence].filter(Boolean).length;
+    
+    if (signalCount >= 3 && exhaustionScore >= 60) {
+      microExhaustion.detected = true;
+      microExhaustion.recommendation = "exit_full";
+      reasons.push(`🔥 MICRO_EXHAUSTION (${microExhaustion.score}): ALL 3 signals — ${microExhaustion.signals.join(', ')}`);
+    } else if (signalCount >= 2 && exhaustionScore >= 40) {
+      microExhaustion.detected = true;
+      microExhaustion.recommendation = "exit_partial";
+      reasons.push(`⚡ MICRO_EXHAUSTION (${microExhaustion.score}): ${signalCount}/3 signals — ${microExhaustion.signals.join(', ')}`);
+    } else if (signalCount >= 1 && exhaustionScore >= 25) {
+      microExhaustion.detected = true;
+      microExhaustion.recommendation = "tighten_stop";
+      reasons.push(`⚠️ MICRO_EXHAUSTION (${microExhaustion.score}): ${signalCount}/3 signals — ${microExhaustion.signals.join(', ')}`);
+    }
+  }
+
   // v2.0: 5-PHASE STATE CLASSIFICATION
   // More granular than 3-way direction — captures transition zones
   let adjustedScore = Math.round(totalScore);
@@ -359,6 +477,7 @@ export function calculateMomentumScore(
     isWeakening,
     isExhausted,
     isTransitioning,
+    microExhaustion,
     components: defaultResult.components,
     overextensionATR: Math.round(overextensionATR * 100) / 100,
     reasons
