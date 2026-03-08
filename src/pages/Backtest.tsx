@@ -340,33 +340,89 @@ const Backtest = () => {
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Gate Rejection Breakdown */}
+              {/* Gate Rejection Breakdown Chart */}
               {sortedGates.length > 0 && (
                 <Card className="border-border bg-card">
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Gate Rejection Dağılımı</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-primary" />
+                      <CardTitle className="text-sm font-medium">Gate Rejection Dağılımı</CardTitle>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Toplam {Object.values(gateStats).reduce((s, v) => s + (v as number), 0)} sinyal bloke edildi
+                    </p>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2">
-                      {sortedGates.map(([gate, count]) => {
-                        const total = Object.values(gateStats).reduce((s, v) => s + (v as number), 0);
-                        const pct = total > 0 ? ((count as number) / total * 100).toFixed(1) : '0';
-                        return (
-                          <div key={gate} className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground font-mono">{gate}</span>
-                            <div className="flex items-center gap-2">
-                              <div className="w-24 h-1.5 bg-secondary rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary rounded-full"
-                                  style={{ width: `${pct}%` }}
+                    {(() => {
+                      const total = Object.values(gateStats).reduce((s, v) => s + (v as number), 0);
+                      const chartData = sortedGates.map(([gate, count]) => ({
+                        gate: gate.replace(/_/g, ' ').replace(/\b\w/g, l => l),
+                        gateKey: gate,
+                        count: count as number,
+                        pct: total > 0 ? Math.round((count as number) / total * 1000) / 10 : 0,
+                      }));
+                      const COLORS = [
+                        'hsl(var(--primary))',
+                        'hsl(var(--destructive))',
+                        'hsl(210 80% 55%)',
+                        'hsl(45 90% 55%)',
+                        'hsl(160 60% 45%)',
+                        'hsl(280 60% 55%)',
+                        'hsl(30 80% 55%)',
+                        'hsl(350 70% 50%)',
+                        'hsl(190 70% 45%)',
+                        'hsl(120 50% 45%)',
+                        'hsl(260 50% 55%)',
+                        'hsl(15 70% 50%)',
+                      ];
+                      return (
+                        <div>
+                          <div style={{ height: Math.max(200, chartData.length * 32) }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 40, top: 5, bottom: 5 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                                <XAxis type="number" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} stroke="hsl(var(--border))" />
+                                <YAxis
+                                  type="category"
+                                  dataKey="gate"
+                                  width={160}
+                                  tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }}
+                                  stroke="hsl(var(--border))"
                                 />
-                              </div>
-                              <span className="text-foreground w-12 text-right">{count as number} ({pct}%)</span>
-                            </div>
+                                <Tooltip
+                                  contentStyle={{
+                                    backgroundColor: 'hsl(var(--card))',
+                                    border: '1px solid hsl(var(--border))',
+                                    borderRadius: '8px',
+                                    fontSize: '11px',
+                                  }}
+                                  formatter={(value: number, _name: string, props: any) => [
+                                    `${value} blok (${props.payload.pct}%)`,
+                                    'Rejection'
+                                  ]}
+                                  labelFormatter={(label) => label}
+                                />
+                                <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                                  {chartData.map((_entry, index) => (
+                                    <Cell key={index} fill={COLORS[index % COLORS.length]} />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
                           </div>
-                        );
-                      })}
-                    </div>
+                          <Separator className="my-3" />
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                            {chartData.slice(0, 6).map((item, i) => (
+                              <div key={item.gateKey} className="flex items-center gap-1.5 text-[10px]">
+                                <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                                <span className="text-muted-foreground truncate">{item.gateKey}</span>
+                                <span className="text-foreground ml-auto font-medium">{item.pct}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               )}
