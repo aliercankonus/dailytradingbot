@@ -3192,6 +3192,55 @@ serve(async (req) => {
           signals: _exh.signals,
         });
 
+        // ============= LIQUIDITY TRAP DETECTION (LTF) =============
+        // Uses 5m/1m klines to detect fake breakouts, stop hunts, bull/bear traps
+        const ltfDataForTrap = ltfDataMap.get(symbol);
+        const trapKlines = ltfDataForTrap?.klines5m ?? mfs.klines15m;
+        const trapPrices = ltfDataForTrap?.prices5m ?? parseKlinePrices(mfs.klines15m);
+        const trapAtr = ltfDataForTrap ? calculateATR(ltfDataForTrap.klines5m, 14) : mfs.atr;
+        
+        // Direction is determined from smart momentum (early direction context)
+        const trapDirection = earlySmartMomentum.direction === "bullish" ? "long" as const
+          : earlySmartMomentum.direction === "bearish" ? "short" as const : "neutral" as const;
+        
+        const liquidityTrap = detectLiquidityTrap(trapKlines, trapPrices, trapDirection, trapAtr);
+        
+        // Store in MFS for downstream use
+        (mfs as any).liquidityTrap = {
+          detected: liquidityTrap.detected,
+          score: liquidityTrap.score,
+          trapType: liquidityTrap.trapType,
+          signals: liquidityTrap.signals,
+          wickRejection: liquidityTrap.wickRejection,
+          volumeSpikeReversal: liquidityTrap.volumeSpikeReversal,
+          priceRejection: liquidityTrap.priceRejection,
+          sweepDetected: liquidityTrap.sweepDetected,
+          recommendation: liquidityTrap.recommendation,
+          positionMultiplier: liquidityTrap.positionMultiplier,
+          trapDirection: liquidityTrap.trapDirection,
+        };
+        
+        // Collect for batch snapshot update
+        symbolLiquidityTrapMap.set(symbol, {
+          score: liquidityTrap.score,
+          detected: liquidityTrap.detected,
+          trapType: liquidityTrap.trapType,
+          recommendation: liquidityTrap.recommendation,
+          positionMultiplier: liquidityTrap.positionMultiplier,
+          signals: liquidityTrap.signals,
+          wickRejection: liquidityTrap.wickRejection,
+          volumeSpikeReversal: liquidityTrap.volumeSpikeReversal,
+          priceRejection: liquidityTrap.priceRejection,
+          sweepDetected: liquidityTrap.sweepDetected,
+          trapDirection: liquidityTrap.trapDirection,
+        });
+        
+        if (liquidityTrap.detected) {
+          logger.forSymbol(symbol).warn(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score}, type=${liquidityTrap.trapType}, signals=[${liquidityTrap.signals.join(', ')}], mult=×${liquidityTrap.positionMultiplier}`);
+        } else {
+          logger.forSymbol(symbol).debug(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
+        }
+
         // ============= LTF MICRO-MOMENTUM (5m/1m) =============
         // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
         const ltfData = ltfDataMap.get(symbol);
