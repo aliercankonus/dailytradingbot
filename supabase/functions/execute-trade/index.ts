@@ -536,18 +536,20 @@ serve(async (req) => {
       logger.warn(`Failed to get current trend, using signal trend: ${trendError.message}`);
     }
 
-    const currentTrend = trendData?.primaryTrend || signal.trend;
-    const trendConsistency = trendData?.trueAlignment?.score || 0;
-    // Fix: atrPercent is under volatility object in calculate-trend response
-    const atrPercent = trendData?.volatility?.atrPercent || trendData?.ranging?.atrPercent || 1.5;
+    // MFS MIGRATED: Build MarketFeatureSnapshot ONCE — all gates read from this snapshot
+    const mfs = buildMarketFeatureSnapshot(signal.symbol, trendData || {});
+
+    const currentTrend = mfs.primaryTrend || signal.trend;
+    const trendConsistency = mfs.trueAlignment?.score ?? 0;
+    const atrPercent = mfs.atrPercent || 1.5;
     
     // ============================================================
     // ENHANCED TRUE ALIGNMENT FIELDS (v2.0)
     // Extract weighted components for smarter position sizing and validation
     // ============================================================
-    const trueAlignment = trendData?.trueAlignment || {};
-    const tf4hConfidence = trueAlignment.tf4hConfidence ?? 0;
-    const tf1hConfidence = trueAlignment.tf1hConfidence ?? 0;
+    const trueAlignment = mfs.trueAlignment || {};
+    const tf4hConfidence = trueAlignment.tf4hConfidence ?? mfs.timeframes['4h'].confidence ?? 0;
+    const tf1hConfidence = trueAlignment.tf1hConfidence ?? mfs.timeframes['1h'].confidence ?? 0;
     const adxContribution = trueAlignment.adxContribution ?? 0;
     const totalWeightedConfidence = trueAlignment.totalWeightedConfidence ?? 0;
     const weightedComponents = trueAlignment.weightedComponents || {};
@@ -559,10 +561,9 @@ serve(async (req) => {
       logger.info(`   → Weighted: 4h=${weightedComponents.tf4hWeighted?.toFixed(1) ?? 0}, 1h=${weightedComponents.tf1hWeighted?.toFixed(1) ?? 0}, vol=${weightedComponents.volumeWeighted?.toFixed(1) ?? 0}, adx=${weightedComponents.adxWeighted?.toFixed(1) ?? 0}`);
     }
     
-    // Extract Bollinger Bands data from trend analysis
-    const bollingerData = trendData?.bollingerBands || {};
-    const bb1h = bollingerData['1h'] || {};
-    const bb4h = bollingerData['4h'] || {};
+    // MFS MIGRATED: Bollinger data from MFS
+    const bb1h = mfs.bollinger['1h'];
+    const bb4h = mfs.bollinger['4h'];
     
     logger.info(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
     logger.info(`📊 Bollinger Bands: 1h squeeze=${bb1h.squeeze}, %B=${bb1h.percentB?.toFixed(1)}% | 4h squeeze=${bb4h.squeeze}, %B=${bb4h.percentB?.toFixed(1)}%`);
@@ -575,8 +576,7 @@ serve(async (req) => {
     // This preserves discipline while avoiding over-filtering valid setups
     // ============================================================
     const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
-    const trendConfidence = trendData?.timeframes?.['4h']?.confidence || 
-                            trendData?.higherTimeframeFilter?.confidence4h || 50;
+    const trendConfidence = mfs.timeframes['4h'].confidence || 50;
     
     // Track if this is a counter-trend entry for position sizing
     let isCounterTrendEntry = false;
@@ -614,11 +614,10 @@ serve(async (req) => {
 
     // FILTER 2: Require trend consistency (dynamic threshold based on ADX and 1h confidence)
     // CENTRALIZED: Use shared extractor for consistent ADX access
-    const adxValueForConsistency = extractADX(trendData);
+    const adxValueForConsistency = mfs.adx;
     
     // Extract 1h confidence for dynamic threshold
-    const confidence1hForConsistency = trendData?.timeframes?.['1h']?.confidence || 
-                                       trendData?.higherTimeframeFilter?.confidence1h || 0;
+    const confidence1hForConsistency = mfs.timeframes['1h'].confidence || 0;
     
     // Check if this is a neutral trend scenario (for lower threshold)
     // Aligned with quality threshold logic: neutral applies when strategy contains "neutral" OR trend is neutral/ranging
@@ -666,7 +665,7 @@ serve(async (req) => {
 
     // FILTER 5: ADX HARD GATE - Require minimum trend strength (uses centralized ADX_THRESHOLDS)
     // CENTRALIZED: Use shared extractor for consistent ADX access
-    const adxValue = extractADX(trendData);
+    const adxValue = mfs.adx;
     
     if (adxValue < ADX_THRESHOLDS.MINIMUM) {
       logger.gate(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`, false);
@@ -681,7 +680,7 @@ serve(async (req) => {
     // Blocks entries at extreme oscillator exhaustion to prevent late entries
     // ============================================================
     if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
-      const stochRsiK4h = extractStochRsiK(trendData, '4h', 50);
+      const stochRsiK4h = mfs.stochRsi['4h'].k ?? 50;
       const signalDirection = signal.signal_type;
       
       // Block LONG at extreme high (K >= 95) - overbought exhaustion
@@ -720,8 +719,7 @@ serve(async (req) => {
     let dynamicQualityThreshold: number = QUALITY_THRESHOLDS.BASE_MIN; // Base threshold from shared constants
     
     // Extract 1h confidence for strong alignment exception
-    const confidence1h = trendData?.timeframes?.['1h']?.confidence || 
-                         trendData?.higherTimeframeFilter?.confidence1h || 0;
+    const confidence1h = mfs.timeframes['1h'].confidence || 0;
     
     // Check if this is a neutral trend scenario (for lower threshold)
     // Neutral applies when: strategy name contains "neutral" OR current trend is neutral/ranging
@@ -791,8 +789,8 @@ serve(async (req) => {
     // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
     // Volume score from calculate-trend provides additional confirmation
     // ============================================================
-    const volumeScore = trendData?.volumeScore ?? 0;
-    const volumeConfirms = trendData?.momentum?.volumeConfirms ?? false;
+    const volumeScore = trendData?.volumeScore ?? 0; // Top-level field, not in MFS
+    const volumeConfirms = mfs.momentum?.volumeConfirms ?? false;
     
     // Warn on low volume but don't block unless extremely low
     if (volumeScore === 0 && !volumeConfirms) {
@@ -811,9 +809,9 @@ serve(async (req) => {
     // PHASE 5: MOMENTUM STATE & FAKE BREAKOUT RISK CHECK
     // Adjust position size based on momentum quality from calculate-trend
     // ============================================================
-    const momentumState = trendData?.momentum?.state || 'none';
-    const fakeBreakoutRisk = trendData?.momentum?.fakeBreakoutRisk === true;
-    const genuineMomentum = trendData?.momentum?.genuineMomentum === true;
+    const momentumState = mfs.momentumState || 'none';
+    const fakeBreakoutRisk = mfs.momentum?.fakeBreakoutRisk === true;
+    const genuineMomentum = mfs.momentum?.genuineMomentum === true;
     
     // Start with 1.0 multiplier for momentum adjustments
     let momentumPositionMultiplier = 1.0;
@@ -977,17 +975,16 @@ serve(async (req) => {
 
         // FILTER 7: Avoid extremely low volume periods (< 20% of average)
         // RELAXATION: Allow 10% of average if ADX is rising AND 30m+1h agree (trend forming)
-        const adx = trendData?.volatility?.adx || 0;
-        const adxRising = trendData?.momentum?.adxRising === true || 
-          (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
-        const trend30m = trendData?.timeframes?.['30m']?.trend || "neutral";
-        const trend1h = trendData?.timeframes?.['1h']?.trend || "neutral";
-        const conf30m = trendData?.timeframes?.['30m']?.confidence || 0;
-        const conf1h = trendData?.timeframes?.['1h']?.confidence || 0;
+        const adx = mfs.adx;
+        const adxRising = mfs.adxSlope.isRising;
+        const trend30m = mfs.timeframes['30m'].trend || "neutral";
+        const trend1h = mfs.timeframes['1h'].trend || "neutral";
+        const conf30m = mfs.timeframes['30m'].confidence || 0;
+        const conf1h = mfs.timeframes['1h'].confidence || 0;
         
         // Check for trend formation conditions
         // FIX: Require 4h trend alignment for volume relaxation to prevent counter-trend entries
-        const trend4h = trendData?.timeframes?.['4h']?.trend || "neutral";
+        const trend4h = mfs.timeframes['4h'].trend || "neutral";
         const signalDirection = signal.signal_type === 'long' ? 'bullish' : 'bearish';
         
         // FIX: Volume relaxation only applies when 4h trend matches signal direction (or is neutral)
@@ -1158,13 +1155,12 @@ serve(async (req) => {
               logger.info(`✅ VWAP supports LONG: Price slightly below VWAP - good entry`);
             }
           } else if (currentPrice > vwapUpperBand) {
-            const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+            const adxValue = mfs.adx;
             const ADX_EXCEPTION_THRESHOLD = VWAP_FILTER.ADX_EXCEPTION_THRESHOLD;
             
             // Smart guards: ADX rising OR momentum direction agrees with trade
-            const adxRising = trendData?.momentum?.adxRising === true || 
-              (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
-            const macdHistogram = trendData?.momentum?.macdHistogram || 0;
+            const adxRising = mfs.adxSlope.isRising;
+            const macdHistogram = mfs.momentum?.macdHistogram ?? 0;
             const momentumDirectionAgrees = macdHistogram > 0; // LONG needs positive MACD histogram
             
             // Valid exception: ADX >= 25 AND (ADX rising OR momentum agrees)
@@ -1230,11 +1226,10 @@ serve(async (req) => {
               logger.info(`✅ VWAP supports SHORT: Price slightly above VWAP - good entry`);
             }
           } else if (currentPrice < vwapLowerBand) {
-            const adxValue = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+            const adxValue = mfs.adx;
             const ADX_EXCEPTION_THRESHOLD = VWAP_FILTER.ADX_EXCEPTION_THRESHOLD;
-            const adxRising = trendData?.momentum?.adxRising === true || 
-              (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
-            const macdHistogram = trendData?.momentum?.macdHistogram || 0;
+            const adxRising = mfs.adxSlope.isRising;
+            const macdHistogram = mfs.momentum?.macdHistogram ?? 0;
             const momentumDirectionAgrees = macdHistogram < 0;
             const hasValidException = adxValue >= ADX_EXCEPTION_THRESHOLD && (adxRising || momentumDirectionAgrees);
             const hasWeakException = adxValue >= ADX_EXCEPTION_THRESHOLD && !adxRising && !momentumDirectionAgrees;
@@ -1321,7 +1316,7 @@ serve(async (req) => {
     // REDUCE (40-60): Proceed with 50% position size
     // NORMAL (<40): Full position size
     // ============================================================
-    const executionMfs = buildMarketFeatureSnapshot(signal.symbol, trendData);
+    const executionMfs = mfs; // MFS already built above — reuse
     const unifiedReversalResult = calculateUnifiedReversalScore(executionMfs, signal.signal_type);
     logger.info(`🔄 Unified Reversal: ${unifiedReversalResult.score}/100 (ADX weight: ${unifiedReversalResult.adxWeight}) → ${unifiedReversalResult.decision}`);
     if (unifiedReversalResult.reasons.length > 0) {
@@ -1359,7 +1354,7 @@ serve(async (req) => {
     const capitulationProbe = signal.indicators?.capitulationBounceProbe;
     
     // Calculate ATR percent for stop/TP calculations
-    const atrPercentForProbes = trendData?.volatility?.atrPercent ?? 1.5;
+    const atrPercentForProbes = mfs.atrPercent || 1.5;
     
     if (flashCrashProbe?.active) {
       // FLASH CRASH BOUNCE: Ultra-tight stop, wider TP
@@ -1568,16 +1563,16 @@ serve(async (req) => {
               trend: currentTrend,
               confidence: signal.confidence_score || 0,
               trendConsistency: trendConsistency,
-              adx: trendData?.volatility?.adx || 0,
-              rsi: trendData?.timeframes?.['1h']?.indicators?.rsi || 50,
-              macdHistogram: trendData?.timeframes?.['1h']?.indicators?.macdHistogram || 0,
-              stochRSI: trendData?.stochasticRsi?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
+              adx: mfs.adx,
+              rsi: mfs.timeframes['1h'].indicators?.rsi ?? 50,
+              macdHistogram: mfs.timeframes['1h'].indicators?.macdHistogram ?? 0,
+              stochRSI: { k: mfs.stochRsi['1h'].k, d: mfs.stochRsi['1h'].d, signal: mfs.stochRsi['1h'].signal },
               bollingerBands: {
                 percentB: bb1h.percentB || 50,
                 squeeze: bb1h.squeeze || false
               },
-              momentum: trendData?.momentum || { confirms: false, divergence: false },
-              volumeConfirms: trendData?.volumeConfirms || false
+              momentum: mfs.momentum || { confirms: false, divergence: false },
+              volumeConfirms: mfs.momentum?.volumeConfirms || false
             },
             strategyName: signal.strategy_name || 'Unknown',
             entryPrice: currentPrice,
@@ -1672,8 +1667,8 @@ serve(async (req) => {
       let strategyPositionNote = "";
       
       if (isMomentum) {
-        const adxValue = trendData?.volatility?.adx || 0;
-        const momentumConfirms = trendData?.momentum?.confirms === true;
+        const adxValue = mfs.adx;
+        const momentumConfirms = mfs.momentum?.confirms === true;
         
         if (adxValue >= ADX_THRESHOLDS.STRONG && momentumConfirms) {
           strategyPositionMultiplier = 1.25;
@@ -1688,8 +1683,8 @@ serve(async (req) => {
           strategyPositionNote = `Momentum strategy: standard size`;
         }
       } else if (isMeanReversion) {
-        const stochRsi1h = trendData?.stochasticRsi?.['1h'] || {};
-        const k1h = stochRsi1h.k ?? 50;
+        const stochRsi1hMR = mfs.stochRsi['1h'];
+        const k1h = stochRsi1hMR.k ?? 50;
         const isExtremeOversold = k1h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;
         const isExtremeOverbought = k1h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT;
         const signalType = signal.signal_type;
@@ -1702,7 +1697,7 @@ serve(async (req) => {
           strategyPositionNote = `Mean reversion (counter-trend) = -25% size for safety`;
         }
       } else if (strategyType === 'TREND_FOLLOWING') {
-        const adxValue = trendData?.volatility?.adx || 0;
+        const adxValue = mfs.adx;
         
         if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) {
           strategyPositionMultiplier = 1.2;
@@ -2217,7 +2212,7 @@ serve(async (req) => {
     // ATR at entry provides stable baseline for volatility-adjusted exits
     // ============================================================
     // ATR is extracted from trendData volatility object
-    const entryAtrPercent = trendData?.volatility?.atrPercent ?? atrPercent ?? 1.5;
+    const entryAtrPercent = mfs.atrPercent || atrPercent || 1.5;
     const entryAtr = (entryAtrPercent / 100) * executedPrice;  // Convert percent to absolute ATR
     logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
 
@@ -2232,17 +2227,17 @@ serve(async (req) => {
       quality_score: signal.indicators?.qualityScore,
       confidence_score: signal.confidence_score,
       // Trend data at entry
-      adx: trendData?.volatility?.adx ?? null,
-      adx_slope: trendData?.volatility?.adxSlope ?? null,
-      stoch_rsi_4h_k: trendData?.stochasticRsi?.['4h']?.k ?? null,
-      stoch_rsi_4h_d: trendData?.stochasticRsi?.['4h']?.d ?? null,
-      regime: trendData?.marketRegime ?? null,
-      primary_trend: trendData?.primaryTrend ?? null,
+      adx: mfs.adx ?? null,
+      adx_slope: mfs.adxSlope.slope ?? null,
+      stoch_rsi_4h_k: mfs.stochRsi['4h'].k ?? null,
+      stoch_rsi_4h_d: mfs.stochRsi['4h'].d ?? null,
+      regime: mfs.regime ?? null,
+      primary_trend: mfs.primaryTrend ?? null,
       // Move exhaustion context
-      move_from_24h_low_percent: trendData?.priceDistanceFromSwing?.distanceFromLowPercent ?? null,
-      move_from_24h_high_percent: trendData?.priceDistanceFromSwing?.distanceFromHighPercent ?? null,
-      price_24h_low: trendData?.priceDistanceFromSwing?.low24h ?? null,
-      price_24h_high: trendData?.priceDistanceFromSwing?.high24h ?? null,
+      move_from_24h_low_percent: mfs.priceDistance?.distanceFromLowPercent ?? null,
+      move_from_24h_high_percent: mfs.priceDistance?.distanceFromHighPercent ?? null,
+      price_24h_low: mfs.priceDistance?.low24h ?? null,
+      price_24h_high: mfs.priceDistance?.high24h ?? null,
       // Entry context
       entry_exception_type: entryExceptionType,
       reversal_decision: reversalDecision,
@@ -2271,20 +2266,20 @@ serve(async (req) => {
         priceActionMultiplier: signal.indicators?.priceActionEarlyEntry?.positionSizeMultiplier ?? null,
       },
       // Timeframe alignment
-      tf_4h_trend: trendData?.timeframes?.['4h']?.trend ?? null,
-      tf_1h_trend: trendData?.timeframes?.['1h']?.trend ?? null,
-      tf_30m_trend: trendData?.timeframes?.['30m']?.trend ?? null,
-      tf_15m_trend: trendData?.timeframes?.['15m']?.trend ?? null,
+      tf_4h_trend: mfs.timeframes['4h'].trend ?? null,
+      tf_1h_trend: mfs.timeframes['1h'].trend ?? null,
+      tf_30m_trend: mfs.timeframes['30m'].trend ?? null,
+      tf_15m_trend: mfs.timeframes['15m'].trend ?? null,
       // MOMENTUM FORENSICS: Complete momentum state for post-trade analysis
       smart_momentum_score: signal.indicators?.smartMomentum?.score ?? null,
       smart_momentum_direction: signal.indicators?.smartMomentum?.direction ?? null,
       smart_momentum_accelerating: signal.indicators?.smartMomentum?.isAccelerating ?? null,
       smart_momentum_weakening: signal.indicators?.smartMomentum?.isWeakening ?? null,
       smart_momentum_exhausted: signal.indicators?.smartMomentum?.isExhausted ?? null,
-      momentum_macd_slope: signal.indicators?.smartMomentum?.components?.macdSlope ?? trendData?.momentum?.macdSlope ?? null,
+      momentum_macd_slope: signal.indicators?.smartMomentum?.components?.macdSlope ?? mfs.momentum?.macdSlope ?? null,
       momentum_overextension_atr: signal.indicators?.smartMomentum?.overextensionATR ?? null,
-      momentum_state: signal.indicators?.momentumState ?? trendData?.momentum?.state ?? null,
-      momentum_confirms: signal.indicators?.momentumConfirms ?? trendData?.momentum?.confirms ?? null,
+      momentum_state: signal.indicators?.momentumState ?? mfs.momentumState ?? null,
+      momentum_confirms: signal.indicators?.momentumConfirms ?? mfs.momentum?.confirms ?? null,
       // ENTRY DISTRIBUTION FORENSICS (Point 6: track for post-trade analysis)
       weighted_score: signal.indicators?.directionContext?.weightedScore ?? signal.indicators?.weightedScore ?? null,
       derived_direction: signal.indicators?.derivedDirection ?? null,
