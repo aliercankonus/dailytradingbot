@@ -3177,7 +3177,7 @@ serve(async (req) => {
         
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
         const _mc = earlySmartMomentum.components;
-        logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning} microExh=${earlySmartMomentum.microExhaustion.detected}(${earlySmartMomentum.microExhaustion.score}/${earlySmartMomentum.microExhaustion.recommendation}) liqTrap=pending`);
+        // NOTE: MOMENTUM_COMPONENTS log deferred until after liquidity trap detection (line ~3242)
 
         // Collect micro exhaustion data for dashboard snapshot
         const _exh = earlySmartMomentum.microExhaustion;
@@ -3240,6 +3240,9 @@ serve(async (req) => {
         } else {
           logger.forSymbol(symbol).info(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
         }
+        
+        // MOMENTUM_COMPONENTS with real trap score (deferred from momentum calc)
+        logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning} microExh=${earlySmartMomentum.microExhaustion.detected}(${earlySmartMomentum.microExhaustion.score}/${earlySmartMomentum.microExhaustion.recommendation}) trap=${liquidityTrap.score}(${liquidityTrap.trapType})`);
 
         // ============= LTF MICRO-MOMENTUM (5m/1m) =============
         // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
