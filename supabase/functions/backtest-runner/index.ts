@@ -663,10 +663,10 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
-  // 10. NEW: Momentum reversal exit — cut losses when trend flips
+  // 10. Momentum reversal exit — cut losses when trend flips (relaxed threshold: -35 to reduce premature exits)
   if (hoursHeld > 2) {
-    if ((side === 'LONG' && momentumScore < -25 && primaryTrend === 'bearish') ||
-        (side === 'SHORT' && momentumScore > 25 && primaryTrend === 'bullish')) {
+    if ((side === 'LONG' && momentumScore < -35 && primaryTrend === 'bearish') ||
+        (side === 'SHORT' && momentumScore > 35 && primaryTrend === 'bullish')) {
       if (pnlPercent < -0.5) {
         return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
       }
