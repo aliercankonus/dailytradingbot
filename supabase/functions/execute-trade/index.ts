@@ -671,7 +671,7 @@ serve(async (req) => {
 
     // FILTER 4: Avoid high volatility (ATR > extreme threshold) - uses centralized EMERGENCY_EXIT_PARAMS
     if (atrPercent > EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'High Volatility', signal, trendData, { atrPercent, maxAllowed: EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'High Volatility', signal, mfs, { atrPercent, maxAllowed: EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD });
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
