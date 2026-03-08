@@ -947,26 +947,19 @@ export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipReg
   } else if (overboughtSignal.detected) {
     selectedSignal = overboughtSignal;
   } else {
-    // Neither detected - NEAR-MISS DIAGNOSTICS
-    const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                   trendData?.stochasticRsi?.['4h']?.k ?? 
-                   trendData?.stochasticRsi?.aggregated?.k ?? 50;
-    const percentB = trendData?.bollingerBands?.['4h']?.percentB ?? 50;
-    const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-    const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
-    const momentumScore = trendData?.momentum?.score ?? 0;
-    const momentumDir = trendData?.momentum?.direction ?? 'neutral';
-    const symbol = trendData?.symbol ?? 'unknown';
+    // Neither detected - NEAR-MISS DIAGNOSTICS (all from MFS)
+    const stochK = mfs.stochRsi['4h'].k;
+    const percentB = mfs.bollinger['4h'].percentB;
     const distToExtremeOversold = Math.abs(stochK - 10);
     const distToExtremeOverbought = Math.abs(stochK - 90);
     const nearestExtremeK = Math.min(distToExtremeOversold, distToExtremeOverbought);
     // Only log if reasonably close to any threshold (K within 25 of extreme)
     if (nearestExtremeK <= 25) {
       console.log(
-        `[EXHAUSTION_NEAR_MISS] ${symbol} NOT_DETECTED | ` +
+        `[EXHAUSTION_NEAR_MISS] ${mfs.symbol} NOT_DETECTED | ` +
         `K=${stochK.toFixed(1)} (dist_to_extreme=${nearestExtremeK.toFixed(1)}, need ≤10 or ≥90) | ` +
-        `%B=${percentB.toFixed(1)} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | ` +
-        `momentum=${momentumScore.toFixed(0)} dir=${momentumDir} | ` +
+        `%B=${percentB.toFixed(1)} | ADX=${mfs.adx.toFixed(1)} slope=${mfs.adxSlope.toFixed(2)} | ` +
+        `momentum=${mfs.momentumScore.toFixed(0)} dir=${mfs.momentumDirection} | ` +
         `phase=${trendPhase}/${expansionState} | ` +
         `oversold: score=${oversoldSignal.exhaustionScore} detected=${oversoldSignal.detected} tier=${oversoldSignal.exhaustionTier} | ` +
         `overbought: score=${overboughtSignal.exhaustionScore} detected=${overboughtSignal.detected} tier=${overboughtSignal.exhaustionTier} | ` +
