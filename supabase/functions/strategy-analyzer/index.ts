@@ -6360,9 +6360,9 @@ serve(async (req) => {
         if (TREND_REVERSAL_DETECTION_GATE.ENABLED) {
           // PHASE 3 MIGRATION: Read from snapshot
           const stochK = mfs.stochRsi["4h"].k;
-          const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK;
+          const stochKPrev = trendData.stochasticRsi?.['4h']?.prevK ?? stochK; // prevK NOT in MFS
           const macdHist = mfs.macdHistogram;
-          const macdHistPrev = trendData.momentum?.macdHistogramPrevious ?? macdHist;
+          const macdHistPrev = momentum.prevMacdHistogram ?? macdHist;
           const priceChange4h = mfs.priceChange4h;
           
           // Detect BULLISH reversal (blocks SHORT)
