@@ -3168,7 +3168,84 @@ serve(async (req) => {
         const _mc = earlySmartMomentum.components;
         logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning}`);
 
-        // ============= STORE MOMENTUM ANALYSIS EARLY =============
+        // ============= LTF MICRO-MOMENTUM (5m/1m) =============
+        // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
+        const ltfData = ltfDataMap.get(symbol);
+        if (ltfData && ltfData.prices5m.length >= 30) {
+          const atr5m = calculateATR(ltfData.klines5m, 14);
+          const adx5m = calculateADXWithDirection(ltfData.klines5m, 14);
+          const mom5m = calculateMomentumScore(
+            ltfData.klines5m, ltfData.prices5m, 
+            adx5m.adx, adx5m.adxSlope > 0, atr5m, adx5m.adxSlope
+          );
+          
+          // 1m momentum (lighter — fewer candles, used for micro-trend direction only)
+          let mom1m = { score: 0, direction: "neutral" as string, phase: "neutral" as string };
+          let recentCandlePattern = "none";
+          if (ltfData.prices1m.length >= 20) {
+            const atr1m = calculateATR(ltfData.klines1m, 14);
+            const adx1m = calculateADXWithDirection(ltfData.klines1m, 14);
+            const fullMom1m = calculateMomentumScore(
+              ltfData.klines1m, ltfData.prices1m,
+              adx1m.adx, adx1m.adxSlope > 0, atr1m, adx1m.adxSlope
+            );
+            mom1m = { score: fullMom1m.score, direction: fullMom1m.direction, phase: fullMom1m.phase };
+            
+            // Detect recent 1m candle pattern (last 5 candles)
+            const last5 = ltfData.prices1m.slice(-5);
+            const higherCloses = last5.filter((p, i) => i > 0 && p > last5[i - 1]).length;
+            const lowerCloses = last5.filter((p, i) => i > 0 && p < last5[i - 1]).length;
+            if (higherCloses >= 4) recentCandlePattern = "strong_bullish_run";
+            else if (lowerCloses >= 4) recentCandlePattern = "strong_bearish_run";
+            else if (higherCloses >= 3) recentCandlePattern = "bullish_bias";
+            else if (lowerCloses >= 3) recentCandlePattern = "bearish_bias";
+            else recentCandlePattern = "mixed";
+          }
+          
+          // Calculate LTF alignment: do 1m and 5m agree?
+          const dir5mSign = mom5m.direction === "bullish" ? 1 : mom5m.direction === "bearish" ? -1 : 0;
+          const dir1mSign = mom1m.direction === "bullish" ? 1 : mom1m.direction === "bearish" ? -1 : 0;
+          const ltfAlignment = (dir5mSign + dir1mSign) / 2; // -1 to +1
+          
+          // Does LTF agree with the HTF primary trend?
+          const htfDir = mfs.primaryTrend === "bullish" ? 1 : mfs.primaryTrend === "bearish" ? -1 : 0;
+          const microTrendConfirms = htfDir !== 0 && Math.sign(ltfAlignment) === Math.sign(htfDir);
+          
+          // Entry timing score: higher when 5m is accelerating toward HTF direction
+          let entryTimingScore = 50; // baseline
+          if (mom5m.isAccelerating && microTrendConfirms) entryTimingScore = 85;
+          else if (microTrendConfirms && Math.abs(mom5m.score) > 30) entryTimingScore = 75;
+          else if (microTrendConfirms) entryTimingScore = 65;
+          else if (!microTrendConfirms && Math.abs(mom5m.score) > 40) entryTimingScore = 25; // opposing
+          
+          // Is 1m reverting vs 5m? (short-term mean reversion signal)
+          const isReverting1m = dir1mSign !== 0 && dir5mSign !== 0 && dir1mSign !== dir5mSign;
+          
+          const ltfMicro = {
+            score5m: mom5m.score,
+            direction5m: mom5m.direction,
+            phase5m: mom5m.phase,
+            score1m: mom1m.score,
+            direction1m: mom1m.direction,
+            isAccelerating5m: mom5m.isAccelerating,
+            isReverting1m,
+            ltfAlignment,
+            entryTimingScore,
+            microTrendConfirms,
+            recentCandlePattern,
+          };
+          
+          (mfs as any).ltfMicroMomentum = ltfMicro;
+          (mfs as any).klines5m = ltfData.klines5m;
+          (mfs as any).klines1m = ltfData.klines1m;
+          
+          logger.forSymbol(symbol).info(
+            `🔬 LTF_MICRO: 5m=${mom5m.score.toFixed(0)}(${mom5m.direction}/${mom5m.phase}) 1m=${mom1m.score.toFixed(0)}(${mom1m.direction}) align=${ltfAlignment.toFixed(2)} timing=${entryTimingScore} confirms=${microTrendConfirms} pattern=${recentCandlePattern}${isReverting1m ? ' ⚠️REVERTING' : ''}`
+          );
+        } else {
+          logger.forSymbol(symbol).debug(`🔬 LTF_MICRO: Insufficient 5m data (${ltfData?.prices5m.length ?? 0} candles)`);
+        }
+
         // Moved BEFORE gate checks so ALL symbols get momentum data recorded,
         // not just those that pass all gates. Uses early momentum calculation.
         // Pullback data will be updated later if symbol passes gates.
