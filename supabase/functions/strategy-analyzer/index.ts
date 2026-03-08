@@ -9088,7 +9088,7 @@ serve(async (req) => {
         let nearExtremeRelaxationTrigger: string | null = null;
         
         if (NEAR_EXTREME_PROTECTION_GATE.ENABLED) {
-          const priceDistance = trendData.priceDistanceFromSwing;
+          const priceDistance = priceDistanceFromSwing;
           
           if (priceDistance) {
             const distanceFromLow = priceDistance.distanceFromLowPercent ?? 0;
