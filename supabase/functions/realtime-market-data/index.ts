@@ -332,6 +332,7 @@ serve(async (req) => {
     console.log('[MarketData-Edge] Client WebSocket opened');
     activeConnections++;
     connectToBinance();
+    connectKlineStream(); // Start kline WS → DB cache
     
     // Start heartbeat to keep connection alive
     heartbeatInterval = setInterval(() => {
@@ -339,6 +340,9 @@ serve(async (req) => {
         socket.send(JSON.stringify({ type: 'heartbeat' }));
       }
     }, HEARTBEAT_INTERVAL);
+    
+    // Periodically flush kline data to DB
+    klineDbFlushInterval = setInterval(flushKlinesToDb, KLINE_FLUSH_INTERVAL);
   };
 
   socket.onmessage = (event) => {
