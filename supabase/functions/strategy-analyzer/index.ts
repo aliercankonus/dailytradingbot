@@ -13221,7 +13221,7 @@ serve(async (req) => {
           // SHORT momentum zone: 35-55 (bearish-to-neutral bias)
           // Entries outside these zones get 25% additional position reduction
           if (momentumContinuationAllowedLong && !stochRsiRising) {
-            const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+            const rsi4h = mfs.timeframes['4h'].rsi;
             const rsiInMomentumZone = rsi4h >= 45 && rsi4h <= 65; // LONG zone
             
             if (rsiInMomentumZone) {
@@ -13497,7 +13497,7 @@ serve(async (req) => {
           // SHORT momentum zone: 35-55 (bearish-to-neutral bias)
           // Entries outside these zones get 25% additional position reduction
           if (momentumContinuationAllowed && !stochRsiFalling) {
-            const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+            const rsi4h = mfs.timeframes['4h'].rsi;
             const rsiInMomentumZone = rsi4h >= 35 && rsi4h <= 55; // SHORT zone
             
             if (rsiInMomentumZone) {
@@ -17041,7 +17041,7 @@ serve(async (req) => {
                 const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
                 
                 // IMPROVEMENT 2: Get 1h confidence for ADX relaxation
-                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const conf1h = mfs.timeframes['1h'].confidence;
                 const is1hVeryConfident = conf1h >= 70;
                 const is1hBearish = htfTrend1h === "bearish";
                 
@@ -17136,7 +17136,7 @@ serve(async (req) => {
                 const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
                 
                 // IMPROVEMENT 2: Get 1h confidence for ADX relaxation
-                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const conf1h = mfs.timeframes['1h'].confidence;
                 const is1hVeryConfident = conf1h >= 70;
                 const is1hBullish = htfTrend1h === "bullish";
                 
@@ -17227,7 +17227,7 @@ serve(async (req) => {
               if (isMomentumType && !is4hDirectional) {
                 // 4h is neutral - check if we can allow via 1h directional + momentum building
                 const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
-                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const conf1h = mfs.timeframes['1h'].confidence;
                 const is1hConfident = conf1h >= 60;
                 const is1hVeryConfident = conf1h >= 62;  // PHASE 1 FIX: Lowered from 70 - 62%+ 1h conf is already directional
                 const isMomentumBuilding = earlyMomentumScore >= MOMENTUM_THRESHOLDS.MIN_SCORE;
@@ -17406,7 +17406,7 @@ serve(async (req) => {
         
         if (candidates.length === 0 && passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES) {
           // Check if convergence conditions are met
-          const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+          const conf1h = mfs.timeframes['1h'].confidence;
           const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown');
           
           // PHASE 3 FIX: Allow dominant direction with HTF alignment, not just strict consensus
@@ -18566,9 +18566,9 @@ serve(async (req) => {
         ].filter(Boolean);
         
         if (unifiedPositionSize < 0.3 && beGatesApplied.length >= 2) {
-          const tf1hDir = trendData.timeframes?.['1h']?.direction || 'N/A';
-          const tf30mDir = trendData.timeframes?.['30m']?.direction || 'N/A';
-          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final size ${unifiedPositionSize.toFixed(2)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${trendData.adx?.toFixed(1)}, Slope=${trendData.adxSlope?.toFixed(2)}, StochK=${trendData.stochrsiK?.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
+          const tf1hDir = mfs.timeframes['1h'].trend || 'N/A';
+          const tf30mDir = mfs.timeframes['30m'].trend || 'N/A';
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final size ${unifiedPositionSize.toFixed(2)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${adx.toFixed(1)}, Slope=${adxSlope.toFixed(2)}, StochK=${mfs.stochRsi["4h"].k.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
         }
         
         // Cap position size AFTER all gates applied
@@ -18752,9 +18752,9 @@ serve(async (req) => {
               stealthDrift: trendData.stealthTrend?.driftPercent || 0,
               direction: lateGrindDirection,
               conditions: lateGrindAccepted ? {
-                htfBias: trendData.timeframes?.['4h']?.confidence || 0,
-                adxSlope: trendData.volatility?.adxSlope || 0,
-                stochK4h: (trendData.stochasticRsi?.['4h']?.k ?? 50),
+                htfBias: mfs.timeframes['4h'].confidence,
+                adxSlope: mfs.adxSlope,
+                stochK4h: mfs.stochRsi['4h'].k,
               } : null,
             },
             // PHASE 2: Price Action Early Entry tracking for dashboard analytics
