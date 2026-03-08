@@ -2967,7 +2967,7 @@ export const deriveTradeDirection = (
     // ===== PHASE 3: MOMENTUM WEIGHT IN DIRECTION DERIVATION =====
     // Factor momentum score into direction confidence - opposing momentum reduces certainty
     // This prevents deriving LONG when momentum is strongly bearish (-22)
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const momentumScore = mfs.smartMomentum?.score ?? 0;
     let momentumAdjustment = 0;
     let momentumImpact: MomentumTier = 'neutral';
     let momentumConfidenceReduction = 0;
