@@ -784,8 +784,9 @@ serve(async (req) => {
     // ============================================================
     // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
     // Volume score from calculate-trend provides additional confirmation
+    // NOTE: volumeScore is a top-level trendData field not in MFS (aggregate score, not per-timeframe)
     // ============================================================
-    const volumeScore = trendData?.volumeScore ?? 0; // Top-level field, not in MFS
+    const volumeScore = trendData?.volumeScore ?? 0;
     const volumeConfirms = mfs.momentum?.volumeConfirms ?? false;
     
     // Warn on low volume but don't block unless extremely low
