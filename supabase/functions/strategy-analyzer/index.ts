@@ -18901,19 +18901,6 @@ serve(async (req) => {
         // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion)
         unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
 
-        // Collect micro exhaustion data for dashboard snapshot
-        const _exh = earlySmartMomentum.microExhaustion;
-        symbolMicroExhaustionMap.set(symbol, {
-          score: _exh.score,
-          detected: _exh.detected,
-          recommendation: _exh.recommendation,
-          positionMultiplier: _exh.positionMultiplier,
-          momentumDecay: _exh.momentumDeceleration,
-          accelerationFlip: _exh.accelerationFlip,
-          priceDivergence: _exh.priceDivergence,
-          signals: _exh.signals,
-        });
-
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
         
