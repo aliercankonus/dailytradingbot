@@ -792,12 +792,22 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
-  // 10. Momentum reversal exit — cut losses when trend flips (relaxed threshold: -35 to reduce premature exits)
+  // 10. Momentum reversal exit — tightened PnL threshold from -0.5% to -0.3%
   if (hoursHeld > 2) {
     if ((side === 'LONG' && momentumScore < -35 && primaryTrend === 'bearish') ||
         (side === 'SHORT' && momentumScore > 35 && primaryTrend === 'bullish')) {
-      if (pnlPercent < -0.5) {
+      if (pnlPercent < -0.3) {
         return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
+      }
+    }
+  }
+
+  // 10b. Early momentum flip — extreme momentum reversal within first 2 hours
+  if (hoursHeld > 1 && hoursHeld <= 2) {
+    if ((side === 'LONG' && momentumScore < -50) ||
+        (side === 'SHORT' && momentumScore > 50)) {
+      if (pnlPercent < -0.5) {
+        return { shouldExit: true, exitReason: 'early_momentum_flip_exit' };
       }
     }
   }
