@@ -1516,7 +1516,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // ACCEPTABLE: StochRSI bearish cross
-    if (stochRsi.bearishCrossCount >= 1) {
+    if (mfs.stochRsiAggregated.bearishCrossCount >= 1) {
       const baseScore = 12 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bearish rally: StochRSI bearish cross" + mtfSuffix);
       return { isPullback: true, hasBothConditions: false, pullbackDepth: 25, entryTimingScore: weighted.score, reason: weighted.reason };
