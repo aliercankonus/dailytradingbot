@@ -514,7 +514,7 @@ class RejectionBuffer {
                 symbol: entry.symbol,
                 rejection_reason: entry.rejection_reason,
                 filters_status: entry.filters_status,
-                trend_data: entry.ai_context.trendData,
+                trend_data: entry.ai_context.mfs,
               }).catch((err: any) => logger.warn(`AI analysis failed for ${entry.symbol}: ${err}`));
             }
           }
