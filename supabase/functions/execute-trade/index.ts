@@ -665,7 +665,7 @@ serve(async (req) => {
 
     // FILTER 3: Skip ranging markets for BUY/SELL signals
     if (currentTrend === 'ranging') {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Ranging Market', signal, trendData, { currentTrend });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Ranging Market', signal, mfs, { currentTrend });
       throw new Error('Market is ranging - trade cancelled to avoid choppy conditions');
     }
 
