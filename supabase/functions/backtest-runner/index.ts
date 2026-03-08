@@ -333,10 +333,10 @@ function buildBacktestMFS(
     atr, atrPercent, relativeATR: 1.0, historicalATRAvg: atr,
     isCompressed: squeeze, volatilityNormal: atrPercent < 3.0, isRanging: !emaBullish && !emaBearish,
     
-    momentumState: momentumResult.direction !== "neutral" ? "confirmed" : "none",
+    momentumState: derivedMomentumState,
     momentumScore: momentumResult.score,
     prevMomentumScore: momentumResult.score,
-    momentumConfirms: Math.abs(momentumResult.score) > 15,
+    momentumConfirms: derivedMomentumConfirms,
     macdExpanding, macdStrong: Math.abs(macdHist) > Math.abs(macdResult.signal) * 0.5,
     macdHistogram: macdHist,
     macdDirectionAligned: (primaryTrend === 'bullish' && macdHist > 0) || (primaryTrend === 'bearish' && macdHist < 0),
