@@ -285,20 +285,9 @@ export type PartialTrendData = Partial<TrendDataResponse> & {
 };
 
 // ============= EXTRACTION RESULT TYPES =============
-// For use with the centralized extraction helpers in scoring.ts
-export interface ADXExtractionResult {
-  adx: number;
-  source: 'direct' | 'volatility' | 'default';
-}
-
+// Used by market-feature-snapshot.ts internal extractors
 export interface ADXSlopeResult {
   slope: number;
   isRising: boolean;
-  source: string;
-}
-
-export interface StochRsiExtractionResult {
-  k: number;
-  d: number;
   source: string;
 }
