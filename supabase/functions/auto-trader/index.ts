@@ -258,6 +258,14 @@ serve(async (req) => {
       other: results.reduce((sum, r) => sum + (r.strategyBreakdown?.other || 0), 0),
     };
 
+    // Aggregate Binance fetch stats from all strategy-analyzer responses
+    const aggregateFetchStats = {
+      fetchOkCount: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.fetchOkCount || 0), 0),
+      cacheHits: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.cacheHits || 0), 0),
+      cacheMisses: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.cacheMisses || 0), 0),
+      timeoutCount: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.timeoutCount || 0), 0),
+    };
+
     logger.summary(
       `Completed: ${activeUsers.length} users (${successfulUsers} success, ${failedUsers} failed), ${totalSignals} signals, ${totalExecuted} executed, ${totalRejected} rejected`
     );
@@ -279,6 +287,7 @@ serve(async (req) => {
           totalSignals,
           totalExecuted,
           totalRejected,
+          binanceFetchStats: aggregateFetchStats,
         },
         success: failedUsers === 0,
         error_message: failedUsers > 0 ? `${failedUsers} users failed` : null,
@@ -287,8 +296,7 @@ serve(async (req) => {
     } catch (metricsErr) {
       logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
     }
-    const fetchStats = getAndResetFetchStats();
-    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms | 🔶 Binance: OK=${fetchStats.fetchOkCount} CACHE_HIT=${fetchStats.cacheHits} CACHE_MISS=${fetchStats.cacheMisses} TIMEOUT=${fetchStats.timeoutCount}`);
+    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms | 🔶 Binance: OK=${aggregateFetchStats.fetchOkCount} CACHE_HIT=${aggregateFetchStats.cacheHits} CACHE_MISS=${aggregateFetchStats.cacheMisses} TIMEOUT=${aggregateFetchStats.timeoutCount}`);
 
     return new Response(
       JSON.stringify({
@@ -300,6 +308,7 @@ serve(async (req) => {
         totalExecuted,
         totalRejected,
         strategyBreakdown: totalExecuted > 0 ? aggregateStrategyBreakdown : undefined,
+        binanceFetchStats: aggregateFetchStats,
         results,
         timestamp: new Date().toISOString(),
       }),
