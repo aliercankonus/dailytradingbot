@@ -622,7 +622,7 @@ serve(async (req) => {
       // Use HTF weighted components for smarter exit timing
       // Premium alignment = more patience, Weak alignment = exit sooner
       // ============================================================
-      const trueAlignment = extractTrueAlignment(trendDataForPosition);
+      const trueAlignment = extractTrueAlignmentFromMFS(mfsForPosition);
       let alignmentExitAdjustment = 0;
       let alignmentExitNote = "";
       let htfAlignmentMultiplier = 1.0; // Used for trailing stop distance adjustment
