@@ -680,7 +680,7 @@ serve(async (req) => {
     // Blocks entries at extreme oscillator exhaustion to prevent late entries
     // ============================================================
     if (DEEP_STOCHRSI_HARD_GATE.ENABLED) {
-      const stochRsiK4h = extractStochRsiK(trendData, '4h', 50);
+      const stochRsiK4h = mfs.stochRsi['4h'].k ?? 50;
       const signalDirection = signal.signal_type;
       
       // Block LONG at extreme high (K >= 95) - overbought exhaustion
