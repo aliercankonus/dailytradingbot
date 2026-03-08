@@ -147,7 +147,19 @@ export interface MarketFeatureSnapshot {
     isWeakening: boolean;
     isTransitioning: boolean;
     overextensionATR: number;
+    components?: {
+      macdSlope: number;
+      priceImpulse: number;
+      emaSpreadRoC: number;
+      rsiMomentum: number;
+    };
   };
+  
+  // === Direction Derivation Support ===
+  directionStableBars: number;
+  momentumDirection: string;
+  prevMacdHistogram: number;
+  squeezeJustReleased: boolean;
   
   // === Price Distance ===
   distanceFromHighPercent: number;
