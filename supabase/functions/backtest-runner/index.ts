@@ -491,17 +491,21 @@ function evaluateProductionGates(
     direction = 'LONG';
   } else if (emaBearish && momentumResult.score < 0) {
     direction = 'SHORT';
-  } else if (momentumResult.score > 15 && adx > ADX_THRESHOLDS.STRONG) {
-    // Relaxed from >20 to >15
+  } else if (momentumResult.score > 10 && adx > ADX_THRESHOLDS.STRONG) {
+    // RELAXED: from >15 to >10 — allows moderate momentum with strong ADX
     direction = 'LONG';
-  } else if (momentumResult.score < -15 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score < -10 && adx > ADX_THRESHOLDS.STRONG) {
     direction = 'SHORT';
   } else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
-    // NEW: Strong structural trend can derive direction from DI
+    // Strong structural trend can derive direction from DI
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diPlus > diMinus + 5) direction = 'LONG';
     else if (diMinus > diPlus + 5) direction = 'SHORT';
+  } else if (adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0.2) {
+    // NEW: Rising ADX with moderate momentum can derive direction
+    if (momentumResult.score > 5) direction = 'LONG';
+    else if (momentumResult.score < -5) direction = 'SHORT';
   }
   
   if (!direction) {
