@@ -19360,6 +19360,9 @@ serve(async (req) => {
       logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
     }
 
+    // Collect Binance fetch stats from this function's memory space
+    const binanceFetchStats = getAndResetFetchStats();
+
     return new Response(JSON.stringify({
       signals,
       totalSignalsGenerated,
@@ -19412,6 +19415,8 @@ serve(async (req) => {
         state: noTradeState,
         reason: noTradeReason,
       } : null,
+      // Binance fetch stats from strategy-analyzer's memory space
+      binanceFetchStats,
       minQualityScore: DEFAULT_MIN_QUALITY,
       message: noTradeState 
         ? `No trade zone: ${noTradeState} - ${noTradeReason}`
