@@ -3413,7 +3413,7 @@ serve(async (req) => {
           (mfs as any).klines5m = ltfData.klines5m;
           (mfs as any).klines1m = ltfData.klines1m;
           
-          logger.forSymbol(symbol).info(
+          logger.forSymbol(symbol).debug(
             `🔬 LTF_MICRO: 5m=${mom5m.score.toFixed(0)}(${mom5m.direction}/${mom5m.phase}) 1m=${mom1m.score.toFixed(0)}(${mom1m.direction}) align=${ltfAlignment.toFixed(2)} timing=${entryTimingScore} confirms=${microTrendConfirms} pattern=${recentCandlePattern}${isReverting1m ? ' ⚠️REVERTING' : ''}`
           );
           
