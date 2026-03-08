@@ -265,7 +265,7 @@ export function calculateMomentumScore(
 
   if (isWeakening) reasons.push("⚠️ Momentum WEAKENING");
   if (isExhausted) reasons.push("🛑 Trend EXHAUSTED");
-  if (isAccelerating) reasons.push("🚀 Momentum ACCELERATING");
+  // Note: isAccelerating reason is pushed inside the EMA(3) block above
 
   // v2.0: 5-PHASE STATE CLASSIFICATION
   // More granular than 3-way direction — captures transition zones
