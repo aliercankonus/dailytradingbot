@@ -931,7 +931,12 @@ async function runBacktest(
               atrAtEntry: atrPercent,
               atrPercentAtEntry: atrPercent,
               strategyName: gateResult.strategyName,
+              entryMomentumScore: gateResult.momentumScore,
+              entryStochK: mfs.stochRsi["1h"].k,
+              entryAdx: mfs.adx,
             });
+            
+            logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest ENTRY: ${symbol} ${dir} @ ${currentPrice} | entryMom=${gateResult.momentumScore} K=${mfs.stochRsi["1h"].k.toFixed(1)} ADX=${mfs.adx.toFixed(1)} strategy=${gateResult.strategyName}`);
           }
         }
 
