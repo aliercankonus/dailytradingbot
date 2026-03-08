@@ -10985,7 +10985,7 @@ serve(async (req) => {
         // Tier 1: BLOCK (score >= 60) - too risky, skip signal
         // Tier 2: REDUCE (score 40-60) - proceed with 50% position size
         // Tier 3: NORMAL (score < 40) - full position size
-        const unifiedReversal = calculateUnifiedReversalScore(trendData, trend, symbol, {}, mfs);
+        const unifiedReversal = calculateUnifiedReversalScore(mfs, trend, symbol);
         
         // Store multiplier for later use in position sizing
         let reversalPositionMultiplier = unifiedReversal.positionSizeMultiplier;
