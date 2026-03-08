@@ -3167,7 +3167,7 @@ serve(async (req) => {
           
           const allTimeframesNeutral = is4hNeutral && is1hNeutral && is30mNeutral;
           const isLowAdx = adx < RANGING_MARKET_DETECTION_PARAMS.ADX_THRESHOLD;
-          const volumeRatio = trendData.volume?.ratio ?? 1.0;
+          const volumeRatio = mfs.volume["1h"].volumeRatio || mfs.volume["30m"].volumeRatio || 1.0;
           const isLowVolume = volumeRatio < RANGING_MARKET_DETECTION_PARAMS.VOLUME_RATIO_THRESHOLD;
           
         if (allTimeframesNeutral && isLowAdx && isLowVolume) {
