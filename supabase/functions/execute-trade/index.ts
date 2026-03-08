@@ -536,18 +536,20 @@ serve(async (req) => {
       logger.warn(`Failed to get current trend, using signal trend: ${trendError.message}`);
     }
 
-    const currentTrend = trendData?.primaryTrend || signal.trend;
-    const trendConsistency = trendData?.trueAlignment?.score || 0;
-    // Fix: atrPercent is under volatility object in calculate-trend response
-    const atrPercent = trendData?.volatility?.atrPercent || trendData?.ranging?.atrPercent || 1.5;
+    // MFS MIGRATED: Build MarketFeatureSnapshot ONCE — all gates read from this snapshot
+    const mfs = buildMarketFeatureSnapshot(signal.symbol, trendData || {});
+
+    const currentTrend = mfs.primaryTrend || signal.trend;
+    const trendConsistency = mfs.trueAlignment?.score ?? 0;
+    const atrPercent = mfs.atrPercent || 1.5;
     
     // ============================================================
     // ENHANCED TRUE ALIGNMENT FIELDS (v2.0)
     // Extract weighted components for smarter position sizing and validation
     // ============================================================
-    const trueAlignment = trendData?.trueAlignment || {};
-    const tf4hConfidence = trueAlignment.tf4hConfidence ?? 0;
-    const tf1hConfidence = trueAlignment.tf1hConfidence ?? 0;
+    const trueAlignment = mfs.trueAlignment || {};
+    const tf4hConfidence = trueAlignment.tf4hConfidence ?? mfs.timeframes['4h'].confidence ?? 0;
+    const tf1hConfidence = trueAlignment.tf1hConfidence ?? mfs.timeframes['1h'].confidence ?? 0;
     const adxContribution = trueAlignment.adxContribution ?? 0;
     const totalWeightedConfidence = trueAlignment.totalWeightedConfidence ?? 0;
     const weightedComponents = trueAlignment.weightedComponents || {};
@@ -559,10 +561,9 @@ serve(async (req) => {
       logger.info(`   → Weighted: 4h=${weightedComponents.tf4hWeighted?.toFixed(1) ?? 0}, 1h=${weightedComponents.tf1hWeighted?.toFixed(1) ?? 0}, vol=${weightedComponents.volumeWeighted?.toFixed(1) ?? 0}, adx=${weightedComponents.adxWeighted?.toFixed(1) ?? 0}`);
     }
     
-    // Extract Bollinger Bands data from trend analysis
-    const bollingerData = trendData?.bollingerBands || {};
-    const bb1h = bollingerData['1h'] || {};
-    const bb4h = bollingerData['4h'] || {};
+    // MFS MIGRATED: Bollinger data from MFS
+    const bb1h = mfs.bollinger['1h'];
+    const bb4h = mfs.bollinger['4h'];
     
     logger.info(`Current market trend: ${currentTrend}, Consistency: ${trendConsistency}, ATR: ${atrPercent}%, Signal: ${signal.signal_type}`);
     logger.info(`📊 Bollinger Bands: 1h squeeze=${bb1h.squeeze}, %B=${bb1h.percentB?.toFixed(1)}% | 4h squeeze=${bb4h.squeeze}, %B=${bb4h.percentB?.toFixed(1)}%`);
