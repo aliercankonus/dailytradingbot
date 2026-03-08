@@ -22,12 +22,13 @@ function multiplierLabel(score: number, alignment: number) {
   if (score > 80 && alignment > 0) return "×1.20";
   if (score > 70 && alignment > 0) return "×1.10";
   if (score < 30) return "×0.50";
+  if (alignment < 0) return "×0.75";
   return "×1.00";
 }
 
 function SymbolRow({ data }: { data: LtfMicroData }) {
   const mult = multiplierLabel(data.entryTimingScore, data.ltfAlignment);
-  const multColor = mult === "×1.20" ? "text-emerald-500" : mult === "×1.10" ? "text-green-500" : mult === "×0.50" ? "text-red-500" : "text-muted-foreground";
+  const multColor = mult === "×1.20" ? "text-emerald-500" : mult === "×1.10" ? "text-green-500" : mult === "×0.50" ? "text-red-500" : mult === "×0.75" ? "text-amber-500" : "text-muted-foreground";
 
   return (
     <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-2 items-center py-2 border-b border-border/40 last:border-b-0 text-sm">
@@ -107,7 +108,16 @@ export default function LtfMicroMomentumWidget() {
     );
   }
 
-  const sorted = [...data].sort((a, b) => Math.abs(b.entryTimingScore - 50) - Math.abs(a.entryTimingScore - 50));
+  // Sort by trade impact: abs(multiplier - 1) descending
+  // Symbols with largest position adjustments (boosts or penalties) appear first
+  const getMultiplierValue = (d: LtfMicroData) => {
+    if (d.entryTimingScore > 80 && d.ltfAlignment > 0) return 1.20;
+    if (d.entryTimingScore > 70 && d.ltfAlignment > 0) return 1.10;
+    if (d.entryTimingScore < 30) return 0.50;
+    if (d.ltfAlignment < 0) return 0.75;
+    return 1.00;
+  };
+  const sorted = [...data].sort((a, b) => Math.abs(getMultiplierValue(b) - 1) - Math.abs(getMultiplierValue(a) - 1));
 
   return (
     <Card>

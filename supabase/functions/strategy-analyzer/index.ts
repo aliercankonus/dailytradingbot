@@ -18815,47 +18815,6 @@ serve(async (req) => {
           logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final size ${unifiedPositionSize.toFixed(2)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${adx.toFixed(1)}, Slope=${adxSlope.toFixed(2)}, StochK=${mfs.stochRsi["4h"].k.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
         }
         
-        // Cap position size AFTER all gates applied
-        unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
-        
-        const strategyPositionSize = unifiedPositionSize;
-        
-        // Apply tighter stops for late grind acceptance entries (50% of normal = 50% tighter)
-        if (lateGrindAccepted && lateGrindStopMultiplier < 1.0) {
-          stopLossPercent *= lateGrindStopMultiplier;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🐌 LATE GRIND ACCEPTANCE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
-        }
-        
-        // Apply tighter stops for price action early entry (70% of normal = 30% tighter)
-        if (priceActionEarlyEntryActive && PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER < 1.0) {
-          stopLossPercent *= PRICE_ACTION_EARLY_ENTRY_PARAMS.STOP_LOSS_MULTIPLIER;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
-        }
-        
-        // ===== IGNITION TIER ADAPTIVE STOP WIDTH =====
-        // ELITE: wider stop (1.2x) — strong continuation, needs room
-        // CONFIRMED: standard (1.0x)
-        // SPECULATIVE: tighter (0.85x) — must prove quickly
-        // MICRO_PROBE: tight (0.75x) — ya patlar ya söner
-        const ignitionStopWidth = (trendData as any).ignitionStopWidth;
-        if (ignitionStopWidth && ignitionStopWidth !== 1.0) {
-          const prevStop = stopLossPercent;
-          stopLossPercent *= ignitionStopWidth;
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔥 IGNITION STOP WIDTH [${(trendData as any).ignitionTier}]: ${prevStop.toFixed(2)}% → ${stopLossPercent.toFixed(2)}% (×${ignitionStopWidth})`);
-        }
-        
-        // Take profit = stop loss × user-configured multiplier
-        let takeProfitPercent = stopLossPercent * baseTpMultiplier;
-        
-        // Apply tighter TP for price action early entry
-        if (priceActionEarlyEntryActive && PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER < 2.5) {
-          takeProfitPercent *= (PRICE_ACTION_EARLY_ENTRY_PARAMS.TAKE_PROFIT_MULTIPLIER / baseTpMultiplier);
-          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 📈 PRICE ACTION EARLY ENTRY - tighter TP applied: ${takeProfitPercent.toFixed(2)}%`);
-        }
-        
-        // Log unified risk calculation
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 💰 UNIFIED RISK: Profile=${riskProfile}, Position=${strategyPositionSize.toFixed(2)}% (base ${basePositionSize}%), SL=${stopLossPercent.toFixed(2)}% (base ${baseStopLoss}%), TP=${takeProfitPercent.toFixed(2)}% (${baseTpMultiplier}x)`);
-        
         // ===== LTF MICRO TIMING GATE (1m/5m entry timing quality) =====
         // Uses ltfMicroMomentum.entryTimingScore to adjust position sizing
         let ltfMicroTimingMultiplier = 1.0;
@@ -18893,11 +18852,23 @@ serve(async (req) => {
             }
           }
           
+          // ===== LTF CONFLICT PENALTY =====
+          // When 1m/5m are opposing (alignment negative), reduce position as soft penalty
+          // This catches micro-reversals and sharp 1m pullbacks against 5m direction
+          // Not a hard block — preserves healthy pullback entries
+          if (ltfAlign < 0 && ltfMicroTimingMultiplier >= 1.0) {
+            ltfMicroTimingMultiplier = 0.75;
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_CONFLICT: 1m/5m opposing (align=${ltfAlign.toFixed(2)}) → position ×0.75 soft penalty`);
+          }
+          
           if (ltfMicroTimingMultiplier !== 1.0) {
             unifiedPositionSize *= ltfMicroTimingMultiplier;
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⏱️ LTF_MICRO_TIMING - position size adjusted to ${unifiedPositionSize.toFixed(2)}% (timing score: ${ltfMicro.entryTimingScore.toFixed(0)})`);
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⏱️ LTF_MICRO_TIMING - position size adjusted to ${unifiedPositionSize.toFixed(2)}% (timing=${ltfMicro.entryTimingScore.toFixed(0)}, mult=×${ltfMicroTimingMultiplier}, 5m=${ltfMicro.direction5m}/${ltfMicro.score5m.toFixed(0)}, 1m=${ltfMicro.direction1m}/${ltfMicro.score1m.toFixed(0)}, accel=${ltfMicro.isAccelerating5m})`);
           }
         }
+
+        // Cap position size AFTER all gates applied (including LTF micro timing)
+        unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
 
 
         // Map "neutral" to "ranging" for database enum compatibility

@@ -34,6 +34,7 @@ entryTimingScore = 50 (baseline) + htfAlignBonus + accelBonus + momMagBonus + al
 | Entry Timing Score | Multiplier | Tier |
 |---|---|---|
 | < 30 | 0.50x | POOR |
+| 30–70, align < 0 | 0.75x | CONFLICT |
 | 30–70 | 1.00x | NEUTRAL |
 | 70–80 | 1.10x | GOOD |
 | > 80 | 1.20x | EXCELLENT |
@@ -65,6 +66,13 @@ LTF_MICRO_TIMING_GATE = {
 LTF Micro Momentum widget (`LtfMicroMomentumWidget.tsx`) reads `ltfMicroMomentum` from `trend_snapshots.snapshot_data` and displays per-symbol: 5m/1m scores, alignment, timing score with progress bar, grade badge, and effective multiplier.
 
 ## Changelog
+
+### v1.3 (2026-03-08)
+- **LTF Conflict Gate**: `ltfAlignment < 0` → ×0.75 soft penalty (catches 1m/5m opposing micro-reversals)
+- **Cap ordering fix**: LTF_MICRO_TIMING moved BEFORE position cap (was after — boost could exceed 5% max)
+- **jsonb_set `create_if_missing`**: Added `true` flag to prevent first-run errors on empty snapshot_data
+- **Dashboard sort**: Changed from `abs(score-50)` to `abs(multiplier-1)` for trade-impact ranking
+- **Enhanced logging**: Full component breakdown in LTF_MICRO_TIMING log (5m/1m scores, direction, acceleration)
 
 ### v1.2 (2026-03-08)
 - Reduced alignBonus from ±10 to ±6: prevents double counting with boost guard (alignment checked twice)
