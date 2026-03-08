@@ -427,6 +427,49 @@ const handler = async (req: Request): Promise<Response> => {
         smsMessage = `${isCredentialError ? '🚨 CRITICAL' : '⚠️'} Binance API error: ${operation}. ${binanceMsg}`;
         break;
 
+      case 'micro_exhaustion_exit': {
+        const exhAction = payload.exhaustionAction || 'exit_full';
+        const exhScore = payload.exhaustionScore ?? 0;
+        const exhSignals = payload.exhaustionSignals || [];
+        const isFullExit = exhAction === 'exit_full';
+        const actionLabel = isFullExit ? 'Full Exit' : 'Stop Tightened';
+        const actionEmoji = isFullExit ? '🔥' : '⚡';
+        
+        subject = `${actionEmoji} Momentum Exhaustion ${actionLabel}: ${payload.symbol}`;
+        message = `
+          <h2>${actionEmoji} Micro Momentum Exhaustion Detected</h2>
+          <p style="font-size: 1.1em;">Trend momentum is fading — <strong>${actionLabel.toLowerCase()}</strong> triggered to protect your profits.</p>
+          
+          <div style="background: ${isFullExit ? '#fef2f2' : '#fef3c7'}; padding: 15px; border-radius: 8px; border-left: 4px solid ${isFullExit ? '#ef4444' : '#f59e0b'}; margin: 20px 0;">
+            <h3 style="margin-top: 0; color: ${isFullExit ? '#991b1b' : '#92400e'};">Action: ${actionLabel}</h3>
+            <p><strong>Symbol:</strong> ${payload.symbol}</p>
+            <p><strong>Side:</strong> ${payload.side}</p>
+            <p><strong>Exhaustion Score:</strong> ${exhScore}/100</p>
+            <p><strong>Current P&L:</strong> ${(payload.pnlPercent ?? 0) >= 0 ? '+' : ''}${(payload.pnlPercent ?? 0).toFixed(2)}%</p>
+            ${isFullExit ? `<p><strong>Exit Price:</strong> $${(payload.price ?? 0).toFixed(4)}</p>` : `<p><strong>New Stop Loss:</strong> $${(payload.newStopLoss ?? 0).toFixed(4)}</p>`}
+          </div>
+          
+          <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0;">Exhaustion Signals Detected</h3>
+            <ul>
+              ${exhSignals.includes('momentum_deceleration') ? '<li>📉 <strong>Momentum Deceleration:</strong> EMA slope reversing against trend</li>' : ''}
+              ${exhSignals.includes('volume_dryup') ? '<li>📊 <strong>Volume Dry-Up:</strong> Recent volume dropping below average</li>' : ''}
+              ${exhSignals.includes('rsi_divergence') ? '<li>📐 <strong>RSI Divergence:</strong> Price making new extremes while RSI fails to confirm</li>' : ''}
+            </ul>
+          </div>
+          
+          <div style="background: #eff6ff; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h3 style="margin-top: 0; color: #2563eb;">What This Means</h3>
+            <p>${isFullExit 
+              ? 'All 3 exhaustion signals fired simultaneously — the trend is likely ending. Your position was closed to lock in profits before a reversal.' 
+              : '2 of 3 exhaustion signals fired — momentum is weakening. Your stop loss was aggressively tightened to lock in most of your current profit.'}
+            </p>
+          </div>
+        `;
+        smsMessage = `${actionEmoji} EXHAUSTION ${actionLabel.toUpperCase()}: ${payload.symbol} ${payload.side}. Score=${exhScore}. P&L: ${(payload.pnlPercent ?? 0) >= 0 ? '+' : ''}${(payload.pnlPercent ?? 0).toFixed(2)}%${isFullExit ? ` @ $${(payload.price ?? 0).toFixed(4)}` : ` stop→$${(payload.newStopLoss ?? 0).toFixed(4)}`}`;
+        break;
+      }
+
       case 'circuit_breaker_triggered':
         subject = `🚨 Circuit Breaker Triggered — Drawdown ${((payload as any).drawdownPercent ?? 0).toFixed(1)}%`;
         message = `
