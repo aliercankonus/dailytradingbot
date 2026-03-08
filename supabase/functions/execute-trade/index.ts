@@ -13,7 +13,7 @@ import {
   type MarketRegime
 } from "../_shared/scoring.ts";
 import { buildMarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
-import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
+import type { MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { 
   getSymbolFilters, 
@@ -41,11 +41,27 @@ async function logExecutionRejection(
   symbol: string,
   reason: string,
   signal: any,
-  trendData: PartialTrendData | null,
+  mfsSnapshot: MarketFeatureSnapshot | null,
   additionalData?: Record<string, unknown>
 ) {
   const symbolLogger = logger.forSymbol(symbol);
   try {
+    // Write compact MFS summary to trend_data column instead of raw trendData
+    const mfsSummary = mfsSnapshot ? {
+      primaryTrend: mfsSnapshot.primaryTrend,
+      adx: mfsSnapshot.adx,
+      adxSlope: mfsSnapshot.adxSlope,
+      atrPercent: mfsSnapshot.atrPercent,
+      regime: mfsSnapshot.regime,
+      momentumState: mfsSnapshot.momentumState,
+      volumeScore: mfsSnapshot.volumeScore,
+      reversalScore: mfsSnapshot.reversalScore,
+      stochRsi4hK: mfsSnapshot.stochRsi['4h'].k,
+      trueAlignmentScore: mfsSnapshot.trueAlignment?.score,
+      bollinger1hSqueeze: mfsSnapshot.bollinger['1h'].squeeze,
+      bollinger1hPercentB: mfsSnapshot.bollinger['1h'].percentB,
+    } : null;
+
     await supabase.from('signal_rejection_log').insert({
       user_id: userId,
       symbol: symbol,
@@ -62,7 +78,7 @@ async function logExecutionRejection(
         executionFilter: reason,
         ...additionalData
       },
-      trend_data: trendData,
+      trend_data: mfsSummary,
       checked_at: new Date().toISOString()
     });
     symbolLogger.info(`📝 Logged execution rejection: ${reason}`);
@@ -588,7 +604,7 @@ serve(async (req) => {
         const mismatchReason = currentTrend === 'bullish' 
           ? 'Trend Mismatch (Bullish vs SHORT) - High Confidence'
           : 'Trend Mismatch (Bearish vs LONG) - High Confidence';
-        await logExecutionRejection(supabase, user.id, signal.symbol, mismatchReason, signal, trendData, { 
+        await logExecutionRejection(supabase, user.id, signal.symbol, mismatchReason, signal, mfs, { 
           currentTrend, 
           signalDirection, 
           trendConfidence,
@@ -636,7 +652,7 @@ serve(async (req) => {
     }
     
     if (trendConsistency < dynamicMinConsistency) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, trendData, { 
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, mfs, { 
         trendConsistency, 
         minRequired: dynamicMinConsistency,
         adx: adxValueForConsistency,
@@ -649,13 +665,13 @@ serve(async (req) => {
 
     // FILTER 3: Skip ranging markets for BUY/SELL signals
     if (currentTrend === 'ranging') {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Ranging Market', signal, trendData, { currentTrend });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Ranging Market', signal, mfs, { currentTrend });
       throw new Error('Market is ranging - trade cancelled to avoid choppy conditions');
     }
 
     // FILTER 4: Avoid high volatility (ATR > extreme threshold) - uses centralized EMERGENCY_EXIT_PARAMS
     if (atrPercent > EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'High Volatility', signal, trendData, { atrPercent, maxAllowed: EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'High Volatility', signal, mfs, { atrPercent, maxAllowed: EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD });
       throw new Error(`Market volatility too high (ATR: ${atrPercent.toFixed(2)}%) - trade cancelled`);
     }
 
@@ -665,7 +681,7 @@ serve(async (req) => {
     
     if (adxValue < ADX_THRESHOLDS.MINIMUM) {
       logger.gate(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`, false);
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'ADX Too Low', signal, trendData, { adx: adxValue, minRequired: ADX_THRESHOLDS.MINIMUM });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'ADX Too Low', signal, mfs, { adx: adxValue, minRequired: ADX_THRESHOLDS.MINIMUM });
       throw new Error(`Trend strength too weak (ADX: ${adxValue?.toFixed(1) || 0}) - minimum required: ${ADX_THRESHOLDS.MINIMUM}`);
     }
     logger.gate(`✓ ADX hard gate passed: ${adxValue?.toFixed(1)} >= ${ADX_THRESHOLDS.MINIMUM}`, true);
@@ -682,7 +698,7 @@ serve(async (req) => {
       // Block LONG at extreme high (K >= 95) - overbought exhaustion
       if (stochRsiK4h >= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD && signalDirection === 'long') {
         logger.gate(`❌ TIER 0 BACKUP GATE: StochRSI K=${stochRsiK4h.toFixed(1)} >= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD} blocks LONG entry`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, trendData, {
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, mfs, {
           stochRsiK4h,
           threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD,
           direction: signalDirection,
@@ -694,7 +710,7 @@ serve(async (req) => {
       // Block SHORT at extreme low (K <= 5) - oversold exhaustion
       if (stochRsiK4h <= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD && signalDirection === 'short') {
         logger.gate(`❌ TIER 0 BACKUP GATE: StochRSI K=${stochRsiK4h.toFixed(1)} <= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} blocks SHORT entry`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, trendData, {
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, mfs, {
           stochRsiK4h,
           threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
           direction: signalDirection,
@@ -759,7 +775,7 @@ serve(async (req) => {
     
     if (signalQualityScore > 0 && signalQualityScore < hardMinQualityThreshold) {
       // HARD BLOCK: Below hard minimum is never allowed
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, trendData, { 
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, mfs, { 
         qualityScore: signalQualityScore, 
         threshold: hardMinQualityThreshold, 
         isRecoveryMode: isInRecoveryMode,
@@ -783,10 +799,9 @@ serve(async (req) => {
 
     // ============================================================
     // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
-    // Volume score from calculate-trend provides additional confirmation
-    // NOTE: volumeScore is a top-level trendData field not in MFS (aggregate score, not per-timeframe)
+    // MFS MIGRATED: volumeScore now read from MFS aggregate scores
     // ============================================================
-    const volumeScore = trendData?.volumeScore ?? 0;
+    const volumeScore = mfs.volumeScore ?? 0;
     const volumeConfirms = mfs.momentum?.volumeConfirms ?? false;
     
     // Warn on low volume but don't block unless extremely low
@@ -938,7 +953,7 @@ serve(async (req) => {
     const minQuoteVolume = isMainPair ? VOLUME_FILTER.MIN_QUOTE_VOLUME_MAIN : VOLUME_FILTER.MIN_QUOTE_VOLUME_OTHER;
     
     if (quoteVolume24h < minQuoteVolume) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Insufficient 24h Volume', signal, trendData, { quoteVolume: quoteVolume24h, minRequired: minQuoteVolume, isMainPair });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Insufficient 24h Volume', signal, mfs, { quoteVolume: quoteVolume24h, minRequired: minQuoteVolume, isMainPair });
       throw new Error(`Insufficient 24h volume ($${(quoteVolume24h/1_000_000).toFixed(2)}M < $${minQuoteVolume/1_000_000}M required) - trade cancelled to avoid illiquid market`);
     }
     logger.validation(`✓ Volume check passed: $${(quoteVolume24h/1_000_000).toFixed(2)}M >= $${minQuoteVolume/1_000_000}M minimum`, true);
@@ -1004,7 +1019,7 @@ serve(async (req) => {
         // Epsilon tolerance: prevent micro-cliff rejections from rounding/measurement noise
         const VOLUME_EPSILON = 0.005; // 0.5% tolerance
         if (volumeRatio < minVolumeRatio - VOLUME_EPSILON) {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { 
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, mfs, { 
             volumePercent: (volumeRatio * 100).toFixed(2),
             thresholdPercent: (minVolumeRatio * 100).toFixed(2),
             volumeRatio: volumeRatio.toFixed(3),
@@ -1073,12 +1088,12 @@ serve(async (req) => {
         
         // FILTER 10: OBV trend confirmation - BLOCK on strong divergence
         if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -OBV_FILTER.STRONG_DIVERGENCE_BLOCK_PERCENT) {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, trendData, { obvDirection, obvChange, signalSide });
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, mfs, { obvDirection, obvChange, signalSide });
           throw new Error(`OBV divergence: LONG signal but volume strongly bearish (${obvChange.toFixed(1)}% decline) - trade cancelled`);
         }
         
         if (signalSide === 'SELL' && obvDirection === 'bullish' && obvChange > OBV_FILTER.STRONG_DIVERGENCE_BLOCK_PERCENT) {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (SHORT vs Bullish)', signal, trendData, { obvDirection, obvChange, signalSide });
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (SHORT vs Bullish)', signal, mfs, { obvDirection, obvChange, signalSide });
           throw new Error(`OBV divergence: SHORT signal but volume strongly bullish (${obvChange.toFixed(1)}% rise) - trade cancelled`);
         }
         
@@ -1191,7 +1206,7 @@ serve(async (req) => {
                 : '';
               
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})${graduatedFailReason}`);
-              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { 
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, mfs, { 
                 currentPrice, 
                 vwapMid: currentVWAP,
                 vwapMidDeviationPct: vwapDeviation,
@@ -1252,7 +1267,7 @@ serve(async (req) => {
                 ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=${VWAP_FILTER.GRADUATED_MIN_QUALITY}?${qualityScore >= VWAP_FILTER.GRADUATED_MIN_QUALITY})`
                 : '';
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})${graduatedFailReason}`);
-              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { 
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, mfs, { 
                 currentPrice, vwapMid: currentVWAP, vwapMidDeviationPct: vwapDeviation, vwapLowerBand, vwapBandDeviationPct,
                 adx: adxValue, adxRising, macdHistogram, qualityScore,
                 graduatedEligible: adxValue >= ADX_GRADUATED_MIN,
@@ -1284,7 +1299,7 @@ serve(async (req) => {
     logger.info(`💱 Slippage Check: Signal Entry=$${signalEntryPrice.toFixed(2)}, Current=$${currentPrice.toFixed(2)}, Deviation=${priceDeviation.toFixed(3)}%`);
 
     if (priceDeviation > maxSlippagePercent) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Price Slippage', signal, trendData, { priceDeviation, maxAllowed: maxSlippagePercent, signalEntryPrice, currentPrice });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Price Slippage', signal, mfs, { priceDeviation, maxAllowed: maxSlippagePercent, signalEntryPrice, currentPrice });
       throw new Error(`Price moved ${priceDeviation.toFixed(2)}% since signal (max ${maxSlippagePercent}%) - trade cancelled to avoid slippage`);
     }
     logger.validation(`✓ Pre-trade slippage check passed: ${priceDeviation.toFixed(3)}% < ${maxSlippagePercent}% max`, true);
@@ -1302,7 +1317,7 @@ serve(async (req) => {
       // FILTER 9: Wide spread protection (avoid illiquid order books)
       const maxSpreadPercent = SLIPPAGE_PROTECTION.MAX_SPREAD_PERCENT;
       if (spread > maxSpreadPercent) {
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'Wide Spread', signal, trendData, { spread, maxAllowed: maxSpreadPercent, bestBid, bestAsk });
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'Wide Spread', signal, mfs, { spread, maxAllowed: maxSpreadPercent, bestBid, bestAsk });
         throw new Error(`Order book spread too wide (${spread.toFixed(3)}% > ${maxSpreadPercent}%) - trade cancelled to avoid slippage`);
       }
       logger.validation(`✓ Spread check passed: ${spread.toFixed(4)}% < ${maxSpreadPercent}% max`, true);
@@ -1325,7 +1340,7 @@ serve(async (req) => {
     let reversalPositionMultiplier = unifiedReversalResult.positionSizeMultiplier;
     
     if (unifiedReversalResult.decision === "BLOCK") {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Unified Reversal BLOCK', signal, trendData, { reversalScore: unifiedReversalResult.score, reasons: unifiedReversalResult.reasons, adxWeight: unifiedReversalResult.adxWeight });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Unified Reversal BLOCK', signal, mfs, { reversalScore: unifiedReversalResult.score, reasons: unifiedReversalResult.reasons, adxWeight: unifiedReversalResult.adxWeight });
       throw new Error(`🛑 Unified Reversal BLOCK (${unifiedReversalResult.score}/100) - ${unifiedReversalResult.reasons.slice(0, 2).join(', ')} - trade cancelled`);
     }
     
@@ -1535,7 +1550,7 @@ serve(async (req) => {
     logger.info(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     
     if (riskRewardRatio < minRiskReward) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'R/R Ratio Too Low', signal, trendData, { riskRewardRatio, minRequired: minRiskReward, riskAmount, rewardAmount, currentPrice, stopLoss, takeProfit });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'R/R Ratio Too Low', signal, mfs, { riskRewardRatio, minRequired: minRiskReward, riskAmount, rewardAmount, currentPrice, stopLoss, takeProfit });
       throw new Error(`Risk/Reward ratio too low (${riskRewardRatio.toFixed(2)}:1 < ${minRiskReward}:1 required) - trade cancelled`);
     }
     logger.validation(`✓ R:R check passed: ${riskRewardRatio.toFixed(2)}:1 >= ${minRiskReward}:1 minimum`, true);
@@ -1594,11 +1609,11 @@ serve(async (req) => {
           
           // AI can BLOCK a trade if it recommends "avoid" OR risk level is "high"
           if (analysis.recommendation === 'avoid') {
-            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Recommends AVOID', signal, trendData, { aiRecommendation: analysis.recommendation, aiReasoning: analysis.reasoning, aiKeyFactors: analysis.keyFactors });
+            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Recommends AVOID', signal, mfs, { aiRecommendation: analysis.recommendation, aiReasoning: analysis.reasoning, aiKeyFactors: analysis.keyFactors });
             throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
           }
           if (analysis.riskLevel === 'high') {
-            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Risk Level HIGH', signal, trendData, { aiRiskLevel: analysis.riskLevel, aiKeyFactors: analysis.keyFactors });
+            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Risk Level HIGH', signal, mfs, { aiRiskLevel: analysis.riskLevel, aiKeyFactors: analysis.keyFactors });
             throw new Error(`AI risk level HIGH: ${analysis.keyFactors?.slice(0, 2).join(', ')}`);
           }
           // Medium risk: reduce position size by 50%
@@ -2214,7 +2229,7 @@ serve(async (req) => {
     // MEAN REVERSION SUPPORT: STORE ENTRY ATR FOR EXIT CALCULATIONS
     // ATR at entry provides stable baseline for volatility-adjusted exits
     // ============================================================
-    // ATR is extracted from trendData volatility object
+    // ATR is extracted from MFS snapshot
     const entryAtrPercent = mfs.atrPercent || atrPercent || 1.5;
     const entryAtr = (entryAtrPercent / 100) * executedPrice;  // Convert percent to absolute ATR
     logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
