@@ -311,6 +311,8 @@ const Health = () => {
             )}
           </CardContent>
         </Card>
+        
+        <OversoldBounceWidget />
       </main>
     </div>
   );
