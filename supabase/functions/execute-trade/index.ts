@@ -1019,7 +1019,7 @@ serve(async (req) => {
         // Epsilon tolerance: prevent micro-cliff rejections from rounding/measurement noise
         const VOLUME_EPSILON = 0.005; // 0.5% tolerance
         if (volumeRatio < minVolumeRatio - VOLUME_EPSILON) {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, trendData, { 
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Current Volume', signal, mfs, { 
             volumePercent: (volumeRatio * 100).toFixed(2),
             thresholdPercent: (minVolumeRatio * 100).toFixed(2),
             volumeRatio: volumeRatio.toFixed(3),
