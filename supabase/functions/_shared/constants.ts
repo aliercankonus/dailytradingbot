@@ -4370,8 +4370,8 @@ export const MARKET_REGIME_CLASSIFIER = {
     NORMAL: {
       bollingerMaxPercentB: 90,
       bollingerMinPercentB: 10,
-      stochRsiMaxK: 85,
-      stochRsiMinK: 15,
+      stochRsiMaxK: 80,
+      stochRsiMinK: 20,
       momentumScoreMinimum: 5,           // Standard momentum requirement
       qualityBoost: 0,
       positionMultiplier: 1.0,
