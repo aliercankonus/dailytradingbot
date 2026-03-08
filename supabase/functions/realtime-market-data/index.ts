@@ -216,9 +216,9 @@ serve(async (req) => {
       
       console.log('[MarketData-Edge] Connecting to Binance:', binanceUrl);
       
-      binanceSocket = new WebSocket(binanceUrl);
+      binanceTickerSocket = new WebSocket(binanceUrl);
       
-      binanceSocket.onopen = () => {
+      binanceTickerSocket.onopen = () => {
         console.log('[MarketData-Edge] Connected to Binance WebSocket');
         reconnectAttempts = 0;
         
