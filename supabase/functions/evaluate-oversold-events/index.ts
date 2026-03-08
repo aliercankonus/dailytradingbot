@@ -106,8 +106,8 @@ serve(async (req) => {
         }
 
         // Evaluate shadow trade outcome
-        const shadowSL = event.shadow_stop_loss;
-        const shadowTP = event.shadow_take_profit;
+        const shadowSL = event.shadow_sl;
+        const shadowTP = event.shadow_tp;
         let shadowOutcome = 'OPEN';
         let shadowPnl = ret24h ?? 0;
 
@@ -141,10 +141,10 @@ serve(async (req) => {
             ret_24h: ret24h,
             mae,
             mfe,
-            shadow_outcome: shadowOutcome,
+            shadow_exit_reason: shadowOutcome,
             shadow_pnl_percent: shadowPnl,
             evaluated_at: new Date().toISOString(),
-            evaluation_complete: true,
+            evaluated: true,
           })
           .eq('id', event.id);
 
