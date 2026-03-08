@@ -9794,6 +9794,49 @@ serve(async (req) => {
                       );
                       // Track NEAR_24H_LOW expanded event for bounce study
                       await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                      
+                      // ===== LSRD at EXPANDED block =====
+                      if (LIQUIDITY_SWEEP_REVERSAL.ENABLED) {
+                        try {
+                          const ltfDataForLSRD2 = ltfDataMap.get(symbol);
+                          if (ltfDataForLSRD2 && ltfDataForLSRD2.klines5m.length >= 10) {
+                            const lsrdResult2 = detectLiquiditySweepReversal(
+                              ltfDataForLSRD2.rawKlines5m?.length ? ltfDataForLSRD2.rawKlines5m : ltfDataForLSRD2.klines5m,
+                              ltfDataForLSRD2.klines1m,
+                              priceDistance.low24h, 'low', mfs.atr,
+                              mfs.stochRsi["4h"].k, adx, LIQUIDITY_SWEEP_REVERSAL
+                            );
+                            if (lsrdResult2.detected) {
+                              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 💧 LSRD DETECTED (expanded): score=${lsrdResult2.score} pattern=${lsrdResult2.patternType} → LONG bounce probe at ${(lsrdResult2.positionMultiplier * 100).toFixed(0)}%`);
+                              if (shadowModeEnabled) {
+                                const _dedupLSRD2 = await isShadowSignalDuplicate(supabase as any, userId, symbol, 'long', 'LSRD_BOUNCE_PROBE');
+                                if (!_dedupLSRD2) {
+                                  const lsrdSL2 = priceDistance.low24h * (1 - (mfs.atr / mfs.currentPrice) * 1.5);
+                                  const lsrdTP2 = mfs.currentPrice * (1 + (mfs.atr / mfs.currentPrice) * 2.5);
+                                  await supabase.from('shadow_mode_signals').insert({
+                                    user_id: userId, symbol, signal_type: 'long',
+                                    strategy_name: LIQUIDITY_SWEEP_REVERSAL.SHADOW_STRATEGY_NAME,
+                                    gate_blocked_by: 'LSRD_BOUNCE_PROBE',
+                                    old_gate_result: 'NEAR_24H_LOW_BLOCKED_SHORT',
+                                    new_gate_result: 'LSRD_LONG_BOUNCE',
+                                    gate_details: {
+                                      gate: 'LSRD_BOUNCE_PROBE', lsrdScore: lsrdResult2.score,
+                                      patternType: lsrdResult2.patternType, sweepDepthATR: lsrdResult2.sweepDepthATR.toFixed(3),
+                                      recoveryPercent: lsrdResult2.recoveryPercent.toFixed(3), volumeConfirmed: lsrdResult2.volumeConfirmed,
+                                      originalBlock: 'NEAR_24H_LOW_HARD', subGate: 'EXPANDED_OPPOSING_MOMENTUM',
+                                      adx: adx.toFixed(1), stochK: mfs.stochRsi["4h"].k.toFixed(1),
+                                    },
+                                    confidence_score: Math.round(lsrdResult2.score * 0.7),
+                                    entry_price: mfs.currentPrice,
+                                    stop_loss: lsrdSL2, take_profit: lsrdTP2, trend: trend || null,
+                                  });
+                                }
+                              }
+                            }
+                          }
+                        } catch (lsrdErr) { /* non-critical */ }
+                      }
+                      
                       // Shadow tracking for NEAR_24H_LOW_HARD (expanded opposing momentum)
                       if (shadowModeEnabled) {
                         try {
