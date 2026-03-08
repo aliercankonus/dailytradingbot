@@ -2339,7 +2339,7 @@ serve(async (req) => {
     const marketDataMap = new Map(marketDataResults.filter(Boolean).map((d) => [d.symbol, d]));
     const historicalDataMap = new Map<string, { prices: number[]; volumes: number[]; klines: any[]; livePrice: number }>();
     historicalResults.forEach(({ symbol, data }) => historicalDataMap.set(symbol, data));
-    const ltfDataMap = new Map<string, { klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[] }>();
+    const ltfDataMap = new Map<string, { klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[]; rawKlines5m: any[]; rawPrices5m: number[] }>();
     ltfResults.forEach(({ symbol, data }) => ltfDataMap.set(symbol, data));
 
     // Fetch trend data in PARALLEL for eligible symbols (already filtered by win rate)
