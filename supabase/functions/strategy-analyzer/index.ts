@@ -4235,8 +4235,8 @@ serve(async (req) => {
             // ===== MICRO ADMISSION RELAXATION CHECK =====
             // Before hard blocking, check if near-zero slope + extreme StochRSI warrants micro probe
             const microAdm = COUNTER_TREND_ADMISSION.MICRO_ADMISSION;
-            const admStochK = stochK4h;
-            const admAdxSlope = fullAdxResult.adxSlope ?? 0;
+            const admStochK = mfs.stochRsi["4h"].k;
+            const admAdxSlope = earlyFullAdxResult.adxSlope ?? 0;
             const admFailureReasons = counterTrendAdmissionResult.failureReasons || [];
             
             // Only apply relaxation for slope-related failures (not volatility or other structural issues)
