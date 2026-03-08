@@ -488,6 +488,7 @@ export function buildMarketFeatureSnapshot(
     macdStrong: momentum.macdStrong ?? false,
     macdHistogram: momentum.macdHistogram ?? 0,
     macdDirectionAligned: momentum.macdDirectionAligned ?? false,
+    hasDivergence: momentum.hasDivergence ?? false,
     volumeConfirms: momentum.volumeConfirms ?? false,
     adxRisingMomentum: momentum.adxRising ?? false,
     fakeBreakoutRisk: momentum.fakeBreakoutRisk ?? false,
