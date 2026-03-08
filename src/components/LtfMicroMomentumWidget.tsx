@@ -107,7 +107,16 @@ export default function LtfMicroMomentumWidget() {
     );
   }
 
-  const sorted = [...data].sort((a, b) => Math.abs(b.entryTimingScore - 50) - Math.abs(a.entryTimingScore - 50));
+  // Sort by trade impact: abs(multiplier - 1) descending
+  // Symbols with largest position adjustments (boosts or penalties) appear first
+  const getMultiplierValue = (d: LtfMicroData) => {
+    if (d.entryTimingScore > 80 && d.ltfAlignment > 0) return 1.20;
+    if (d.entryTimingScore > 70 && d.ltfAlignment > 0) return 1.10;
+    if (d.entryTimingScore < 30) return 0.50;
+    if (d.ltfAlignment < 0) return 0.75;
+    return 1.00;
+  };
+  const sorted = [...data].sort((a, b) => Math.abs(getMultiplierValue(b) - 1) - Math.abs(getMultiplierValue(a) - 1));
 
   return (
     <Card>
