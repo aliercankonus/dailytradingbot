@@ -4355,14 +4355,13 @@ export const deriveTradeDirection = (
     let biasDirection: TradeDirection | null = null;
     let biasScore = 0;
     
-    // Get ADX for absolute extreme gating
-    const tier95Adx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+    // Get ADX for absolute extreme gating — MFS direct
+    const tier95Adx = mfs.adx;
     
-    // Evidence 1: Micro-direction (8+ consecutive bars)
-    const consecutiveBars = trendData.momentum?.consecutiveBars || 
-                           trendData.priceActionMomentum?.consecutiveBars || 0;
-    const microDirection = trendData.momentum?.direction || 
-                          trendData.priceActionMomentum?.direction || null;
+    // Evidence 1: Micro-direction (8+ consecutive bars) — MFS direct
+    const consecutiveBars = mfs.consecutiveBars1h || 0;
+    const microDirection = mfs.momentumDirection || 
+                          mfs.priceActionMomentum?.direction || null;
     
     if (consecutiveBars >= (BR.MICRO_DIRECTION_MIN_BARS || 8)) {
       biasScore += BR.MICRO_DIRECTION_SCORE || 2;
