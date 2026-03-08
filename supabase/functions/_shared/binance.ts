@@ -341,13 +341,12 @@ export async function get24hrTicker(symbol: string): Promise<any | null> {
  * Fetch order book depth for spread analysis
  */
 export async function getOrderBookSpread(symbol: string): Promise<{ bid: number; ask: number; spread: number } | null> {
+  await acquireFetchSlot();
   try {
-    await acquireFetchSlot();
     const response = await fetchWithTimeout(
       `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=5`,
       FETCH_TIMEOUTS.depth
     );
-    releaseFetchSlot();
     if (!response.ok) {
       return null;
     }
@@ -355,12 +354,14 @@ export async function getOrderBookSpread(symbol: string): Promise<{ bid: number;
     const bestBid = parseFloat(depth.bids[0][0]);
     const bestAsk = parseFloat(depth.asks[0][0]);
     const spread = ((bestAsk - bestBid) / bestBid) * 100;
-    
+    fetchOkCount++;
     return { bid: bestBid, ask: bestAsk, spread };
   } catch (error) {
-    releaseFetchSlot();
+    if (String(error).includes('BINANCE_TIMEOUT')) timeoutCount++;
     logger.error(`Error fetching order book for ${symbol}: ${error}`);
     return null;
+  } finally {
+    releaseFetchSlot();
   }
 }
 
