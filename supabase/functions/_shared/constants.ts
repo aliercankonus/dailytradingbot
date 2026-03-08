@@ -263,6 +263,70 @@
 // Total exports: ~130 const + 7 types + 2 interfaces + 1 function
 // Last updated: 2026-03-03
 // ═══════════════════════════════════════════════════════════════════════════════
+// ============= SYMBOL-SPECIFIC PARAMETER SETS =============
+// BTC-optimized parameters (proven PF 9+)
+export const BTC_PARAMS = {
+  symbols: ['BTCUSDT'],
+  gates: {
+    STOCHRSI_LONG_OVERBOUGHT: 80,
+    STOCHRSI_SHORT_OVERSOLD: 20,
+    STRONG_TREND_MIN_MOM: 10,
+    PARABOLIC_ADX: 45,
+    MOMENTUM_OPPOSING_THRESHOLD: 15,
+    MIN_QUALITY_SCORE: 45,
+  },
+  stopLoss: {
+    atrMultiplier: 1.5,
+    maxCapPercent: 2.0,
+  },
+  takeProfit: {
+    atrMultiplier: 2.5,
+  },
+  exits: {
+    momentumReversalThreshold: -0.3,
+    momentumReversalScore: 35,
+    momentumReversalMinHours: 2,
+    earlyMomentumFlipThreshold: -0.5,
+    earlyMomentumFlipScore: 50,
+    earlyFlipMinHours: 1,
+    earlyFlipMaxHours: 2,
+  },
+} as const;
+
+// Altcoin-optimized parameters (tighter gates for higher volatility)
+export const ALTCOIN_PARAMS = {
+  symbols: ['ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'],
+  gates: {
+    STOCHRSI_LONG_OVERBOUGHT: 75,   // Tighter block
+    STOCHRSI_SHORT_OVERSOLD: 25,    // Tighter block
+    STRONG_TREND_MIN_MOM: 15,       // Higher momentum requirement
+    PARABOLIC_ADX: 50,              // Higher ADX for trend confirmation
+    MOMENTUM_OPPOSING_THRESHOLD: 12, // Tighter opposing block
+    MIN_QUALITY_SCORE: 50,           // Higher quality floor
+  },
+  stopLoss: {
+    atrMultiplier: 1.2,             // Tighter for altcoin volatility
+    maxCapPercent: 1.5,
+  },
+  takeProfit: {
+    atrMultiplier: 2.0,             // Narrower TP
+  },
+  exits: {
+    momentumReversalThreshold: -0.2, // Cut earlier
+    momentumReversalScore: 30,
+    momentumReversalMinHours: 1.5,
+    earlyMomentumFlipThreshold: -0.3,
+    earlyMomentumFlipScore: 40,
+    earlyFlipMinHours: 1,
+    earlyFlipMaxHours: 2,
+  },
+} as const;
+
+// Helper to get params for a symbol
+export function getSymbolParams(symbol: string) {
+  if (BTC_PARAMS.symbols.includes(symbol)) return BTC_PARAMS;
+  return ALTCOIN_PARAMS;
+}
 
 // ============= TRADING FEE PARAMETERS =============
 // Exchange trading fees for accurate P&L calculation
