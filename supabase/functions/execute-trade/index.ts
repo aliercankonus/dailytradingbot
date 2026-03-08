@@ -1683,8 +1683,8 @@ serve(async (req) => {
           strategyPositionNote = `Momentum strategy: standard size`;
         }
       } else if (isMeanReversion) {
-        const stochRsi1h = trendData?.stochasticRsi?.['1h'] || {};
-        const k1h = stochRsi1h.k ?? 50;
+        const stochRsi1hMR = mfs.stochRsi['1h'];
+        const k1h = stochRsi1hMR.k ?? 50;
         const isExtremeOversold = k1h < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD;
         const isExtremeOverbought = k1h > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT;
         const signalType = signal.signal_type;
