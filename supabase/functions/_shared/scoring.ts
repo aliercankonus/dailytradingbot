@@ -2752,8 +2752,8 @@ export const deriveTradeDirection = (
     // This preserves directional pressure even when trend labels are conservative
     const getMomentumDirectionHint = (): number => {
       // Use MACD/RSI to infer direction when trend is neutral
-      const macdHistogram = trendData.momentum?.macdHistogram ?? trendData.indicators?.macdHistogram ?? 0;
-      const rsi = trendData.indicators?.rsi ?? trendData.momentum?.rsi ?? 50;
+      const macdHistogram = mfs.macdHistogram;
+      const rsi = mfs.timeframes["1h"].rsi;
       
       if (macdHistogram > 0 && rsi > RSI_ZONE_THRESHOLDS.BULLISH_HINT) return 1;  // Bullish hint
       if (macdHistogram < 0 && rsi < RSI_ZONE_THRESHOLDS.BEARISH_HINT) return -1; // Bearish hint
