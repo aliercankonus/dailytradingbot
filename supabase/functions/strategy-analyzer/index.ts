@@ -4688,7 +4688,7 @@ serve(async (req) => {
           
           if (isAdxTransitional && htfNotStrong && MEAN_REVERSION_CONFIG.ENABLED) {
             // Compute dedicated MR signal with regime gating skipped
-            const transitionalMRForDirection = detectExhaustion(trendData, { skipRegimeGating: true });
+            const transitionalMRForDirection = detectExhaustion(mfs, { skipRegimeGating: true });
             
             if (transitionalMRForDirection?.detected && transitionalMRForDirection?.allowed && transitionalMRForDirection?.direction) {
               mrTransitionalDirectionOverrideApplied = true;
