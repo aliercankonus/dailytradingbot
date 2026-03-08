@@ -2493,15 +2493,10 @@ serve(async (req) => {
           momentum_score: momScore,
           regime: regimeVal,
           primary_trend: trendVal,
-          gate_type: gateType,
+          gate_name: gateType,
           shadow_entry_price: price,
-          shadow_stop_loss: shadowStopLoss,
-          shadow_take_profit: shadowTakeProfit,
-          feature_snapshot: {
-            stochK, adx: adxVal, adxSlope: adxSlopeVal,
-            momentumScore: momScore, regime: regimeVal,
-            primaryTrend: trendVal, atr: atrVal, price
-          }
+          shadow_sl: shadowStopLoss,
+          shadow_tp: shadowTakeProfit,
         });
         
         if (error) {
