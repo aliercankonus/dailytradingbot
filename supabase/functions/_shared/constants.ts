@@ -3304,6 +3304,37 @@ export const CONVERGENCE_PARAMS = {
 } as const;
 
 
+// ============= LTF MICRO TIMING GATE =============
+// Uses 1m/5m micro-momentum entryTimingScore to adjust position sizing
+// Poor micro-timing (score < 30) reduces position, excellent timing (> 70) boosts it
+export const LTF_MICRO_TIMING_GATE = {
+  ENABLED: true,
+  
+  // ===== POOR TIMING REDUCTION =====
+  // When entryTimingScore < this threshold, reduce position
+  POOR_TIMING_THRESHOLD: 30,
+  POOR_TIMING_MULTIPLIER: 0.50,  // 50% position reduction
+  
+  // ===== EXCELLENT TIMING BOOST =====
+  // When entryTimingScore > this threshold, boost position
+  EXCELLENT_TIMING_THRESHOLD: 70,
+  EXCELLENT_TIMING_MULTIPLIER: 1.20,  // 20% position boost
+  
+  // ===== MODERATE TIMING (no change) =====
+  // Scores between 30-70 get no adjustment (1.0x)
+  
+  // ===== MINIMUM ADX FOR BOOST =====
+  // Only apply boost when ADX confirms trend energy (prevents boosting in chop)
+  MIN_ADX_FOR_BOOST: 22,
+  
+  // ===== LTF ALIGNMENT REQUIREMENT FOR BOOST =====
+  // Require ltfAlignment > 0 (1m and 5m agree) for boost to apply
+  REQUIRE_LTF_ALIGNMENT_FOR_BOOST: true,
+  
+  LOG_GATE_CHECKS: true,
+} as const;
+
+
 // ============= PHASE 3: CONTEXT-AWARE EXIT MANAGEMENT =============
 // Smart stop loss and trailing activation based on market context
 
