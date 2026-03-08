@@ -1155,15 +1155,14 @@ const calculateSeparatedRisk = (
 };
 
 // Helper: Count StochRSI signals opposing the intended trade direction
-const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
+const countOpposingStochSignals = (mfs: MarketFeatureSnapshot, intendedDirection: string): {
   opposingCrossCount: number;
   extremeCount: number;
   crossTimeframes: string[];
   extremeTimeframes: string[];
 } => {
-  const stochRsi = trendData?.stochasticRsi || {};
-  const aggregated = stochRsi.aggregated || {};
-  const timeframes = ['4h', '1h', '30m', '15m'];
+  const aggregated = mfs.stochRsiAggregated;
+  const timeframes = ['4h', '1h', '30m', '15m'] as const;
   
   let opposingCrossCount = 0;
   let extremeCount = 0;
@@ -1173,19 +1172,17 @@ const countOpposingStochSignals = (trendData: any, intendedDirection: string): {
   const isLong = intendedDirection === "bullish" || intendedDirection === "long";
   
   if (isLong) {
-    opposingCrossCount = aggregated.bearishCrossCount || 0;
-    extremeCount = aggregated.overboughtCount || 0;
+    opposingCrossCount = aggregated.bearishCrossCount;
+    extremeCount = aggregated.overboughtCount;
   } else {
-    opposingCrossCount = aggregated.bullishCrossCount || 0;
-    extremeCount = aggregated.oversoldCount || 0;
+    opposingCrossCount = aggregated.bullishCrossCount;
+    extremeCount = aggregated.oversoldCount;
   }
   
   for (const tf of timeframes) {
-    const tfData = stochRsi[tf];
-    if (!tfData) continue;
-    
-    const k = tfData.k ?? 50;
-    const signal = tfData.signal || "neutral";
+    const tfData = mfs.stochRsi[tf];
+    const k = tfData.k;
+    const signal = tfData.signal;
     
     if (isLong) {
       if (signal === "bearish_cross") crossTimeframes.push(tf);
