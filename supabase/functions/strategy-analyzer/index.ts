@@ -531,141 +531,114 @@ class RejectionBuffer {
 let activeRejectionBuffer: RejectionBuffer | null = null;
 
 // Helper function to log rejection with optional AI analysis and Order Flow data
-// ENHANCED: Automatically extracts StochRSI K/D and Bollinger %B values from trendData for all rejection logs
+// PHASE 3 MFS MIGRATION: Now reads all indicator data from MarketFeatureSnapshot when available
+// Falls back to empty defaults when mfs is null (pre-loop calls like symbol filters)
 const logRejectionWithAI = async (
   supabase: any,
   userId: string,
   symbol: string,
   rejectionReason: string,
   filtersStatus: any,
-  trendData: any,
+  mfs: MarketFeatureSnapshot | null,
   enableAI: boolean = false,
   orderFlow?: OrderFlowAnalysis | null
 ) => {
-  // CENTRALIZED: Use shared extractors for consistent StochRSI extraction across all edge functions
-  // Extract all timeframe K/D values for full diagnostic visibility
-  const stochK4h = extractStochRsiK(trendData, '4h');
-  const stochD4h = extractStochRsiD(trendData, '4h');
-  const stochK1h = extractStochRsiK(trendData, '1h');
-  const stochD1h = extractStochRsiD(trendData, '1h');
-  const stochK30m = extractStochRsiK(trendData, '30m');
-  const stochD30m = extractStochRsiD(trendData, '30m');
-  const stochK15m = extractStochRsiK(trendData, '15m');
-  const stochD15m = extractStochRsiD(trendData, '15m');
-  
-  const stochRsiData = {
+  // Extract all indicator data from MarketFeatureSnapshot (single source of truth)
+  const stochRsiData = mfs ? {
     // FLAT FIELDS for UI compatibility (Issue #1 & #2 fix)
-    stochRsiK: stochK4h,      // Primary 4h K (legacy field)
-    stochRsiD: stochD4h,      // Primary 4h D (NEW - Issue #2)
-    stochRsiK4h: stochK4h,    // Explicit 4h K
-    stochRsiD4h: stochD4h,    // Explicit 4h D (NEW - Issue #2)
-    stochRsiK1h: stochK1h,    // 1h K (NEW - Issue #1)
-    stochRsiD1h: stochD1h,    // 1h D (NEW - Issue #1)
-    stochRsiK30m: stochK30m,  // 30m K
-    stochRsiD30m: stochD30m,  // 30m D
-    stochRsiK15m: stochK15m,  // 15m K
-    stochRsiD15m: stochD15m,  // 15m D
+    stochRsiK: mfs.stochRsi["4h"].k,      // Primary 4h K (legacy field)
+    stochRsiD: mfs.stochRsi["4h"].d,      // Primary 4h D (NEW - Issue #2)
+    stochRsiK4h: mfs.stochRsi["4h"].k,    // Explicit 4h K
+    stochRsiD4h: mfs.stochRsi["4h"].d,    // Explicit 4h D (NEW - Issue #2)
+    stochRsiK1h: mfs.stochRsi["1h"].k,    // 1h K (NEW - Issue #1)
+    stochRsiD1h: mfs.stochRsi["1h"].d,    // 1h D (NEW - Issue #1)
+    stochRsiK30m: mfs.stochRsi["30m"].k,  // 30m K
+    stochRsiD30m: mfs.stochRsi["30m"].d,  // 30m D
+    stochRsiK15m: mfs.stochRsi["15m"].k,  // 15m K
+    stochRsiD15m: mfs.stochRsi["15m"].d,  // 15m D
     // NESTED OBJECTS for structured access
-    stochRsi4h: { k: stochK4h, d: stochD4h },
-    stochRsi1h: { k: stochK1h, d: stochD1h },
-    stochRsi30m: { k: stochK30m, d: stochD30m },
-    stochRsi15m: { k: stochK15m, d: stochD15m }
-  };
+    stochRsi4h: { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
+    stochRsi1h: { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
+    stochRsi30m: { k: mfs.stochRsi["30m"].k, d: mfs.stochRsi["30m"].d },
+    stochRsi15m: { k: mfs.stochRsi["15m"].k, d: mfs.stochRsi["15m"].d }
+  } : {};
   
-  // Extract Bollinger Band %B and squeeze values from trendData for consistent logging (all timeframes)
-  const bb4h = trendData?.bollingerBands?.["4h"];
-  const bb1h = trendData?.bollingerBands?.["1h"];
-  const bb30m = trendData?.bollingerBands?.["30m"];
-  const bb15m = trendData?.bollingerBands?.["15m"];
-  const bollingerData = {
+  // Extract Bollinger Band %B and squeeze values from MFS
+  const bollingerData = mfs ? {
     bollinger4h: {
-      percentB: bb4h?.percentB ?? null,
-      squeeze: bb4h?.squeeze ?? null,
-      squeezeIntensity: bb4h?.squeezeIntensity ?? null,
-      pricePosition: bb4h?.pricePosition ?? null,
+      percentB: mfs.bollinger["4h"].percentB,
+      squeeze: mfs.bollinger["4h"].squeeze,
+      squeezeIntensity: mfs.bollinger["4h"].squeezeIntensity,
+      pricePosition: mfs.bollinger["4h"].pricePosition,
     },
     bollinger1h: {
-      percentB: bb1h?.percentB ?? null,
-      squeeze: bb1h?.squeeze ?? null,
-      squeezeIntensity: bb1h?.squeezeIntensity ?? null,
-      pricePosition: bb1h?.pricePosition ?? null,
+      percentB: mfs.bollinger["1h"].percentB,
+      squeeze: mfs.bollinger["1h"].squeeze,
+      squeezeIntensity: mfs.bollinger["1h"].squeezeIntensity,
+      pricePosition: mfs.bollinger["1h"].pricePosition,
     },
     bollinger30m: {
-      percentB: bb30m?.percentB ?? null,
-      squeeze: bb30m?.squeeze ?? null,
-      squeezeIntensity: bb30m?.squeezeIntensity ?? null,
-      pricePosition: bb30m?.pricePosition ?? null,
+      percentB: mfs.bollinger["30m"].percentB,
+      squeeze: mfs.bollinger["30m"].squeeze,
+      squeezeIntensity: mfs.bollinger["30m"].squeezeIntensity,
+      pricePosition: mfs.bollinger["30m"].pricePosition,
     },
     bollinger15m: {
-      percentB: bb15m?.percentB ?? null,
-      squeeze: bb15m?.squeeze ?? null,
-      squeezeIntensity: bb15m?.squeezeIntensity ?? null,
-      pricePosition: bb15m?.pricePosition ?? null,
+      percentB: mfs.bollinger["15m"].percentB,
+      squeeze: mfs.bollinger["15m"].squeeze,
+      squeezeIntensity: mfs.bollinger["15m"].squeezeIntensity,
+      pricePosition: mfs.bollinger["15m"].pricePosition,
     }
-  };
+  } : {};
   
-  // Extract ADX and ADX slope for mean reversion diagnostics
-  // IMPORTANT: Only use trendData values as FALLBACKS - never overwrite explicitly passed values
-  const adxData = {
-    adx: trendData?.volatility?.adx ?? trendData?.adx ?? null,
-    adxSlope: trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? null,
-    adxRising: trendData?.volatility?.adxRising ?? trendData?.momentum?.adxRising ?? null,
-    // Also include ADX from other timeframes if available
-    adx15m: trendData?.volatility?.adx15m ?? null,
-    adx30m: trendData?.volatility?.adx30m ?? null,
-    adx4h: trendData?.volatility?.adx4h ?? null,
-  };
+  // Extract ADX and ADX slope from MFS
+  const adxData = mfs ? {
+    adx: mfs.adx,
+    adxSlope: mfs.adxSlope,
+    adxRising: mfs.adxRising,
+    adx15m: mfs.adx15m ?? null,
+    adx30m: mfs.adx30m ?? null,
+    adx4h: mfs.adx4h ?? null,
+  } : {};
   
-  // Extract momentum score and phase for gate analysis (fixes NEAR_24H_HIGH shadow condition NULL issue)
-  const momentumData = {
-    momentumScore: trendData?.smartMomentum?.score ?? trendData?.momentum?.momentumScore ?? null,
-    momentumPhase: trendData?.smartMomentum?.phase ?? null,
-    momentumDirection: trendData?.smartMomentum?.direction ?? null,
-    isAccelerating: trendData?.smartMomentum?.isAccelerating ?? null,
-    isWeakening: trendData?.smartMomentum?.isWeakening ?? null,
-    isTransitioning: trendData?.smartMomentum?.isTransitioning ?? null,
-  };
+  // Extract momentum data from MFS
+  const momentumData = mfs ? {
+    momentumScore: mfs.smartMomentum?.score ?? null,
+    momentumPhase: mfs.smartMomentum?.phase ?? null,
+    momentumDirection: mfs.smartMomentum?.direction ?? null,
+    isAccelerating: mfs.smartMomentum?.isAccelerating ?? null,
+    isWeakening: mfs.smartMomentum?.isWeakening ?? null,
+    isTransitioning: mfs.smartMomentum?.isTransitioning ?? null,
+  } : {};
   
-  // Extract regime data centrally — prevents reliance on gate-specific passthrough
-  const regimeData = {
-    effectiveRegime: trendData?.regime?.regime ?? trendData?.effectiveRegime ?? null,
-    regimeConfidence: trendData?.regime?.confidence ?? trendData?.regimeConfidence ?? null,
-    regimePersistence: trendData?.regime?.persistedBars ?? null,
-    regimeCandidate: trendData?.regime?.candidate ?? null,
-  };
+  // Extract regime data from MFS
+  const regimeData = mfs ? {
+    effectiveRegime: mfs.regime?.regime ?? null,
+    regimeConfidence: mfs.regime?.confidence ?? null,
+    regimePersistence: mfs.regime?.persistedBars ?? null,
+    regimeCandidate: mfs.regime?.candidate ?? null,
+  } : {};
   
-  // PHASE FIX: Always include volumeRatio unconditionally in rejection logs
-  // Contract: volumeRatio must always be present (null = not computed, number = actual value)
-  // This fixes the UI bug where missing volumeRatio defaulted to 1.0 ("100% Normal") incorrectly
-  const volumeData = {
-    // Extract volumeRatio from 1h timeframe (primary reference) with fallbacks to other timeframes
-    // The volume object is structured as { "15m": {...volumeRatio...}, "30m": {...}, "1h": {...}, "4h": {...} }
-    volumeRatio: trendData?.volume?.["1h"]?.volumeRatio ?? 
-                 trendData?.volume?.["30m"]?.volumeRatio ?? 
-                 trendData?.volume?.["4h"]?.volumeRatio ?? 
-                 trendData?.volume?.["15m"]?.volumeRatio ?? 
-                 trendData?.volume?.ratio ?? 
-                 null,  // null = not computed, DO NOT default to 1.0
-    volumeTrend: trendData?.volume?.["1h"]?.volumeTrend ?? 
-                 trendData?.volume?.trend ?? 
+  // Extract volume data from MFS
+  const volumeData = mfs ? {
+    volumeRatio: mfs.volume["1h"].volumeRatio ?? 
+                 mfs.volume["30m"].volumeRatio ?? 
+                 mfs.volume["4h"].volumeRatio ?? 
+                 mfs.volume["15m"].volumeRatio ?? 
                  null,
-    volumeSpike: trendData?.volume?.["1h"]?.volumeSpike ?? 
-                 trendData?.volume?.spike ?? 
-                 null,
-    volumeAboveMA: trendData?.volume?.aboveMA ?? 
-                   (trendData?.volume?.["1h"]?.volumeRatio > 1.0 ? true : 
-                    trendData?.volume?.["1h"]?.volumeRatio !== undefined ? false : null),
-  };
+    volumeTrend: mfs.volume["1h"].volumeTrend ?? null,
+    volumeSpike: mfs.volume["1h"].volumeSpike ?? null,
+    volumeAboveMA: mfs.volume["1h"].volumeRatio > 1.0 ? true : false,
+  } : {};
   
-  // Merge Order Flow data, StochRSI data, Bollinger data, ADX data, and Volume data into filters_status
+  // Merge all extracted data into filters_status
   // CRITICAL FIX: filtersStatus takes precedence for explicitly passed values (like adxSlope from gate checks)
-  // Spread order: base data first, then filtersStatus last to preserve gate-specific values
   let enrichedFiltersStatus = {
     ...stochRsiData,
     ...bollingerData,
     ...adxData,
     ...momentumData,
-    ...regimeData, // Centralized regime info (effectiveRegime, confidence, persistence, candidate)
+    ...regimeData,
     ...volumeData,
     ...filtersStatus, // LAST: Gate-specific values override defaults
   };
@@ -693,7 +666,7 @@ const logRejectionWithAI = async (
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
-      ai_context: { trendData, enableAI },
+      ai_context: { mfs, enableAI },
     });
     return;
   }
@@ -716,12 +689,12 @@ const logRejectionWithAI = async (
     return;
   }
 
-  if (enableAI && data?.id && trendData) {
+  if (enableAI && data?.id && mfs) {
     analyzeRejectionWithAI(supabase, data.id, {
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
-      trend_data: trendData,
+      trend_data: mfs, // Pass snapshot as trend_data for AI analysis
     }).catch(err => logger.forSymbol(symbol).error(`AI analysis failed: ${err}`));
   }
 };
