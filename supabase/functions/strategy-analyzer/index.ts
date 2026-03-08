@@ -278,7 +278,7 @@ import {
   type ImpulseContinuationResult,
   type FourStateRegimeResult
 } from "../_shared/scoring.ts";
-import { buildMarketFeatureSnapshot, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
+import { buildMarketFeatureSnapshot, snapshotAlignedTFCount, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
@@ -3832,7 +3832,7 @@ serve(async (req) => {
                       adx: parseFloat(adx.toFixed(1)),
                       adxSlope: parseFloat(earlyAdxSlope.toFixed(2)),
                       momentumScore: parseFloat(earlyMomentumScore.toFixed(0)),
-                      alignedTFs: (() => { let bc = 0; const tfs = trendData.timeframes || {}; for (const tf of ['15m','30m','1h','4h']) { const t = tfs[tf]?.trend; if (t === 'bearish' || t === 'weak_bearish') bc++; } return bc; })(),
+                      alignedTFs: snapshotAlignedTFCount(mfs, 'short'),
                     },
                     isPreStrategy: true,
                     message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Flash Crash Phase 2: ${phase2Triggered ? 'TRIGGERED' : (Object.keys(phase2Diagnostics).length > 0 ? 'EVALUATED' : 'NOT_CHECKED')}`
@@ -3856,17 +3856,7 @@ serve(async (req) => {
             // EXCEPTION 2: Strong Trend Override allows LONG if ADX>40 and momentum confirms
             // FIX: During RALLY_OVERRIDE conditions (3+ TFs aligned), raise threshold from 97 to 98
             // to prevent borderline K=97.6 from blocking confirmed rallies
-            const earlyRallyAlignedCount = (() => {
-              let count = 0;
-              for (const tf of ['15m', '30m', '1h', '4h'] as const) {
-                const tfTrend = mfs.timeframes[tf].trend;
-                if ((earlyDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
-                    (earlyDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
-                  count++;
-                }
-              }
-              return count;
-            })();
+            const earlyRallyAlignedCount = snapshotAlignedTFCount(mfs, earlyDirection as 'long' | 'short');
             const earlyRallyConditions = earlyRallyAlignedCount >= 3 && adx >= ADX_THRESHOLDS.MINIMUM;
             const effectiveOverboughtThreshold = earlyRallyConditions ? 98 : DEEP_STOCHRSI_HARD_GATE.DEEP_OVERBOUGHT_K_THRESHOLD;
             
@@ -4889,15 +4879,8 @@ serve(async (req) => {
         const primaryTrendForRegime = mfs.primaryTrend || 'neutral';
         const isBBSqueeze = mfs.bollinger.squeezeActive || mfs.bollinger["4h"].squeeze;
         
-        // Count aligned timeframes for breakout confirmation (from snapshot)
-        let alignedTFCount = 0;
-        for (const tf of ['15m', '30m', '1h', '4h'] as const) {
-          const tfTrend = mfs.timeframes[tf].trend;
-          if ((derivedDirection === 'long' && tfTrend === 'bullish') || 
-              (derivedDirection === 'short' && tfTrend === 'bearish')) {
-            alignedTFCount++;
-          }
-        }
+        // Count aligned timeframes for breakout confirmation (from snapshot convenience function)
+        const alignedTFCount = snapshotAlignedTFCount(mfs, derivedDirection as 'long' | 'short');
         
         // DI separation and relative ATR from snapshot
         const diPlus = mfs.diPlus;
