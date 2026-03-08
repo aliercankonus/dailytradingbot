@@ -2421,6 +2421,8 @@ serve(async (req) => {
     const symbolRegimeMap = new Map<string, string>();
     // Collect order flow analysis + price closes for batch snapshot update (cached Order Flow dashboard)
     const symbolOrderFlowMap = new Map<string, { orderFlow: OrderFlowAnalysis; closes: number[]; direction: "long" | "short"; directionSource: string }>();
+    // Collect LTF micro momentum data for batch snapshot update (LTF dashboard)
+    const symbolLtfMicroMap = new Map<string, { score5m: number; direction5m: string; score1m: number; direction1m: string; ltfAlignment: number; entryTimingScore: number; microTrendConfirms: boolean; recentCandlePattern: string; isAccelerating5m: boolean; isReverting1m: boolean }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
@@ -3213,12 +3215,25 @@ serve(async (req) => {
           const htfDir = mfs.primaryTrend === "bullish" ? 1 : mfs.primaryTrend === "bearish" ? -1 : 0;
           const microTrendConfirms = htfDir !== 0 && Math.sign(ltfAlignment) === Math.sign(htfDir);
           
-          // Entry timing score: higher when 5m is accelerating toward HTF direction
-          let entryTimingScore = 50; // baseline
-          if (mom5m.isAccelerating && microTrendConfirms) entryTimingScore = 85;
-          else if (microTrendConfirms && Math.abs(mom5m.score) > 30) entryTimingScore = 75;
-          else if (microTrendConfirms) entryTimingScore = 65;
-          else if (!microTrendConfirms && Math.abs(mom5m.score) > 40) entryTimingScore = 25; // opposing
+          // Entry timing score: weighted composite
+          // Weights: microTrendConfirms (HTF alignment) = 35%, 5m acceleration = 25%, 
+          //          5m momentum magnitude = 25%, 1m/5m alignment = 15%
+          let entryTimingScore = 50; // baseline (neutral)
+          
+          // Factor 1: HTF alignment (35% weight → 0-35 points above/below baseline)
+          const htfAlignBonus = microTrendConfirms ? 20 : (htfDir !== 0 ? -15 : 0);
+          
+          // Factor 2: 5m acceleration (25% weight → 0-20 points)
+          const accelBonus = mom5m.isAccelerating ? (microTrendConfirms ? 20 : 5) : 0;
+          
+          // Factor 3: 5m momentum magnitude (25% weight → -15 to +15)
+          const momMagBonus = Math.abs(mom5m.score) > 40 ? (microTrendConfirms ? 15 : -15) 
+                            : Math.abs(mom5m.score) > 20 ? (microTrendConfirms ? 8 : -5) : 0;
+          
+          // Factor 4: 1m/5m alignment (15% weight → -10 to +10)
+          const alignBonus = ltfAlignment > 0.5 ? 10 : ltfAlignment < -0.5 ? -10 : ltfAlignment > 0 ? 5 : 0;
+          
+          entryTimingScore = Math.max(0, Math.min(100, 50 + htfAlignBonus + accelBonus + momMagBonus + alignBonus));
           
           // Is 1m reverting vs 5m? (short-term mean reversion signal)
           const isReverting1m = dir1mSign !== 0 && dir5mSign !== 0 && dir1mSign !== dir5mSign;
@@ -3244,6 +3259,14 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(
             `🔬 LTF_MICRO: 5m=${mom5m.score.toFixed(0)}(${mom5m.direction}/${mom5m.phase}) 1m=${mom1m.score.toFixed(0)}(${mom1m.direction}) align=${ltfAlignment.toFixed(2)} timing=${entryTimingScore} confirms=${microTrendConfirms} pattern=${recentCandlePattern}${isReverting1m ? ' ⚠️REVERTING' : ''}`
           );
+          
+          // Collect for batch snapshot persist (dashboard)
+          symbolLtfMicroMap.set(symbol, {
+            score5m: mom5m.score, direction5m: mom5m.direction,
+            score1m: mom1m.score, direction1m: mom1m.direction,
+            ltfAlignment, entryTimingScore, microTrendConfirms, recentCandlePattern,
+            isAccelerating5m: mom5m.isAccelerating, isReverting1m,
+          });
         } else {
           logger.forSymbol(symbol).debug(`🔬 LTF_MICRO: Insufficient 5m data (${ltfData?.prices5m.length ?? 0} candles)`);
         }
@@ -18846,15 +18869,21 @@ serve(async (req) => {
             if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: POOR entry timing (score=${timingScore.toFixed(0)}<${LTF_MICRO_TIMING_GATE.POOR_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | 5m=${ltfMicro.direction5m}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
             }
-          } else if (timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD) {
-            // Excellent micro-timing: boost position by 20% (with guards)
+          } else if (timingScore > LTF_MICRO_TIMING_GATE.GOOD_TIMING_THRESHOLD) {
+            // Good or Excellent micro-timing: graduated boost with guards
             const adxSupports = adx >= LTF_MICRO_TIMING_GATE.MIN_ADX_FOR_BOOST;
             const alignmentOk = !LTF_MICRO_TIMING_GATE.REQUIRE_LTF_ALIGNMENT_FOR_BOOST || ltfAlign > 0;
             
             if (adxSupports && alignmentOk) {
-              ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_MULTIPLIER;
+              // Graduated: 70-80 → 1.10x, 80+ → 1.20x
+              if (timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD) {
+                ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_MULTIPLIER;
+              } else {
+                ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.GOOD_TIMING_MULTIPLIER;
+              }
               if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: EXCELLENT entry timing (score=${timingScore.toFixed(0)}>${LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | ADX=${adx.toFixed(1)}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
+                const tier = timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD ? 'EXCELLENT' : 'GOOD';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: ${tier} entry timing (score=${timingScore.toFixed(0)}>${tier === 'EXCELLENT' ? LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD : LTF_MICRO_TIMING_GATE.GOOD_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | ADX=${adx.toFixed(1)}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
               }
             } else {
               if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
@@ -18868,7 +18897,7 @@ serve(async (req) => {
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⏱️ LTF_MICRO_TIMING - position size adjusted to ${unifiedPositionSize.toFixed(2)}% (timing score: ${ltfMicro.entryTimingScore.toFixed(0)})`);
           }
         }
-        
+
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
@@ -19401,6 +19430,34 @@ serve(async (req) => {
         logger.warn(`⚠️ Failed to cache order flow for ${orderFlowErrors.length}/${symbolOrderFlowMap.size} symbols`);
       } else {
         logger.info(`📊 Cached order flow data in trend_snapshots for ${symbolOrderFlowMap.size} symbols`);
+      }
+    }
+
+    // ============= BATCH UPDATE LTF MICRO DATA IN TREND SNAPSHOTS =============
+    if (symbolLtfMicroMap.size > 0) {
+      const ltfMicroUpdatePromises = Array.from(symbolLtfMicroMap.entries()).map(([sym, data]) => {
+        return supabase
+          .from("trend_snapshots")
+          .select("snapshot_data")
+          .eq("user_id", userId)
+          .eq("symbol", sym)
+          .single()
+          .then(({ data: existing }) => {
+            const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+            const mergedData = { ...existingData, ltfMicroMomentum: data };
+            return supabase
+              .from("trend_snapshots")
+              .update({ snapshot_data: mergedData })
+              .eq("user_id", userId)
+              .eq("symbol", sym);
+          });
+      });
+      const ltfResults = await Promise.all(ltfMicroUpdatePromises);
+      const ltfErrors = ltfResults.filter(r => r?.error);
+      if (ltfErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache LTF micro for ${ltfErrors.length}/${symbolLtfMicroMap.size} symbols`);
+      } else {
+        logger.info(`🔬 Cached LTF micro momentum in trend_snapshots for ${symbolLtfMicroMap.size} symbols`);
       }
     }
 
