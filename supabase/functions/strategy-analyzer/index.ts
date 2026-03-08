@@ -686,6 +686,7 @@ const logRejectionWithAI = async (
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
+      trend_data: mfsCompactSummary,
       checked_at: new Date().toISOString(),
     })
     .select("id")
