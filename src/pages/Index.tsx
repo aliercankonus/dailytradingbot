@@ -29,6 +29,7 @@ import { MomentumStatusDashboard } from "@/components/MomentumStatusDashboard";
 import ModuleInventoryDashboard from "@/components/ModuleInventoryDashboard";
 import { RegimeTransitionLog } from "@/components/RegimeTransitionLog";
 import { OrderFlowDashboard } from "@/components/OrderFlowDashboard";
+import LtfMicroMomentumWidget from "@/components/LtfMicroMomentumWidget";
 import MarketOpportunityDensity from "@/components/MarketOpportunityDensity";
 
 
