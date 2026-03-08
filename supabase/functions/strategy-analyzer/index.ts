@@ -4235,8 +4235,8 @@ serve(async (req) => {
             // ===== MICRO ADMISSION RELAXATION CHECK =====
             // Before hard blocking, check if near-zero slope + extreme StochRSI warrants micro probe
             const microAdm = COUNTER_TREND_ADMISSION.MICRO_ADMISSION;
-            const admStochK = stochK4h;
-            const admAdxSlope = fullAdxResult.adxSlope ?? 0;
+            const admStochK = mfs.stochRsi["4h"].k;
+            const admAdxSlope = earlyFullAdxResult.adxSlope ?? 0;
             const admFailureReasons = counterTrendAdmissionResult.failureReasons || [];
             
             // Only apply relaxation for slope-related failures (not volatility or other structural issues)
@@ -5774,7 +5774,7 @@ serve(async (req) => {
           const currentRegimeStr = fourStateRegime?.regime || 'UNKNOWN';
           const regimeIsTrendExpansion = currentRegimeStr === 'TREND_EXPANSION';
           const regimeIsEarlyTrendRising = currentRegimeStr === 'EARLY_TREND' && 
-            trendExpBypass?.ALLOW_EARLY_TREND_WITH_RISING_ADX && fullAdxResult.adxRising;
+            trendExpBypass?.ALLOW_EARLY_TREND_WITH_RISING_ADX && earlyFullAdxResult.adxRising;
           
           // ===== REGIME-AWARE ADX SCALING + COMPOSITE TREND SCORE =====
           // Replace binary ADX >= 25 with regime-dependent thresholds
@@ -5789,7 +5789,7 @@ serve(async (req) => {
           let compositeTrendScore = 0;
           if (trendExpBypass.ENABLE_COMPOSITE_TREND_SCORE) {
             const adxComponent = (adx - (trendExpBypass.COMPOSITE_ADX_BASELINE ?? 20)) * (trendExpBypass.COMPOSITE_ADX_WEIGHT ?? 0.6);
-            const slopeComponent = ((fullAdxResult.slope ?? 0) * (trendExpBypass.COMPOSITE_SLOPE_SCALE ?? 10)) * (trendExpBypass.COMPOSITE_SLOPE_WEIGHT ?? 0.4);
+            const slopeComponent = ((earlyFullAdxResult.slope ?? 0) * (trendExpBypass.COMPOSITE_SLOPE_SCALE ?? 10)) * (trendExpBypass.COMPOSITE_SLOPE_WEIGHT ?? 0.4);
             compositeTrendScore = adxComponent + slopeComponent;
             compositeBypassEligible = compositeTrendScore >= (trendExpBypass.COMPOSITE_TREND_SCORE_THRESHOLD ?? 3.0);
           }
@@ -5977,13 +5977,13 @@ serve(async (req) => {
             // Allow probe entry at 0.30x instead of hard block.
             let structuralAccelBypassAllowed = false;
             let structuralAccelPositionMultiplier = 0.30;
-            if (adx >= 30 && (fullAdxResult.adxSlope ?? 0) >= 0.3 && htfAlignedWith4h) {
+            if (adx >= 30 && (earlyFullAdxResult.adxSlope ?? 0) >= 0.3 && htfAlignedWith4h) {
               const absMom = Math.abs(smartMomentum.score);
               // Only bypass moderate opposition (15-40), not extreme (>40)
               if (absMom >= 15 && absMom <= 40) {
                 structuralAccelBypassAllowed = true;
                 structuralAccelPositionMultiplier = absMom <= 25 ? 0.35 : 0.25;
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ STRUCTURAL_ACCELERATION_BYPASS: ${derivedDirection.toUpperCase()} allowed — ADX=${adx.toFixed(1)}, slope=${(fullAdxResult.adxSlope ?? 0).toFixed(2)}, 4h aligned, momentum=${smartMomentum.score.toFixed(0)} (likely lagging)`);
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ STRUCTURAL_ACCELERATION_BYPASS: ${derivedDirection.toUpperCase()} allowed — ADX=${adx.toFixed(1)}, slope=${(earlyFullAdxResult.adxSlope ?? 0).toFixed(2)}, 4h aligned, momentum=${smartMomentum.score.toFixed(0)} (likely lagging)`);
                 logger.forSymbol(symbol).info(`   → Position reduced to ${(structuralAccelPositionMultiplier * 100).toFixed(0)}%`);
                 (trendData as any).structuralAccelBypassMultiplier = structuralAccelPositionMultiplier;
               }
@@ -6009,7 +6009,7 @@ serve(async (req) => {
                   momentumScore: smartMomentum.score, 
                   momentumState: trendData?.momentum?.state || 'none',
                   adx,
-                  adxSlope: fullAdxResult.adxSlope,
+                  adxSlope: earlyFullAdxResult.adxSlope,
                   htfTrend4h, 
                   htfTrend1h,
                   phase,
@@ -6495,15 +6495,15 @@ serve(async (req) => {
         
         // NEW: Detect BEHAVIORAL ADX exhaustion (slope-based, not absolute threshold)
         const adxExhaustion = detectADXExhaustion(
-          fullAdxResult,
+          earlyFullAdxResult,
           priceData,
           rsiArrayForPullback,
           derivedDirection
         );
         
         // Log ADX exhaustion analysis
-        if (fullAdxResult.adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
-          logger.forSymbol(symbol).info(`📊 ADX BEHAVIORAL: adx=${fullAdxResult.adx.toFixed(1)} slope=${fullAdxResult.adxSlope.toFixed(2)} peaked=${fullAdxResult.adxPeaked} diGap=${fullAdxResult.diGap.toFixed(1)}`);
+        if (earlyFullAdxResult.adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
+          logger.forSymbol(symbol).info(`📊 ADX BEHAVIORAL: adx=${earlyFullAdxResult.adx.toFixed(1)} slope=${earlyFullAdxResult.adxSlope.toFixed(2)} peaked=${earlyFullAdxResult.adxPeaked} diGap=${earlyFullAdxResult.diGap.toFixed(1)}`);
           logger.forSymbol(symbol).info(`📊 EXHAUSTION CHECK: isExhausted=${adxExhaustion.isExhausted} isContinuation=${adxExhaustion.isContinuation} type=${adxExhaustion.exhaustionType} score=${adxExhaustion.exhaustionScore}`);
           if (adxExhaustion.reasons.length > 0) {
             logger.forSymbol(symbol).info(`   ${adxExhaustion.reasons.join(' | ')}`);
@@ -6517,7 +6517,7 @@ serve(async (req) => {
           
           const adxExhaustionComparison = compareADXExhaustionGate(
             adxExhaustion.exhaustionScore,
-            fullAdxResult.adxSlope < 0 ? Math.abs(fullAdxResult.adxSlope * 10) : 0, // Approximate decline
+            earlyFullAdxResult.adxSlope < 0 ? Math.abs(earlyFullAdxResult.adxSlope * 10) : 0, // Approximate decline
             trendAgeBars,
             priceActionConfirmed
           );
@@ -6534,8 +6534,8 @@ serve(async (req) => {
               newGateResult: 'passed',
               gateDetails: {
                 exhaustionScore: adxExhaustion.exhaustionScore,
-                adx: fullAdxResult.adx,
-                adxSlope: fullAdxResult.adxSlope,
+                adx: earlyFullAdxResult.adx,
+                adxSlope: earlyFullAdxResult.adxSlope,
                 trendAgeBars,
                 priceActionConfirmed,
                 isContinuation: adxExhaustion.isContinuation,
@@ -6547,8 +6547,8 @@ serve(async (req) => {
               atr: trendData?.volatility?.atr,
               trend,
               indicators: {
-                adxPeaked: fullAdxResult.adxPeaked,
-                diGap: fullAdxResult.diGap,
+                adxPeaked: earlyFullAdxResult.adxPeaked,
+                diGap: earlyFullAdxResult.diGap,
                 exhaustionType: adxExhaustion.exhaustionType,
               }
             }).catch(err => logger.forSymbol(symbol).error(`Shadow mode ADX exhaustion log failed: ${err}`));
@@ -6574,12 +6574,12 @@ serve(async (req) => {
         const driftPercent = trendData.stealthTrend?.driftPercent || 0;
         
         // NEW: Pass DI values for accurate trend direction derivation
-        const diPlusForRegime = fullAdxResult.plusDI ?? 25;
-        const diMinusForRegime = fullAdxResult.minusDI ?? 25;
+        const diPlusForRegime = earlyFullAdxResult.plusDI ?? 25;
+        const diMinusForRegime = earlyFullAdxResult.minusDI ?? 25;
         
         const masterRegime = classifyMasterRegime(
           adx,
-          fullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.3),
+          earlyFullAdxResult.adxSlope ?? (smartAdxRising ? 0.5 : -0.3),
           driftPercent,
           htfTrend4h,
           htfTrend1h,
