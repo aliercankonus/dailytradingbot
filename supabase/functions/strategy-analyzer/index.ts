@@ -5253,7 +5253,7 @@ serve(async (req) => {
         // Capture raw regime BEFORE persistence override (needed for correct history storage)
         const rawDetectedRegime = fourStateRegime.regime;
         
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (raw): ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
+        logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (raw): ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
         
         // ============= REGIME PERSISTENCE =============
         // Apply asymmetric persistence to prevent boundary-condition flip-flopping
