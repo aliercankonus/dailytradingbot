@@ -145,6 +145,8 @@ export interface MarketFeatureSnapshot {
   
   // === Momentum ===
   momentumState: MomentumState | string;
+  momentumScore: number;
+  prevMomentumScore: number;
   momentumConfirms: boolean;
   macdExpanding: boolean;
   macdStrong: boolean;
@@ -194,6 +196,10 @@ export interface MarketFeatureSnapshot {
   // === Price Change ===
   priceChange4h: number;
   priceChange24h: number;
+  
+  // === VWAP ===
+  vwapValue: number;
+  vwapDistancePercent: number;
   
   // === Pullback ===
   inPullback: boolean;
@@ -485,6 +491,8 @@ export function buildMarketFeatureSnapshot(
     
     // Momentum
     momentumState: extractMomentumState(trendData),
+    momentumScore: momentum.score ?? 0,
+    prevMomentumScore: momentum.prevScore ?? momentum.score ?? 0,
     momentumConfirms: momentum.confirms ?? false,
     macdExpanding: momentum.macdExpanding ?? false,
     macdStrong: momentum.macdStrong ?? false,
@@ -534,6 +542,10 @@ export function buildMarketFeatureSnapshot(
     // Price change
     priceChange4h: extractPriceChange(trendData, '4h'),
     priceChange24h: extractPriceChange(trendData, '24h'),
+    
+    // VWAP
+    vwapValue: trendData?.vwap?.value ?? 0,
+    vwapDistancePercent: trendData?.vwap?.distancePercent ?? 0,
     
     // Pullback
     inPullback: pullback.inPullback ?? false,

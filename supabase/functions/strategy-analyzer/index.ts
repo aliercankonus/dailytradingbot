@@ -4688,7 +4688,7 @@ serve(async (req) => {
           
           if (isAdxTransitional && htfNotStrong && MEAN_REVERSION_CONFIG.ENABLED) {
             // Compute dedicated MR signal with regime gating skipped
-            const transitionalMRForDirection = detectExhaustion(trendData, { skipRegimeGating: true });
+            const transitionalMRForDirection = detectExhaustion(mfs, { skipRegimeGating: true });
             
             if (transitionalMRForDirection?.detected && transitionalMRForDirection?.allowed && transitionalMRForDirection?.direction) {
               mrTransitionalDirectionOverrideApplied = true;
@@ -10800,7 +10800,7 @@ serve(async (req) => {
         // This allows mean reversion to suggest LONG when direction would be SHORT at extreme oversold
         // PRE-RECOVERY MR OVERRIDE: When in pre-recovery with extreme exhaustion opposite to trend,
         // allow direction flip with stacked position sizing (~32.5% of normal)
-        const earlyMeanReversionSignal = MEAN_REVERSION_CONFIG.ENABLED ? detectExhaustion(trendData) : null;
+        const earlyMeanReversionSignal = MEAN_REVERSION_CONFIG.ENABLED ? detectExhaustion(mfs) : null;
         let meanReversionDirectionFlipApplied = false;
         let originalDerivedDirection = derivedDirection;
         let preRecoveryMROverrideApplied = false;
@@ -13937,7 +13937,7 @@ serve(async (req) => {
            if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone) {
              // Re-run detectExhaustion with regime gating skipped for transitional zone
              const transitionalMRSignal = MEAN_REVERSION_CONFIG.ENABLED 
-               ? detectExhaustion(trendData, { skipRegimeGating: true }) 
+               ? detectExhaustion(mfs, { skipRegimeGating: true }) 
                : null;
              
              if (transitionalMRSignal?.detected && transitionalMRSignal?.allowed) {
