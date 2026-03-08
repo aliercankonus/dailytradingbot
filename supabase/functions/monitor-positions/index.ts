@@ -1197,6 +1197,106 @@ serve(async (req) => {
         }
       }
       
+      // ============= MICRO EXHAUSTION EXIT INTEGRATION =============
+      // Uses MFS microExhaustion signals to tighten stops or trigger exits
+      // Recommendation levels: tighten_stop → exit_partial → exit_full
+      {
+        const microExh = mfsForPosition?.smartMomentum?.microExhaustion;
+        if (microExh?.detected && hasMetMinHoldTime && !emergencyClose) {
+          const recommendation = microExh.recommendation;
+          const exhaustionScore = microExh.score;
+          
+          positionLogger.info(`🔥 MICRO_EXHAUSTION_EXIT: recommendation=${recommendation}, score=${exhaustionScore}, signals=[${microExh.signals?.join(', ')}], P&L=${pnlPercent.toFixed(2)}%`);
+          
+          if (recommendation === "exit_full" && pnlPercent > 0.3) {
+            // Full exit: all 3 signals firing → trend is done, lock profits
+            const feeAwarePnL = calculateFeeAwarePnL(position.side, position.entry_price, currentPrice, position.quantity, position.trading_fee_percent);
+            
+            positionLogger.risk(`🔥 MICRO_EXHAUSTION_FULL_EXIT: Score=${exhaustionScore}, P&L=${pnlPercent.toFixed(2)}% → closing position`);
+            
+            const { error: closeError } = await supabase
+              .from("positions")
+              .update({
+                status: "closed",
+                closed_at: new Date().toISOString(),
+                exit_price: currentPrice,
+                realized_pnl: feeAwarePnL.netPnl,
+                realized_pnl_percent: feeAwarePnL.netPnlPercent,
+                close_reason: "micro_exhaustion_full_exit",
+                trading_fee_amount: feeAwarePnL.totalFee,
+                trading_fee_percent: feeAwarePnL.feeRatePercent,
+              })
+              .eq("id", position.id)
+              .eq("status", "active");
+            
+            if (closeError) {
+              positionLogger.error(`Error closing position ${position.id} on micro exhaustion: ${closeError}`);
+            } else {
+              closedPositions.push({ id: position.id, symbol: position.symbol, side: position.side, reason: "micro_exhaustion_full_exit", pnlPercent: feeAwarePnL.netPnlPercent });
+            }
+            continue; // Skip further processing
+          }
+          
+          if (recommendation === "exit_partial" && pnlPercent > 0.2 && position.stop_loss !== null) {
+            // Partial exit: 2/3 signals → aggressively tighten stop to lock 80% of current profit
+            const lockPercent = 0.80; // Lock 80% of current P&L
+            const lockMove = position.entry_price * (pnlPercent * lockPercent / 100);
+            const exhaustionStop = position.side === "BUY"
+              ? position.entry_price + lockMove
+              : position.entry_price - lockMove;
+            
+            const isTighter = position.side === "BUY"
+              ? exhaustionStop > (newStopLoss || position.stop_loss)
+              : exhaustionStop < (newStopLoss || position.stop_loss);
+            
+            if (isTighter) {
+              newStopLoss = exhaustionStop;
+              positionLogger.trade(`⚡ MICRO_EXHAUSTION_TIGHTEN (exit_partial): Score=${exhaustionScore}, locking 80% of ${pnlPercent.toFixed(2)}% → stop=${exhaustionStop.toFixed(2)}`);
+              
+              const { error: stopError } = await supabase
+                .from("positions")
+                .update({ stop_loss: newStopLoss })
+                .eq("id", position.id)
+                .eq("status", "active");
+              if (stopError) {
+                positionLogger.error(`Error applying micro exhaustion stop for ${position.id}: ${stopError}`);
+              } else {
+                updatedStopLossMap.set(position.id, newStopLoss!);
+              }
+            }
+          }
+          
+          if (recommendation === "tighten_stop" && pnlPercent > 0 && position.stop_loss !== null) {
+            // Warning level: 1/3 signals → tighten stop to lock 60% of current profit
+            const lockPercent = 0.60;
+            const lockMove = position.entry_price * (pnlPercent * lockPercent / 100);
+            const warningStop = position.side === "BUY"
+              ? position.entry_price + lockMove
+              : position.entry_price - lockMove;
+            
+            const isTighter = position.side === "BUY"
+              ? warningStop > (newStopLoss || position.stop_loss)
+              : warningStop < (newStopLoss || position.stop_loss);
+            
+            if (isTighter) {
+              newStopLoss = warningStop;
+              positionLogger.trade(`⚠️ MICRO_EXHAUSTION_WARNING (tighten_stop): Score=${exhaustionScore}, locking 60% of ${pnlPercent.toFixed(2)}% → stop=${warningStop.toFixed(2)}`);
+              
+              const { error: stopError } = await supabase
+                .from("positions")
+                .update({ stop_loss: newStopLoss })
+                .eq("id", position.id)
+                .eq("status", "active");
+              if (stopError) {
+                positionLogger.error(`Error applying micro exhaustion warning stop for ${position.id}: ${stopError}`);
+              } else {
+                updatedStopLossMap.set(position.id, newStopLoss!);
+              }
+            }
+          }
+        }
+      }
+      
       // ============= FIX #3: EARLY INVALIDATION RULE =============
       // Dead-on-arrival detection: If after 20 min the trade has barely moved (MFE < 0.10%)
       // and is losing significantly (< -0.40%), cut it early instead of bleeding to time stop
