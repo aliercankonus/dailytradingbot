@@ -1310,23 +1310,23 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
   // Strong ADX = momentum continuation is valid strategy
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   const isMinTrend = adx >= ADX_THRESHOLDS.MINIMUM; // 20+
-  const hasMacdExpanding = momentum.macdExpanding === true;
-  const momentumState = momentum.state || "none";
+  const hasMacdExpanding = mfs.macdExpanding;
+  const momentumState = mfs.momentumState || "none";
   const isMomentumConfirmed = momentumState === "confirmed" || momentumState === "mixed";
   const isMomentumBuilding = momentumState === "building";
-  const isActiveMomentum = isMomentumConfirmed || isMomentumBuilding || momentum.confirms === true;
+  const isActiveMomentum = isMomentumConfirmed || isMomentumBuilding || mfs.momentumConfirms;
   
   // Strong Trend Continuation Check: 4h + 1h aligned + CONFIRMED momentum
   // PATCH: Require strict momentum confirmation for STC — 'mixed' state with score=0
   // was allowing entries on symbols like ETHUSDT where price never moved favorably
-  const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
-  const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend;
+  const trend1h = mfs.timeframes['1h'].trend;
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
   
   // Strict momentum for STC: must be confirmed/building OR momentum.confirms=true
   // Explicitly exclude 'mixed' state unless momentum.confirms is independently true
-  const isStrictMomentumConfirmed = momentumState === "confirmed" || isMomentumBuilding || momentum.confirms === true;
+  const isStrictMomentumConfirmed = momentumState === "confirmed" || isMomentumBuilding || mfs.momentumConfirms;
   
   const hasStrongTrendContinuation = isMinTrend && isStrictMomentumConfirmed && (
     (trend === "bullish" && isBullishAligned) ||
