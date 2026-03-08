@@ -4626,8 +4626,8 @@ serve(async (req) => {
         if (!directionResult.direction && !lateGrindAccepted && !momentumDirectionOverrideApplied && 
             !orderFlowDirectionOverrideApplied && !preMomentumStochRsiOverrideApplied && SHORT_TERM_ALIGNMENT_PARAMS.ENABLED) {
           
-          const trend30m = trendData.multiTimeframeTrends?.timeframe30m?.trend || timeframes?.['30m']?.trend || "neutral";
-          const microDirection = trendData.microTrend?.direction || "neutral";
+          const trend30m = mfs.timeframes['30m'].trend || "neutral";
+          const microDirection = microTrend.direction || "neutral";
           const momentumState = momentum?.state || "none";
           const adxSufficient = adx >= SHORT_TERM_ALIGNMENT_PARAMS.MIN_ADX;
           
