@@ -149,18 +149,16 @@ export interface TimeInExtremePenalty {
 }
 
 export const calculateTimeInExtremePenalty = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   signalType: string
 ): TimeInExtremePenalty => {
-  const stochRsi = trendData?.stochasticRsi || {};
-  const barsAtExtreme = stochRsi.barsAtExtreme || {};
-  const barsAtExtreme1h = barsAtExtreme['1h'] || { barsOverbought: 0, barsOversold: 0 };
-  const barsAtExtreme4h = barsAtExtreme['4h'] || { barsOverbought: 0, barsOversold: 0 };
+  const barsAtExtreme1h = mfs.barsAtExtreme['1h'];
+  const barsAtExtreme4h = mfs.barsAtExtreme['4h'];
   
   const isLong = signalType === "bullish" || signalType === "long";
   
   // Get ADX for dynamic threshold calculation
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 20;
+  const adx = mfs.adx;
   
   // PHASE 4: Dynamic thresholds based on ADX
   // Stronger trends allow more bars at extreme before penalty kicks in
