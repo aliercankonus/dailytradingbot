@@ -492,6 +492,11 @@ function evaluateProductionGates(
   const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
   const qualityScore = qualityResult.score;
 
+  // Hard floor: block all trades with quality < 40 regardless of other factors
+  if (qualityScore < 40) {
+    return fail('LOW_QUALITY_HARD_FLOOR');
+  }
+
   if (qualityScore < QUALITY_THRESHOLDS.MIN_ENTRY_QUALITY) {
     return fail('LOW_QUALITY');
   }
@@ -519,7 +524,18 @@ function evaluateProductionGates(
   let strategyName = 'TREND_CONTINUATION';
   if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
   if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
-  if (mfs.isCompressed) strategyName = 'SQUEEZE_BREAKOUT';
+  if (mfs.isCompressed) {
+    // SQUEEZE_BREAKOUT requires directional confirmation: MACD expanding in trade direction
+    const macdHist = mfs.macdHistogram;
+    const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
+                                 (direction === 'SHORT' && macdHist < 0 && mfs.macdExpanding);
+    if (squeezeDirConfirmed) {
+      strategyName = 'SQUEEZE_BREAKOUT';
+    } else {
+      // No direction confirmation after squeeze — block entry
+      return fail('SQUEEZE_NO_DIRECTION');
+    }
+  }
 
   return {
     passed: true,
@@ -658,10 +674,10 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
-  // 10. NEW: Momentum reversal exit — cut losses when trend flips
+  // 10. Momentum reversal exit — cut losses when trend flips (relaxed threshold: -35 to reduce premature exits)
   if (hoursHeld > 2) {
-    if ((side === 'LONG' && momentumScore < -25 && primaryTrend === 'bearish') ||
-        (side === 'SHORT' && momentumScore > 25 && primaryTrend === 'bullish')) {
+    if ((side === 'LONG' && momentumScore < -35 && primaryTrend === 'bearish') ||
+        (side === 'SHORT' && momentumScore > 35 && primaryTrend === 'bullish')) {
       if (pnlPercent < -0.5) {
         return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
       }
