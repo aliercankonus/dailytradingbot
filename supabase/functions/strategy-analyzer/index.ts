@@ -2437,6 +2437,85 @@ serve(async (req) => {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
 
+    // ============= OVERSOLD EVENT STUDY TRACKING =============
+    // Records oversold rejection events for forward return analysis (bounce tracking)
+    // Uses 6h cooldown per symbol to prevent event clustering bias
+    const OVERSOLD_EVENT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+    const oversoldEventCooldownCache = new Map<string, boolean>();
+    
+    const trackOversoldEvent = async (
+      sym: string,
+      gateType: string,
+      stochK: number,
+      adxVal: number,
+      adxSlopeVal: number,
+      momScore: number,
+      regimeVal: string,
+      trendVal: string,
+      price: number,
+      atrVal: number
+    ) => {
+      try {
+        // Skip if K >= 15 (only track deep oversold/overbought events)
+        if (stochK >= 15) return;
+        
+        // 6h cooldown dedup check
+        const cacheKey = `${sym}_oversold`;
+        if (oversoldEventCooldownCache.has(cacheKey)) return;
+        
+        // Check DB for recent events (6h window)
+        const cutoff = new Date(Date.now() - OVERSOLD_EVENT_COOLDOWN_MS).toISOString();
+        const { data: recentEvents } = await supabase
+          .from('oversold_event_study')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('symbol', sym)
+          .gte('event_time', cutoff)
+          .limit(1);
+        
+        if (recentEvents && recentEvents.length > 0) {
+          oversoldEventCooldownCache.set(cacheKey, true);
+          return;
+        }
+        
+        // Calculate shadow trade parameters (hypothetical LONG probe)
+        const shadowStopLoss = price * (1 - (atrVal > 0 ? (1.2 * atrVal / price) : 0.012));
+        const shadowTakeProfit = price * (1 + (atrVal > 0 ? (1.5 * atrVal / price) : 0.015));
+        
+        const { error } = await supabase.from('oversold_event_study').insert({
+          user_id: userId,
+          symbol: sym,
+          event_time: new Date().toISOString(),
+          price,
+          stoch_k: stochK,
+          adx: adxVal,
+          adx_slope: adxSlopeVal,
+          momentum_score: momScore,
+          regime: regimeVal,
+          primary_trend: trendVal,
+          gate_type: gateType,
+          shadow_entry_price: price,
+          shadow_stop_loss: shadowStopLoss,
+          shadow_take_profit: shadowTakeProfit,
+          feature_snapshot: {
+            stochK, adx: adxVal, adxSlope: adxSlopeVal,
+            momentumScore: momScore, regime: regimeVal,
+            primaryTrend: trendVal, atr: atrVal, price
+          }
+        });
+        
+        if (error) {
+          logger.warn(`⚠️ Failed to track oversold event for ${sym}: ${error.message}`);
+        } else {
+          logger.forSymbol(sym).info(`📊 OVERSOLD_EVENT_STUDY: Tracked K=${stochK.toFixed(1)}, gate=${gateType}, price=${price.toFixed(2)}`);
+          oversoldEventCooldownCache.set(cacheKey, true);
+        }
+      } catch (e) {
+        // Non-critical — don't break the pipeline
+        logger.warn(`⚠️ Oversold event tracking error for ${sym}: ${e}`);
+      }
+    };
+
     // ============= PRE-COMPUTE ORDER FLOW FOR ALL SYMBOLS =============
     // Must happen BEFORE the main analysis loop because early gates (POSITION_DEDUPLICATION,
     // EXISTING_SIGNAL, MAX_TRADES_PER_SYMBOL) use `continue` and skip the order flow caching.
@@ -11954,6 +12033,8 @@ serve(async (req) => {
             false,
             earlyOrderFlowAnalysis
           );
+          // Track oversold event for bounce study
+          await trackOversoldEvent(symbol, 'ABSOLUTE_MIN_STOCHRSI', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0);
           continue;
         }
         
@@ -12585,6 +12666,8 @@ serve(async (req) => {
                 false,
                 earlyOrderFlowAnalysis
               );
+              // Track oversold event for bounce study
+              await trackOversoldEvent(symbol, 'SEVERE_HTF_OVERSOLD', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0);
               continue;
             }
           }
@@ -13892,6 +13975,8 @@ serve(async (req) => {
               false,
               earlyOrderFlowAnalysis
             );
+            // Track oversold event for bounce study
+            await trackOversoldEvent(symbol, 'STOCHRSI_OVERSOLD_BLOCK', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0);
             continue;
           }
         }
