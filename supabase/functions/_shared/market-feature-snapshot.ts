@@ -379,7 +379,7 @@ export interface MarketFeatureSnapshot {
 }
 
 // ============= DEFAULTS =============
-const defaultStochRsi: StochRsiFeatures = { k: 50, d: 50, signal: "neutral" };
+const defaultStochRsi: StochRsiFeatures = { k: 50, d: 50, signal: "neutral", prevK: 50, kArray: [] };
 
 const defaultBarsAtExtreme: BarsAtExtremeFeatures = { barsOverbought: 0, barsOversold: 0 };
 
