@@ -19,12 +19,7 @@ import {
   getConfidencePenalty, 
   getAdxWeight,
   calculateUnifiedReversalScore,
-  // Keep extractors for trendData passed to shared modules (exit-strategies expects raw trendData)
-  extractADX,
-  extractADXSlope,
-  extractStochRsiK,
-  extractStochRsiD,
-  extractAtrPercent,
+  // Legacy extractors removed — all logic reads from MarketFeatureSnapshot (mfs) directly
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
 import { buildMarketFeatureSnapshot, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
