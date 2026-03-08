@@ -9549,6 +9549,8 @@ serve(async (req) => {
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
+                  // Track NEAR_24H_LOW event for bounce study (location-based, skip stochK filter)
+                  await trackOversoldEvent(symbol, 'NEAR_24H_LOW_HARD', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
                   continue;
                 } else {
                   // Bypass allowed but with reduced size
