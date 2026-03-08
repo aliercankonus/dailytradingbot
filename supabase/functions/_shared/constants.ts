@@ -3057,8 +3057,8 @@ export const STRATEGY_SPECIFIC_CONSTRAINTS = {
     // Minimum ADX required - LOWERED from 25 to 23
     MIN_ADX: 23,
     // StochRSI must be below this (not overbought - reversal risk) - NORMAL mode
-    // RELAXED: Raised from 70 to 85 - overbought in bullish trend is momentum continuation
-    MAX_STOCHRSI_K: 85,
+    // Tightened from 85 to 80 — overbought LONG entries are top root cause of losses
+    MAX_STOCHRSI_K: 80,
     // STRONG TREND EXCEPTION: When ADX >= this, allow higher StochRSI
     // PHASE 1 FIX: LOWERED from 25 to 20 - ADX 20-25 is gap zone where good signals get blocked
     STRONG_TREND_ADX_THRESHOLD: 20,
