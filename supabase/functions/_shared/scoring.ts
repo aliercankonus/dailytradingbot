@@ -2953,7 +2953,7 @@ export const deriveTradeDirection = (
     // Add StochRSI extremes as bias input to weighted sum
     let stochBias = 0;
     if (P.ENABLE_STOCHRSI_BIAS) {
-      const stochK4h = extractStochRsiK(trendData, '4h');
+      const stochK4h = mfs.stochRsi['4h'].k;
       if (stochK4h >= (P.STOCHRSI_OVERBOUGHT_K || 90)) {
         stochBias = -(P.STOCHRSI_BIAS_WEIGHT || 0.10);  // Overbought = bearish bias
         reasons.push(`STOCHRSI BIAS: K=${stochK4h.toFixed(0)} >= ${P.STOCHRSI_OVERBOUGHT_K || 90} → ${(stochBias * 100).toFixed(0)}% bearish bias`);
