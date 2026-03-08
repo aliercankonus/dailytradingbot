@@ -523,8 +523,8 @@ class RejectionBuffer {
       }
     }
 
-    logger.info(`Rejection buffer: ${this.buffer.length} buffered → ${insertedCount} inserted, ${touchIds.length} refreshed`);
-    return insertedCount + touchIds.length;
+    logger.info(`Rejection buffer: ${this.buffer.length} buffered → ${insertedCount} inserted, ${touchEntries.length} refreshed`);
+    return insertedCount + touchEntries.length;
   }
 }
 
