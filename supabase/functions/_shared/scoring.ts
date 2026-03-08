@@ -1672,9 +1672,7 @@ export const detectMarketRegimeEnhanced = (mfs: MarketFeatureSnapshot): MarketRe
   regimeScore += consistencyPoints;
   
   // ============= HTF ALIGNMENT CONTRIBUTION (0-15 points) =============
-  const htf4hTrend = timeframes?.['4h']?.trend || "neutral";
-  const htf1hTrend = timeframes?.['1h']?.trend || "neutral";
-  const primaryTrend = trendData?.primaryTrend || "neutral";
+  // htf4hTrend, htf1hTrend, primaryTrend already declared from MFS above
   
   let htfAlignmentPoints = 0;
   if (htf4hTrend !== "neutral" && htf4hTrend === primaryTrend) {
