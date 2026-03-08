@@ -441,6 +441,8 @@ export function buildMarketFeatureSnapshot(
     
     // StochRSI
     stochRsi,
+    stochRsiAggregated,
+    barsAtExtreme,
     
     // Timeframes
     timeframes: {
