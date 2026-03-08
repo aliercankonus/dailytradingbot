@@ -550,6 +550,9 @@ export function buildMarketFeatureSnapshot(
       isStrongMove: priceActionMomentum.isStrongMove ?? false,
       canOverrideNeutralAlignment: priceActionMomentum.canOverrideNeutralAlignment ?? false,
     },
+    
+    // Market regime
+    regime: trendData?.regime?.regime || 'RANGING',
   };
 }
 
