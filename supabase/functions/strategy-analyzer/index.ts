@@ -2423,6 +2423,8 @@ serve(async (req) => {
     const symbolOrderFlowMap = new Map<string, { orderFlow: OrderFlowAnalysis; closes: number[]; direction: "long" | "short"; directionSource: string }>();
     // Collect LTF micro momentum data for batch snapshot update (LTF dashboard)
     const symbolLtfMicroMap = new Map<string, { score5m: number; direction5m: string; score1m: number; direction1m: string; ltfAlignment: number; entryTimingScore: number; microTrendConfirms: boolean; recentCandlePattern: string; isAccelerating5m: boolean; isReverting1m: boolean }>();
+    // Collect micro exhaustion data for batch snapshot update (Exhaustion dashboard)
+    const symbolMicroExhaustionMap = new Map<string, { score: number; detected: boolean; recommendation: string; positionMultiplier: number; momentumDecay: boolean; accelerationFlip: boolean; priceDivergence: boolean; signals: string[] }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
@@ -3171,6 +3173,19 @@ serve(async (req) => {
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
         const _mc = earlySmartMomentum.components;
         logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning} microExh=${earlySmartMomentum.microExhaustion.detected}(${earlySmartMomentum.microExhaustion.score}/${earlySmartMomentum.microExhaustion.recommendation})`);
+
+        // Collect micro exhaustion data for dashboard snapshot
+        const _exh = earlySmartMomentum.microExhaustion;
+        symbolMicroExhaustionMap.set(symbol, {
+          score: _exh.score,
+          detected: _exh.detected,
+          recommendation: _exh.recommendation,
+          positionMultiplier: _exh.positionMultiplier,
+          momentumDecay: _exh.momentumDeceleration,
+          accelerationFlip: _exh.accelerationFlip,
+          priceDivergence: _exh.priceDivergence,
+          signals: _exh.signals,
+        });
 
         // ============= LTF MICRO-MOMENTUM (5m/1m) =============
         // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
@@ -18867,9 +18882,37 @@ serve(async (req) => {
           }
         }
 
-        // Cap position size AFTER all gates applied (including LTF micro timing)
+        // ============= MICRO EXHAUSTION POSITION SIZING =============
+        // v5.0: Reduce position size when momentum exhaustion is detected
+        // >70 score → 0.65x, >85 → 0.4x, >90 → 0.35x (soft block territory)
+        const microExhEntry = mfs?.smartMomentum?.microExhaustion;
+        if (microExhEntry && microExhEntry.detected && microExhEntry.positionMultiplier < 1.0) {
+          const prevSize = unifiedPositionSize;
+          unifiedPositionSize *= microExhEntry.positionMultiplier;
+          
+          const blockEntry = microExhEntry.score > 90;
+          if (blockEntry) {
+            logger.forSymbol(symbol).warn(`🔥 MICRO_EXHAUSTION_SOFT_BLOCK: score=${microExhEntry.score}, signals=[${microExhEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${microExhEntry.positionMultiplier})`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔥 MICRO_EXHAUSTION_SIZING: score=${microExhEntry.score}, signals=[${microExhEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${microExhEntry.positionMultiplier})`);
+          }
+        }
+
+        // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion)
         unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
 
+        // Collect micro exhaustion data for dashboard snapshot
+        const _exh = earlySmartMomentum.microExhaustion;
+        symbolMicroExhaustionMap.set(symbol, {
+          score: _exh.score,
+          detected: _exh.detected,
+          recommendation: _exh.recommendation,
+          positionMultiplier: _exh.positionMultiplier,
+          momentumDecay: _exh.momentumDeceleration,
+          accelerationFlip: _exh.accelerationFlip,
+          priceDivergence: _exh.priceDivergence,
+          signals: _exh.signals,
+        });
 
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
@@ -19442,6 +19485,44 @@ serve(async (req) => {
         logger.warn(`⚠️ Failed to cache LTF micro for ${ltfErrors.length}/${symbolLtfMicroMap.size} symbols`);
       } else {
         logger.info(`🔬 Cached LTF micro momentum in trend_snapshots for ${symbolLtfMicroMap.size} symbols`);
+      }
+    }
+
+    // ============= BATCH UPDATE MICRO EXHAUSTION DATA IN TREND SNAPSHOTS =============
+    if (symbolMicroExhaustionMap.size > 0) {
+      const exhUpdatePromises = Array.from(symbolMicroExhaustionMap.entries()).map(([sym, data]) => {
+        return supabase.rpc('jsonb_set_snapshot_field' as any, {
+          p_user_id: userId,
+          p_symbol: sym,
+          p_field: 'microExhaustion',
+          p_value: data,
+        }).then((result: any) => {
+          if (result.error) {
+            return supabase
+              .from("trend_snapshots")
+              .select("snapshot_data")
+              .eq("user_id", userId)
+              .eq("symbol", sym)
+              .single()
+              .then(({ data: existing }) => {
+                const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+                const mergedData = { ...existingData, microExhaustion: data };
+                return supabase
+                  .from("trend_snapshots")
+                  .update({ snapshot_data: mergedData })
+                  .eq("user_id", userId)
+                  .eq("symbol", sym);
+              });
+          }
+          return result;
+        });
+      });
+      const exhResults = await Promise.all(exhUpdatePromises);
+      const exhErrors = exhResults.filter(r => r?.error);
+      if (exhErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache micro exhaustion for ${exhErrors.length}/${symbolMicroExhaustionMap.size} symbols`);
+      } else {
+        logger.info(`🔥 Cached micro exhaustion in trend_snapshots for ${symbolMicroExhaustionMap.size} symbols`);
       }
     }
 
