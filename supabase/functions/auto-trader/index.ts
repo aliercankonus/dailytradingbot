@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger } from "../_shared/logging.ts";
-import { getAndResetFetchStats } from "../_shared/binance.ts";
 import { detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 
 const corsHeaders = {
@@ -155,8 +154,10 @@ serve(async (req) => {
             const signalsGenerated = analyzerResult?.totalSignalsGenerated || 0;
             const signalsExecuted = analyzerResult?.executedSignals || 0;
             
+            // ===== Aggregate Binance fetch stats from strategy-analyzer =====
+            const userFetchStats = analyzerResult?.binanceFetchStats || { cacheHits: 0, cacheMisses: 0, timeoutCount: 0, fetchOkCount: 0 };
+            
             // ===== PHASE 1: COMPREHENSIVE REJECTION LOGGING =====
-            // Extract ALL rejection categories from analyzer result for proper visibility
             const rejections = analyzerResult?.rejections || {};
             const totalRejected = (rejections.byHardGates || 0) + 
                                   (rejections.byQuality || 0) + 
@@ -208,6 +209,9 @@ serve(async (req) => {
               }
             }
 
+            // Log Binance fetch stats per user
+            userLogger.info(`🔶 Binance: OK=${userFetchStats.fetchOkCount} CACHE_HIT=${userFetchStats.cacheHits} CACHE_MISS=${userFetchStats.cacheMisses} TIMEOUT=${userFetchStats.timeoutCount}`);
+
             userLogger.summary(`Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${totalRejected} (gates=${rejections.byHardGates || 0}, quality=${rejections.byQuality || 0}, strategy=${rejections.byStrategy || 0})`);
             if (signalsExecuted > 0) {
               userLogger.info(`Strategy breakdown: Momentum=${strategyBreakdown.momentum}, MeanReversion=${strategyBreakdown.meanReversion}, TrendFollow=${strategyBreakdown.trendFollowing}, Other=${strategyBreakdown.other}`);
@@ -223,6 +227,7 @@ serve(async (req) => {
               perSymbolAttribution: activeSymbols.length > 0 ? perSymbolAttribution : undefined,
               message: analyzerResult?.message || 'Auto-trader processing completed',
               strategyBreakdown: signalsExecuted > 0 ? strategyBreakdown : undefined,
+              binanceFetchStats: userFetchStats,
             };
           } catch (userError) {
             const errorMessage = userError instanceof Error ? userError.message : "Unknown error";
@@ -253,6 +258,14 @@ serve(async (req) => {
       other: results.reduce((sum, r) => sum + (r.strategyBreakdown?.other || 0), 0),
     };
 
+    // Aggregate Binance fetch stats from all strategy-analyzer responses
+    const aggregateFetchStats = {
+      fetchOkCount: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.fetchOkCount || 0), 0),
+      cacheHits: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.cacheHits || 0), 0),
+      cacheMisses: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.cacheMisses || 0), 0),
+      timeoutCount: results.reduce((sum, r) => sum + ((r as any).binanceFetchStats?.timeoutCount || 0), 0),
+    };
+
     logger.summary(
       `Completed: ${activeUsers.length} users (${successfulUsers} success, ${failedUsers} failed), ${totalSignals} signals, ${totalExecuted} executed, ${totalRejected} rejected`
     );
@@ -274,6 +287,7 @@ serve(async (req) => {
           totalSignals,
           totalExecuted,
           totalRejected,
+          binanceFetchStats: aggregateFetchStats,
         },
         success: failedUsers === 0,
         error_message: failedUsers > 0 ? `${failedUsers} users failed` : null,
@@ -282,8 +296,7 @@ serve(async (req) => {
     } catch (metricsErr) {
       logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
     }
-    const fetchStats = getAndResetFetchStats();
-    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms | 🔶 Binance: OK=${fetchStats.fetchOkCount} CACHE_HIT=${fetchStats.cacheHits} CACHE_MISS=${fetchStats.cacheMisses} TIMEOUT=${fetchStats.timeoutCount}`);
+    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms | 🔶 Binance: OK=${aggregateFetchStats.fetchOkCount} CACHE_HIT=${aggregateFetchStats.cacheHits} CACHE_MISS=${aggregateFetchStats.cacheMisses} TIMEOUT=${aggregateFetchStats.timeoutCount}`);
 
     return new Response(
       JSON.stringify({
@@ -295,6 +308,7 @@ serve(async (req) => {
         totalExecuted,
         totalRejected,
         strategyBreakdown: totalExecuted > 0 ? aggregateStrategyBreakdown : undefined,
+        binanceFetchStats: aggregateFetchStats,
         results,
         timestamp: new Date().toISOString(),
       }),

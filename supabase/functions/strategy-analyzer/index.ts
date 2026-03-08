@@ -276,7 +276,7 @@ import { buildMarketFeatureSnapshot, snapshotAlignedTFCount, type MarketFeatureS
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
-import { getKlines, get24hrTicker, parseKlinePrices } from "../_shared/binance.ts";
+import { getKlines, get24hrTicker, parseKlinePrices, getAndResetFetchStats } from "../_shared/binance.ts";
 import { 
   isShadowModeEnabled, 
   logShadowSignal, 
@@ -19360,6 +19360,9 @@ serve(async (req) => {
       logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
     }
 
+    // Collect Binance fetch stats from this function's memory space
+    const binanceFetchStats = getAndResetFetchStats();
+
     return new Response(JSON.stringify({
       signals,
       totalSignalsGenerated,
@@ -19412,6 +19415,8 @@ serve(async (req) => {
         state: noTradeState,
         reason: noTradeReason,
       } : null,
+      // Binance fetch stats from strategy-analyzer's memory space
+      binanceFetchStats,
       minQualityScore: DEFAULT_MIN_QUALITY,
       message: noTradeState 
         ? `No trade zone: ${noTradeState} - ${noTradeReason}`
