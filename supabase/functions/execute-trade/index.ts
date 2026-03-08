@@ -1697,7 +1697,7 @@ serve(async (req) => {
           strategyPositionNote = `Mean reversion (counter-trend) = -25% size for safety`;
         }
       } else if (strategyType === 'TREND_FOLLOWING') {
-        const adxValue = trendData?.volatility?.adx || 0;
+        const adxValue = mfs.adx;
         
         if (adxValue >= ADX_THRESHOLDS.VERY_STRONG) {
           strategyPositionMultiplier = 1.2;
