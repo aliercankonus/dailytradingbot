@@ -13676,8 +13676,8 @@ serve(async (req) => {
               gate: hardContradiction.contradictionType,
               details: hardContradiction.details,
               derivedDirection,
-              momentumScore: trendData?.momentum?.momentumScore,
-              macdSlope: trendData?.momentum?.macdSlope,
+              momentumScore: mfs.smartMomentum?.score ?? 0,
+              macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0,
               adx: adx.toFixed(1)
             },
             mfs,
