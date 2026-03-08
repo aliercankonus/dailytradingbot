@@ -3073,6 +3073,12 @@ serve(async (req) => {
           isWeakening: earlySmartMomentum.isWeakening ?? false,
           isTransitioning: earlySmartMomentum.isTransitioning ?? false,
           overextensionATR: earlySmartMomentum.overextensionATR ?? 0,
+          components: earlySmartMomentum.components ? {
+            macdSlope: earlySmartMomentum.components.macdSlope ?? 0,
+            priceImpulse: earlySmartMomentum.components.priceImpulse ?? 0,
+            emaSpreadRoC: earlySmartMomentum.components.emaSpreadRoC ?? 0,
+            rsiMomentum: earlySmartMomentum.components.rsiMomentum ?? 0,
+          } : undefined,
         };
         
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
