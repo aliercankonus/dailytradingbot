@@ -4321,7 +4321,7 @@ export const deriveTradeDirection = (
   // Priority 6: Fall back to primary trend from 5m if directional
   if (primaryTrend === "bullish" || primaryTrend === "bearish") {
     const direction: TradeDirection = primaryTrend === "bullish" ? "long" : "short";
-    const primaryConf = trendData.confidence || 50;
+    const primaryConf = mfs.confidence || 50;
     const finalConf = primaryConf * 0.8;
     reasons.push(`Primary trend ${primaryTrend} (${primaryConf.toFixed(0)}% confidence)`);
     reasons.push("Warning: Using primary trend as fallback - lower conviction");
