@@ -10808,7 +10808,7 @@ serve(async (req) => {
         
         // DIAGNOSTIC: Always log raw MR detection values for debugging
         // PHASE 3 MIGRATION: Read from snapshot
-        const stochK4h = mfs.stochRsi["4h"].k;
+        const stochK4hMR = mfs.stochRsi["4h"].k;
         const rsi4h = mfs.timeframes["4h"].rsi !== 50 ? mfs.timeframes["4h"].rsi : 
                       (trendData?.rsi?.['4h'] ?? null);
         logger.forSymbol(symbol).debug(
@@ -10816,7 +10816,7 @@ serve(async (req) => {
           `allowed=${earlyMeanReversionSignal?.allowed ?? 'N/A'}, ` +
           `isExtremeExhaustion=${earlyMeanReversionSignal?.isExtremeExhaustion ?? 'N/A'}, ` +
           `phase=${earlyMeanReversionSignal?.trendPhase ?? 'N/A'}/${earlyMeanReversionSignal?.expansionState ?? 'N/A'}, ` +
-          `4hK=${stochK4h?.toFixed(1) ?? 'N/A'}, 4hRSI=${rsi4h?.toFixed(1) ?? 'N/A'}, ` +
+          `4hK=${stochK4hMR?.toFixed(1) ?? 'N/A'}, 4hRSI=${rsi4h?.toFixed(1) ?? 'N/A'}, ` +
           `derivedDir=${derivedDirection}`
         );
         
