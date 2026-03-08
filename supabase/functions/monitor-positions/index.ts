@@ -631,7 +631,7 @@ serve(async (req) => {
         const { tf4hWeighted, tf1hWeighted, adxWeighted, volumeWeighted } = trueAlignment.weightedComponents;
         
         // Check if position is aligned with HTF trend
-        const primaryTrend = trendDataForPosition?.trend || 'ranging';
+        const primaryTrend = mfsForPosition?.primaryTrend || 'ranging';
         const isPositionAlignedWithHTF = 
           (position.side === 'BUY' && primaryTrend === 'bullish') ||
           (position.side === 'SELL' && primaryTrend === 'bearish');
