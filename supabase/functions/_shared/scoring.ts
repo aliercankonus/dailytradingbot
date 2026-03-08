@@ -2310,7 +2310,7 @@ export const detectEarlyIgnitionEntry = (
   reasons.push(`Range break ${rangeBreakDirection.toUpperCase()}: ${rangeBreakPercent.toFixed(2)}%`);
   
   // ===== CONDITION 6: StochRSI Safety =====
-  const stochK4h = stochRsi['4h']?.k ?? 50;
+  const stochK4h = mfs.stochRsi['4h'].k ?? 50;
   checkDetails.stochRsiK = stochK4h;
   
   if (stochK4h <= P.TIER_0_BLOCK_K_FLOOR || stochK4h >= P.TIER_0_BLOCK_K_CEILING) {
