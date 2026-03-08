@@ -775,7 +775,7 @@ serve(async (req) => {
     
     if (signalQualityScore > 0 && signalQualityScore < hardMinQualityThreshold) {
       // HARD BLOCK: Below hard minimum is never allowed
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, trendData, { 
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Quality Score Too Low', signal, mfs, { 
         qualityScore: signalQualityScore, 
         threshold: hardMinQualityThreshold, 
         isRecoveryMode: isInRecoveryMode,
