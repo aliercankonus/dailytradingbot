@@ -218,6 +218,8 @@ import {
   detectTrendContinuationPullback,
   // NEW: Liquidity Trap Detector (fake breakout, stop hunt, bull/bear trap)
   detectLiquidityTrap,
+  // Liquidity Sweep Reversal Detection
+  detectLiquiditySweepReversal,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
