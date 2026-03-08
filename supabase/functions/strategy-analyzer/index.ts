@@ -18859,15 +18859,21 @@ serve(async (req) => {
             if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: POOR entry timing (score=${timingScore.toFixed(0)}<${LTF_MICRO_TIMING_GATE.POOR_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | 5m=${ltfMicro.direction5m}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
             }
-          } else if (timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD) {
-            // Excellent micro-timing: boost position by 20% (with guards)
+          } else if (timingScore > LTF_MICRO_TIMING_GATE.GOOD_TIMING_THRESHOLD) {
+            // Good or Excellent micro-timing: graduated boost with guards
             const adxSupports = adx >= LTF_MICRO_TIMING_GATE.MIN_ADX_FOR_BOOST;
             const alignmentOk = !LTF_MICRO_TIMING_GATE.REQUIRE_LTF_ALIGNMENT_FOR_BOOST || ltfAlign > 0;
             
             if (adxSupports && alignmentOk) {
-              ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_MULTIPLIER;
+              // Graduated: 70-80 → 1.10x, 80+ → 1.20x
+              if (timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD) {
+                ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_MULTIPLIER;
+              } else {
+                ltfMicroTimingMultiplier = LTF_MICRO_TIMING_GATE.GOOD_TIMING_MULTIPLIER;
+              }
               if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
-                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: EXCELLENT entry timing (score=${timingScore.toFixed(0)}>${LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | ADX=${adx.toFixed(1)}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
+                const tier = timingScore > LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD ? 'EXCELLENT' : 'GOOD';
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⏱️ LTF_MICRO_TIMING: ${tier} entry timing (score=${timingScore.toFixed(0)}>${tier === 'EXCELLENT' ? LTF_MICRO_TIMING_GATE.EXCELLENT_TIMING_THRESHOLD : LTF_MICRO_TIMING_GATE.GOOD_TIMING_THRESHOLD}) → position ×${ltfMicroTimingMultiplier} | ADX=${adx.toFixed(1)}, align=${ltfAlign.toFixed(2)}, pattern=${ltfMicro.recentCandlePattern}`);
               }
             } else {
               if (LTF_MICRO_TIMING_GATE.LOG_GATE_CHECKS) {
