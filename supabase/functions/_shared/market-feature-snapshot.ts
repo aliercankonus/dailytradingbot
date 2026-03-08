@@ -644,6 +644,12 @@ export function buildMarketFeatureSnapshot(
       isWeakening: smartMom.isWeakening ?? false,
       isTransitioning: smartMom.isTransitioning ?? false,
       overextensionATR: smartMom.overextensionATR ?? 0,
+      microExhaustion: smartMom.microExhaustion ? {
+        detected: smartMom.microExhaustion.detected,
+        score: smartMom.microExhaustion.score,
+        recommendation: smartMom.microExhaustion.recommendation,
+        signals: smartMom.microExhaustion.signals,
+      } : undefined,
       components: smartMom.components ? {
         macdSlope: smartMom.components.macdSlope ?? 0,
         priceImpulse: smartMom.components.priceImpulse ?? 0,
