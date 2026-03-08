@@ -1419,7 +1419,8 @@ serve(async (req) => {
 
         // ADX-aware strong trend floor: let strong trends develop further
         if (TRAILING_MIN_PROFIT_FLOOR.STRONG_TREND_ENABLED) {
-          const { adx: posAdx } = extractADX(trendDataForPosition);
+          // MFS MIGRATION: Use MFS for ADX
+          const posAdx = mfsForPosition?.adx ?? 20;
           if (posAdx >= TRAILING_MIN_PROFIT_FLOOR.VERY_STRONG_TREND_MIN_ADX) {
             minProfitFloor = Math.max(minProfitFloor, TRAILING_MIN_PROFIT_FLOOR.VERY_STRONG_TREND_MIN_PROFIT_PERCENT);
             positionLogger.debug(`TRAILING FLOOR: Very strong trend (ADX ${posAdx.toFixed(1)}) → min profit ${minProfitFloor.toFixed(2)}%`);
