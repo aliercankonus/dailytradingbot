@@ -923,7 +923,7 @@ interface SignalTypeValidation {
 const validateSignalTypeRequirements = (
   strategyId: string,
   strategyName: string,
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   derivedDirection: string
 ): SignalTypeValidation => {
   if (!SIGNAL_TYPE_VALIDITY_PARAMS.ENABLED) {
@@ -931,14 +931,13 @@ const validateSignalTypeRequirements = (
   }
   
   const violations: string[] = [];
-  const adx = trendData?.volatility?.adx || 0;
-  const adxSlope = trendData?.volatility?.adxSlope || 0;
-  const momentum = trendData?.momentum || {};
-  // FIX: Smart Momentum is stored at trendData.smartMomentum.score, NOT trendData.momentum.momentumScore
-  const momentumScore = trendData?.smartMomentum?.score ?? momentum?.momentumScore ?? 0;
-  const macdSlope = trendData?.smartMomentum?.components?.macdSlope ?? momentum?.macdSlope ?? 0;
-  const regime = trendData?.regime?.regime || 'RANGING';
-  const bbSqueeze = trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  const momentumScore = mfs.smartMomentum?.score ?? 0;
+  const macdSlope = mfs.smartMomentum?.components?.macdSlope ?? 0;
+  const regime = mfs.regime || 'RANGING';
+  const bbSqueeze = mfs.bollinger["4h"].squeeze || mfs.bollinger.squeezeActive;
   
   // MOMENTUM BREAKOUT strategy requirements
   const isMomentumBreakout = strategyId === 'builtin-momentum-breakout' || 
@@ -983,10 +982,9 @@ const validateSignalTypeRequirements = (
   
   if (isMeanReversion) {
     const config = SIGNAL_TYPE_VALIDITY_PARAMS.MEAN_REVERSION;
-    const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
-    // FIX: StochRSI was reading from trendData.momentum (always 50 fallback)
-    // Correct path: trendData.stochasticRsi['4h'].k (consistent with gate layer)
-    const stochRsi = trendData?.stochasticRsi?.['4h']?.k ?? trendData?.stochasticRsi?.['1h']?.k ?? momentum?.stochRsiK ?? 50;
+    // MFS MIGRATION: RSI and StochRSI from snapshot
+    const rsi = mfs.timeframes["1h"].rsi;
+    const stochRsi = mfs.stochRsi["4h"].k;
     
     // Requirement 1: ADX must NOT be too high (strong trends crush reversals)
     if (adx > config.MAX_ADX) {
@@ -1072,7 +1070,7 @@ interface HardContradictionResult {
 }
 
 const checkHardContradictions = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   derivedDirection: string
 ): HardContradictionResult => {
   if (!SIGNAL_TYPE_VALIDITY_PARAMS.ENABLED) {
@@ -1080,11 +1078,10 @@ const checkHardContradictions = (
   }
   
   const config = SIGNAL_TYPE_VALIDITY_PARAMS.HARD_CONTRADICTIONS;
-  const momentum = trendData?.momentum || {};
-  // FIX: Same path fix as validateSignalTypeRequirements — read from smartMomentum first
-  const momentumScore = trendData?.smartMomentum?.score ?? momentum?.momentumScore ?? 0;
-  const macdSlope = trendData?.smartMomentum?.components?.macdSlope ?? momentum?.macdSlope ?? 0;
-  const adx = trendData?.volatility?.adx || 0;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const momentumScore = mfs.smartMomentum?.score ?? 0;
+  const macdSlope = mfs.smartMomentum?.components?.macdSlope ?? 0;
+  const adx = mfs.adx;
   
   // CHECK 1: Momentum Direction Contradiction
   // Block if momentum score strongly contradicts direction
@@ -1134,7 +1131,7 @@ interface SqueezeClassificationResult {
 }
 
 const classifySqueezeState = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   strategyName: string
 ): SqueezeClassificationResult => {
   const config = SIGNAL_TYPE_VALIDITY_PARAMS.SQUEEZE_RECLASSIFICATION;
@@ -1143,8 +1140,9 @@ const classifySqueezeState = (
     return { shouldReclassify: false };
   }
   
-  const bbSqueeze = trendData?.bollingerBand?.squeeze || trendData?.bollingerBands?.['4h']?.squeeze || false;
-  const adx = trendData?.volatility?.adx || 0;
+  // MFS MIGRATION: Squeeze and ADX from MarketFeatureSnapshot
+  const bbSqueeze = mfs.bollinger["4h"].squeeze || mfs.bollinger.squeezeActive;
+  const adx = mfs.adx;
   const isBreakoutStrategy = strategyName.toLowerCase().includes('breakout');
   
   if (bbSqueeze && adx < config.MAX_ADX_FOR_RECLASSIFICATION && isBreakoutStrategy && config.BLOCK_BREAKOUT_STRATEGIES) {
@@ -1266,7 +1264,21 @@ interface ReversalRiskResult {
   reason: string;
 }
 
-const detectReversalRisk = (trendData: any, intendedDirection: string): ReversalRiskResult => {
+const detectReversalRisk = (mfs: MarketFeatureSnapshot, intendedDirection: string): ReversalRiskResult => {
+  // MFS MIGRATION: Build trendData compatibility shim for calculateUnifiedReversalScore
+  // calculateUnifiedReversalScore still uses trendData internally (separate migration)
+  const trendData = {
+    volatility: { adx: mfs.adx, adxSlope: mfs.adxSlope },
+    momentum: { momentumScore: mfs.smartMomentum?.score ?? 0, macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0, stochRsiK: mfs.stochRsi["4h"].k },
+    smartMomentum: mfs.smartMomentum,
+    stochasticRsi: { "4h": { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d }, "1h": { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d } },
+    bollingerBand: { squeeze: mfs.bollinger["4h"].squeeze, percentB: mfs.bollinger["4h"].percentB },
+    regime: { regime: mfs.regime },
+    timeframes: {
+      "4h": { trend: mfs.timeframes["4h"].trend, confidence: mfs.timeframes["4h"].confidence, indicators: { rsi: mfs.timeframes["4h"].rsi } },
+      "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
+    },
+  };
   const unifiedResult = calculateUnifiedReversalScore(trendData, intendedDirection, "unknown");
   
   return {
@@ -13649,7 +13661,7 @@ serve(async (req) => {
         
         // ============= PHASE 2: HARD CONTRADICTION CHECK =============
         // Block if momentum/MACD strongly contradicts derived direction
-        const hardContradiction = checkHardContradictions(trendData, derivedDirection);
+        const hardContradiction = checkHardContradictions(mfs, derivedDirection);
         if (hardContradiction.hasContradiction) {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { 
@@ -13664,8 +13676,8 @@ serve(async (req) => {
               gate: hardContradiction.contradictionType,
               details: hardContradiction.details,
               derivedDirection,
-              momentumScore: trendData?.momentum?.momentumScore,
-              macdSlope: trendData?.momentum?.macdSlope,
+              momentumScore: mfs.smartMomentum?.score ?? 0,
+              macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0,
               adx: adx.toFixed(1)
             },
             mfs,
@@ -16679,7 +16691,7 @@ serve(async (req) => {
           const signalTypeValidation = validateSignalTypeRequirements(
             strategy.id || '',
             strategy.name,
-            trendData,
+            mfs,
             derivedDirection
           );
           
@@ -16725,7 +16737,7 @@ serve(async (req) => {
           
           // ============= PHASE 4: SQUEEZE STATE CLASSIFICATION =============
           // Block breakout strategies during low-ADX squeeze (reclassify as watchlist)
-          const squeezeClass = classifySqueezeState(trendData, strategy.name);
+          const squeezeClass = classifySqueezeState(mfs, strategy.name);
           if (squeezeClass.shouldReclassify) {
             rejectedByStrategy++;
             perSymbolGateAttribution.set(symbol, { 
