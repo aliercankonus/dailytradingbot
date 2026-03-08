@@ -909,9 +909,10 @@ serve(async (req) => {
         // Strong trends can sustain higher volatility without indicating reversal
         // This prevents premature exits like the ETHUSDT $2,859 entry that was closed too early
         // ============================================================
-        // CENTRALIZED: Use shared extractors for consistent ADX access
-        const positionAdxValue = extractADX(trendData);
-        const { slope: adxSlope, isRising: isAdxRising } = extractADXSlope(trendData);
+        // MFS MIGRATION: Use MFS for ADX and slope
+        const positionAdxValue = mfsForPosition?.adx ?? 20;
+        const adxSlope = mfsForPosition?.adxSlope ?? 0;
+        const isAdxRising = mfsForPosition?.adxRising ?? false;
         
         // Determine adaptive threshold based on ADX and trend confirmation
         let adaptiveVolatilityThreshold: number = EMERGENCY_EXIT_PARAMS.EXTREME_VOLATILITY_THRESHOLD; // Default: 3.0x
