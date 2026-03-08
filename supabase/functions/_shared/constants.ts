@@ -4482,7 +4482,7 @@ export const FOUR_STATE_REGIME = {
     LOW_ATR_MULTIPLIER: 0.7,  // ATR < 70% of historical = compressed
     // HARD BLOCK - no entries at all (except MR probes with strict conditions)
     ALLOW_MR_BYPASS: true,
-    MR_BYPASS_MIN_STOCHRSI_DISTANCE: 15,  // StochRSI K must be < 15 or > 85 for MR
+    MR_BYPASS_MIN_STOCHRSI_DISTANCE: 20,  // StochRSI K must be < 20 or > 80 for MR (was 15/85)
   },
   
   // ===== INLINE THRESHOLDS (extracted from classify4StateRegime) =====

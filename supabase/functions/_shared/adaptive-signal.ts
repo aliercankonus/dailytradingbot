@@ -257,7 +257,7 @@ export const determineAdaptiveDirection = (
         reason: `Mean reversion from oversold (K=${stochRsiK.toFixed(1)}, ADX=${adx.toFixed(1)})`
       };
     }
-    if (stochRsiK >= 85 && momentumState !== 'exhausted') {
+    if (stochRsiK >= 80 && momentumState !== 'exhausted') {
       return {
         direction: 'short',
         confidence: 55,
