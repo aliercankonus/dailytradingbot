@@ -787,47 +787,38 @@ export const getAlignmentScore = (
 };
 
 // ============= TECHNICAL INDICATOR SCORE (0-15 points) =============
+// MFS MIGRATED: Now reads from MarketFeatureSnapshot
 export const getTechnicalScore = (
-  trendData: any, 
+  mfs: MarketFeatureSnapshot, 
   effectiveTrend: string, 
   symbol: string
 ): number => {
   let score = 0;
   
-  const stochRsi = trendData?.stochasticRsi;
-  const bollinger = trendData?.bollingerBands;
-  const adx = trendData?.volatility?.adx || 0;
-  const momentum = trendData?.momentum || {};
-  const timeframes = trendData?.timeframes || {};
+  const adx = mfs.adx;
   
-  if (!stochRsi || !bollinger) {
-    return 0;
-  }
+  const primarySignal = mfs.stochRsi['1h'].signal;
+  const primaryK = mfs.stochRsi['1h'].k;
+  const k4h = mfs.stochRsi['4h'].k;
   
-  const primarySignal = stochRsi.primarySignal || stochRsi["1h"]?.signal;
-  const primaryK = stochRsi.primaryK || stochRsi["1h"]?.k || 50;
-  const stoch4h = stochRsi['4h'] || {};
-  const k4h = stoch4h.k ?? 50;
-  
-  const squeeze = bollinger.squeeze || bollinger.squeezeActive || bollinger["1h"]?.squeeze;
-  const pricePosition = bollinger.pricePosition || bollinger["1h"]?.pricePosition;
-  const percentB = bollinger.percentB || bollinger["1h"]?.percentB || 50;
+  const squeeze = mfs.bollinger['1h'].squeeze || mfs.bollinger.squeezeActive;
+  const pricePosition = mfs.bollinger['1h'].pricePosition;
+  const percentB = mfs.bollinger['1h'].percentB;
   
   let stochScore = 0;
   let bbScore = 0;
   
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
-  const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 50;
+  const rsi4h = mfs.timeframes['4h'].rsi;
   
   // Strong Trend Continuation Exception Check
-  // When momentum is building/confirmed AND timeframes are aligned, allow partial credit at extremes
-  const momentumState = momentum.state || "none";
-  const momentumConfirmed = momentum.confirms === true;
-  const macdExpanding = momentum.macdExpanding === true;
+  const momentumState = mfs.momentumState || "none";
+  const momentumConfirmed = mfs.momentumConfirms;
+  const macdExpanding = mfs.macdExpanding;
   const isActiveMomentum = momentumState === "building" || momentumState === "confirmed" || momentumConfirmed;
   
-  const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
-  const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
   
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
