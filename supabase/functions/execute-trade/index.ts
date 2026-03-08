@@ -665,7 +665,7 @@ serve(async (req) => {
 
     // FILTER 5: ADX HARD GATE - Require minimum trend strength (uses centralized ADX_THRESHOLDS)
     // CENTRALIZED: Use shared extractor for consistent ADX access
-    const adxValue = extractADX(trendData);
+    const adxValue = mfs.adx;
     
     if (adxValue < ADX_THRESHOLDS.MINIMUM) {
       logger.gate(`❌ ADX HARD GATE: ADX ${adxValue?.toFixed(1) || 0} < ${ADX_THRESHOLDS.MINIMUM} - trade cancelled`, false);
