@@ -5704,7 +5704,7 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // Even with relaxation, require StochRSI runway
     REQUIRE_STOCHRSI_RUNWAY: true,
     STOCHRSI_RUNWAY_MIN_K_FOR_SHORT: 10,  // LOWERED: Was 15 → 10 (synced with K floor fix v2)
-    STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 85,   // K must be <= 85 for continued long
+    STOCHRSI_RUNWAY_MAX_K_FOR_LONG: 80,   // K must be <= 80 for continued long (tightened from 85)
     
     // Graduated relaxation slope check (matches ADX_SLOPE_GRADUATED philosophy)
     // Instead of binary block, slope determines relaxation DEGREE
