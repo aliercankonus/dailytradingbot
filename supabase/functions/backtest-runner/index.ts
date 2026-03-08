@@ -547,16 +547,16 @@ function evaluateProductionGates(
     return fail('OVERSOLD_SHORT_BLOCK');
   }
 
-  // ===== GATE 6: Momentum Direction Alignment (production-accurate: ±15 threshold) =====
-  if (direction === 'LONG' && momentumResult.score < -15) {
-    // Allow structural acceleration bypass: ADX >= 30, slope >= 0.3
+  // ===== GATE 6: Momentum Direction Alignment — SYMBOL-ADAPTIVE =====
+  const momOpposingThreshold = sp.gates.MOMENTUM_OPPOSING_THRESHOLD;
+  if (direction === 'LONG' && momentumResult.score < -momOpposingThreshold) {
     if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
     } else {
       return fail('MOMENTUM_OPPOSING');
     }
   }
-  if (direction === 'SHORT' && momentumResult.score > 15) {
+  if (direction === 'SHORT' && momentumResult.score > momOpposingThreshold) {
     if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
     } else {
