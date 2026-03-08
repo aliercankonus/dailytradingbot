@@ -30,6 +30,23 @@ export interface MicroExhaustionResult {
   positionMultiplier: number;       // 1.0 = no change, 0.65/0.4 = reduced
 }
 
+// ============= LIQUIDITY TRAP DETECTOR =============
+// Detects fake breakouts, stop hunts, bull/bear traps on LTF klines
+// Uses: wick analysis, volume spike + reversal, price rejection patterns
+export interface LiquidityTrapResult {
+  detected: boolean;
+  score: number;                    // 0-100: trap probability
+  trapType: "none" | "bull_trap" | "bear_trap" | "stop_hunt" | "fake_breakout";
+  signals: string[];                // Which signals triggered
+  wickRejection: boolean;           // Long wick with body reversal
+  volumeSpikeReversal: boolean;     // Volume spike followed by price reversal
+  priceRejection: boolean;          // Price broke level then snapped back
+  sweepDetected: boolean;           // Liquidity sweep (break + immediate reversal)
+  recommendation: "ignore" | "reduce_size" | "block_entry" | "flip_direction";
+  positionMultiplier: number;       // 1.0 = no change, 0.5/0.3 = reduced
+  trapDirection: "bullish_trap" | "bearish_trap" | "none"; // Direction of the trap (bearish_trap = fake bullish breakout)
+}
+
 export interface MomentumScoreResult {
   score: number;                    // -100 to +100
   direction: "bullish" | "bearish" | "neutral";

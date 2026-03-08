@@ -266,6 +266,21 @@ export interface MarketFeatureSnapshot {
     };
   };
   
+  // === Liquidity Trap Detection (calculated from LTF klines) ===
+  liquidityTrap?: {
+    detected: boolean;
+    score: number;
+    trapType: string;
+    signals: string[];
+    wickRejection: boolean;
+    volumeSpikeReversal: boolean;
+    priceRejection: boolean;
+    sweepDetected: boolean;
+    recommendation: string;
+    positionMultiplier: number;
+    trapDirection: string;
+  };
+  
   // === LTF Micro Momentum (calculated from 5m/1m klines) ===
   ltfMicroMomentum?: {
     score5m: number;           // -100 to +100 momentum from 5m klines
