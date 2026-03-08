@@ -22,6 +22,7 @@ function multiplierLabel(score: number, alignment: number) {
   if (score > 80 && alignment > 0) return "×1.20";
   if (score > 70 && alignment > 0) return "×1.10";
   if (score < 30) return "×0.50";
+  if (alignment < 0) return "×0.75";
   return "×1.00";
 }
 
