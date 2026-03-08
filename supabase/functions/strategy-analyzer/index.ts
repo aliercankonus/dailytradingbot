@@ -5681,7 +5681,7 @@ serve(async (req) => {
         let priceActionMomentumPositionMultiplier = 1.0;
         if (directionResult.source === "price-action-momentum") {
           priceActionMomentumPositionMultiplier = MOMENTUM_CONTINUATION_PARAMS.POSITION_SIZE_MULTIPLIER;
-          const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+          const priceMove = priceActionMomentumData.movePercent || 0;
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} PRICE ACTION MOMENTUM: ${priceMove.toFixed(2)}% move detected - position size ${(priceActionMomentumPositionMultiplier * 100).toFixed(0)}%`);
         }
         
