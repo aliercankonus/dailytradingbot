@@ -19582,6 +19582,44 @@ serve(async (req) => {
       }
     }
 
+    // ============= BATCH UPDATE LIQUIDITY TRAP DATA IN TREND SNAPSHOTS =============
+    if (symbolLiquidityTrapMap.size > 0) {
+      const trapUpdatePromises = Array.from(symbolLiquidityTrapMap.entries()).map(([sym, data]) => {
+        return supabase.rpc('jsonb_set_snapshot_field' as any, {
+          p_user_id: userId,
+          p_symbol: sym,
+          p_field: 'liquidityTrap',
+          p_value: data,
+        }).then((result: any) => {
+          if (result.error) {
+            return supabase
+              .from("trend_snapshots")
+              .select("snapshot_data")
+              .eq("user_id", userId)
+              .eq("symbol", sym)
+              .single()
+              .then(({ data: existing }) => {
+                const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+                const mergedData = { ...existingData, liquidityTrap: data };
+                return supabase
+                  .from("trend_snapshots")
+                  .update({ snapshot_data: mergedData })
+                  .eq("user_id", userId)
+                  .eq("symbol", sym);
+              });
+          }
+          return result;
+        });
+      });
+      const trapResults = await Promise.all(trapUpdatePromises);
+      const trapErrors = trapResults.filter(r => r?.error);
+      if (trapErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache liquidity trap for ${trapErrors.length}/${symbolLiquidityTrapMap.size} symbols`);
+      } else {
+        logger.info(`🪤 Cached liquidity trap in trend_snapshots for ${symbolLiquidityTrapMap.size} symbols`);
+      }
+    }
+
     // Log heartbeat and persist to database
     if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
       logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
