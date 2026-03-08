@@ -9108,7 +9108,7 @@ serve(async (req) => {
                 if (adx >= relaxConfig.MIN_ADX_FOR_RELAXATION) {
                   useRelaxedThresholds = true;
                   relaxationReason = `ADX ${adx.toFixed(1)} >= ${relaxConfig.MIN_ADX_FOR_RELAXATION}`;
-                } else if (relaxConfig.BOLLINGER_SQUEEZE_TRIGGER && trendData.volatility?.bbSqueeze) {
+                } else if (relaxConfig.BOLLINGER_SQUEEZE_TRIGGER && mfs.bollinger["1h"].squeeze) {
                   useRelaxedThresholds = true;
                   relaxationReason = 'BB Squeeze active';
                 } else if (relaxConfig.BOLLINGER_BREAKDOWN_TRIGGER) {
