@@ -19488,6 +19488,44 @@ serve(async (req) => {
       }
     }
 
+    // ============= BATCH UPDATE MICRO EXHAUSTION DATA IN TREND SNAPSHOTS =============
+    if (symbolMicroExhaustionMap.size > 0) {
+      const exhUpdatePromises = Array.from(symbolMicroExhaustionMap.entries()).map(([sym, data]) => {
+        return supabase.rpc('jsonb_set_snapshot_field' as any, {
+          p_user_id: userId,
+          p_symbol: sym,
+          p_field: 'microExhaustion',
+          p_value: data,
+        }).then((result: any) => {
+          if (result.error) {
+            return supabase
+              .from("trend_snapshots")
+              .select("snapshot_data")
+              .eq("user_id", userId)
+              .eq("symbol", sym)
+              .single()
+              .then(({ data: existing }) => {
+                const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+                const mergedData = { ...existingData, microExhaustion: data };
+                return supabase
+                  .from("trend_snapshots")
+                  .update({ snapshot_data: mergedData })
+                  .eq("user_id", userId)
+                  .eq("symbol", sym);
+              });
+          }
+          return result;
+        });
+      });
+      const exhResults = await Promise.all(exhUpdatePromises);
+      const exhErrors = exhResults.filter(r => r?.error);
+      if (exhErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache micro exhaustion for ${exhErrors.length}/${symbolMicroExhaustionMap.size} symbols`);
+      } else {
+        logger.info(`🔥 Cached micro exhaustion in trend_snapshots for ${symbolMicroExhaustionMap.size} symbols`);
+      }
+    }
+
     // Log heartbeat and persist to database
     if (BOT_HEARTBEAT_CONFIG.LOG_HEARTBEAT) {
       logger.info(`💓 HEARTBEAT: ${heartbeatTimestamp} | Symbols: ${perSymbolGateAttribution.size} | Signals: ${signals.length} | State: ${noTradeState || 'OPERATIONAL'}`);
