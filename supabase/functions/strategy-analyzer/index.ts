@@ -9976,7 +9976,7 @@ serve(async (req) => {
                alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
                technicalScore: getTechnicalScore(trendData, trend, symbol),
                entryTimingScore: 10, // Conservative default before pullback analysis
-               volumeScore: sharedGetVolumeScore(trendData, trend),
+               volumeScore: getVolumeScore(mfs, trend),
                orderFlowScore: 0,
                confidencePenalty: getConfidencePenalty(confidence),
                directionBonus: trend === "bearish" ? 3 : 0,
