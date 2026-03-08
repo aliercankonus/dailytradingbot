@@ -73,6 +73,9 @@ interface BacktestPosition {
   atrAtEntry: number;
   atrPercentAtEntry: number;
   strategyName: string;
+  entryMomentumScore: number;
+  entryStochK: number;
+  entryAdx: number;
 }
 
 interface EquityPoint {
@@ -760,9 +763,8 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'time_stop_24h' };
   }
 
-  // 9. Moderate exhaustion exit — OPTIMIZED: higher peak threshold, less aggressive ratio
-  // Only trigger when peak was meaningful AND drawdown from peak is severe
-  if (position.peakPnl > 0.60 && pnlPercent < position.peakPnl * 0.15) {
+  // 9. Moderate exhaustion exit — reverted to working threshold
+  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
@@ -872,8 +874,8 @@ async function runBacktest(
               pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
               exitReason: exitResult.exitReason, entryScore: pos.entryScore,
               stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
-              qualityScore: pos.qualityScore, momentumScore: momResult.score,
-              adx: adxResult.adx, stochK: wCloses.length > 14 ? calculateStochasticRSI(wCloses, 14, 14, 3, 3).k : 0, strategyName: pos.strategyName,
+              qualityScore: pos.qualityScore, momentumScore: pos.entryMomentumScore,
+              adx: pos.entryAdx, stochK: pos.entryStochK, strategyName: pos.strategyName,
             });
 
             const positionSize = equity * 0.015 * 1.0; // 1.5% base
@@ -929,7 +931,12 @@ async function runBacktest(
               atrAtEntry: atrPercent,
               atrPercentAtEntry: atrPercent,
               strategyName: gateResult.strategyName,
+              entryMomentumScore: gateResult.momentumScore,
+              entryStochK: mfs.stochRsi["1h"].k,
+              entryAdx: mfs.adx,
             });
+            
+            logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest ENTRY: ${symbol} ${dir} @ ${currentPrice} | entryMom=${gateResult.momentumScore} K=${mfs.stochRsi["1h"].k.toFixed(1)} ADX=${mfs.adx.toFixed(1)} strategy=${gateResult.strategyName}`);
           }
         }
 
@@ -958,8 +965,8 @@ async function runBacktest(
           pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
           exitReason: 'backtest_end', entryScore: pos.entryScore,
           stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
-          qualityScore: pos.qualityScore, momentumScore: 0,
-          adx: 0, stochK: 0, strategyName: pos.strategyName,
+          qualityScore: pos.qualityScore, momentumScore: pos.entryMomentumScore,
+          adx: pos.entryAdx, stochK: pos.entryStochK, strategyName: pos.strategyName,
         });
         const positionSize = equity * 0.015;
         equity += positionSize * (pnl.netPnlPercent / 100);
