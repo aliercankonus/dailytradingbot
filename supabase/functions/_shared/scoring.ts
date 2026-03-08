@@ -2331,8 +2331,8 @@ export const detectEarlyIgnitionEntry = (
   reasons.push(`StochRSI K=${stochK4h.toFixed(1)} safe for ${rangeBreakDirection}`);
   
   // ===== HTF CHECK: Must NOT oppose =====
-  const trend4h = timeframes['4h']?.trend || "neutral";
-  const conf4h = timeframes['4h']?.confidence || 50;
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const conf4h = mfs.timeframes['4h'].confidence || 50;
   
   const htfOpposing = (rangeBreakDirection === "long" && trend4h === "bearish" && conf4h >= P.HTF_OPPOSING_CONFIDENCE_THRESHOLD) ||
                       (rangeBreakDirection === "short" && trend4h === "bullish" && conf4h >= P.HTF_OPPOSING_CONFIDENCE_THRESHOLD);
