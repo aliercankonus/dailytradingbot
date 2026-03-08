@@ -12,6 +12,7 @@ import {
   QUALITY_THRESHOLDS, TRADING_FEE_PARAMS,
   NEAR_EXTREME_PROTECTION_GATE, MOVE_EXHAUSTION_FILTER_PARAMS,
   MOMENTUM_SCORE_COMPONENTS,
+  getSymbolParams, BTC_PARAMS, ALTCOIN_PARAMS,
 } from "../_shared/constants.ts";
 import { calculateFeeAwarePnL, evaluateDecayVelocity, evaluateProgressiveProfitLock,
   evaluateMicroProfitLock, type PositionContext, type MarketContext, type UserExitSettings
@@ -433,7 +434,9 @@ interface GateResult {
 function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
   momentumResult: MomentumScoreResult,
+  symbol?: string,
 ): GateResult {
+  const sp = getSymbolParams(symbol || mfs.symbol);
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
@@ -520,38 +523,40 @@ function evaluateProductionGates(
     return fail('COUNTER_TREND');
   }
 
-  // ===== GATE 5.5: StochRSI Directional Protection — SYNCED with constants (K>80/K<20) =====
-  if (direction === 'SHORT' && stochK > 80) {
+  // ===== GATE 5.5: StochRSI Directional Protection — SYMBOL-ADAPTIVE =====
+  const obThreshold = sp.gates.STOCHRSI_LONG_OVERBOUGHT;
+  const osThreshold = sp.gates.STOCHRSI_SHORT_OVERSOLD;
+  if (direction === 'SHORT' && stochK > obThreshold) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
-  if (direction === 'LONG' && stochK < 20) {
+  if (direction === 'LONG' && stochK < osThreshold) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
 
-  // ===== GATE 5.6: Overbought LONG / Oversold SHORT Block (K>80 / K<20) =====
-  if (direction === 'LONG' && stochK > 80 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+  // ===== GATE 5.6: Overbought LONG / Oversold SHORT Block — SYMBOL-ADAPTIVE =====
+  if (direction === 'LONG' && stochK > obThreshold && adx < ADX_THRESHOLDS.VERY_STRONG) {
     return fail('OVERBOUGHT_LONG_BLOCK');
   }
-  if (direction === 'SHORT' && stochK < 20 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+  if (direction === 'SHORT' && stochK < osThreshold && adx < ADX_THRESHOLDS.VERY_STRONG) {
     return fail('OVERSOLD_SHORT_BLOCK');
   }
 
-  // ===== GATE 6: Momentum Direction Alignment (production-accurate: ±15 threshold) =====
-  if (direction === 'LONG' && momentumResult.score < -15) {
-    // Allow structural acceleration bypass: ADX >= 30, slope >= 0.3
+  // ===== GATE 6: Momentum Direction Alignment — SYMBOL-ADAPTIVE =====
+  const momOpposingThreshold = sp.gates.MOMENTUM_OPPOSING_THRESHOLD;
+  if (direction === 'LONG' && momentumResult.score < -momOpposingThreshold) {
     if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
     } else {
       return fail('MOMENTUM_OPPOSING');
     }
   }
-  if (direction === 'SHORT' && momentumResult.score > 15) {
+  if (direction === 'SHORT' && momentumResult.score > momOpposingThreshold) {
     if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
     } else {
@@ -603,8 +608,8 @@ function evaluateProductionGates(
   const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
   const qualityScore = qualityResult.score;
 
-  // Hard floor: block all trades with quality < 40 regardless of other factors
-  if (qualityScore < 40) {
+  // Hard floor — SYMBOL-ADAPTIVE quality minimum
+  if (qualityScore < sp.gates.MIN_QUALITY_SCORE) {
     return fail('LOW_QUALITY_HARD_FLOOR');
   }
 
@@ -792,29 +797,42 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
-  // 10. Momentum reversal exit — tightened PnL threshold from -0.5% to -0.3%
-  if (hoursHeld > 2) {
-    if ((side === 'LONG' && momentumScore < -35 && primaryTrend === 'bearish') ||
-        (side === 'SHORT' && momentumScore > 35 && primaryTrend === 'bullish')) {
-      if (pnlPercent < -0.3) {
+  // 10. Momentum reversal exit — SYMBOL-ADAPTIVE thresholds
+  // Get params from position's symbol
+  const symParams = getSymbolParams(position.symbol);
+  if (hoursHeld > symParams.exits.momentumReversalMinHours) {
+    if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
+        (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
+      if (pnlPercent < symParams.exits.momentumReversalThreshold) {
         return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
       }
     }
   }
 
-  // 10b. Early momentum flip — extreme momentum reversal within first 2 hours
-  if (hoursHeld > 1 && hoursHeld <= 2) {
-    if ((side === 'LONG' && momentumScore < -50) ||
-        (side === 'SHORT' && momentumScore > 50)) {
-      if (pnlPercent < -0.5) {
+  // 10b. Early momentum flip — SYMBOL-ADAPTIVE
+  if (hoursHeld > symParams.exits.earlyFlipMinHours && hoursHeld <= symParams.exits.earlyFlipMaxHours) {
+    if ((side === 'LONG' && momentumScore < -symParams.exits.earlyMomentumFlipScore) ||
+        (side === 'SHORT' && momentumScore > symParams.exits.earlyMomentumFlipScore)) {
+      if (pnlPercent < symParams.exits.earlyMomentumFlipThreshold) {
         return { shouldExit: true, exitReason: 'early_momentum_flip_exit' };
       }
     }
   }
 
-  // 11. NEW: ADX collapse exit — exit when structure breaks down
+  // 11. ADX collapse exit — exit when structure breaks down
   if (adx < 15 && adxSlope < -1.0 && hoursHeld > 4 && pnlPercent < 0.3) {
     return { shouldExit: true, exitReason: 'adx_collapse_exit' };
+  }
+
+  // 12. ALTCOIN-ONLY: Hard PnL floor — prevent runaway losses on volatile altcoins
+  const isBtc = position.symbol.startsWith('BTC');
+  if (!isBtc && pnlPercent < -symParams.stopLoss.maxCapPercent) {
+    return { shouldExit: true, exitReason: 'hard_pnl_floor_exit' };
+  }
+
+  // 13. ALTCOIN-ONLY: Quick loss cut — if losing after 3+ hours with no recovery
+  if (!isBtc && hoursHeld > 3 && pnlPercent < -0.5 && pnlPercent < position.peakPnl - 0.3) {
+    return { shouldExit: true, exitReason: 'stale_loss_exit' };
   }
 
   return { shouldExit: false, exitReason: '' };
@@ -933,7 +951,7 @@ async function runBacktest(
           const mfs = buildBacktestMFS(symbol, wCloses, wHighs, wLows, wVolumes, wKlines, momResult, adxResult);
           
           // Run production gate pipeline
-          const gateResult = evaluateProductionGates(mfs, momResult);
+          const gateResult = evaluateProductionGates(mfs, momResult, symbol);
 
           if (gateResult.gate) {
             gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
@@ -942,10 +960,11 @@ async function runBacktest(
           if (gateResult.passed && gateResult.direction) {
             const dir = gateResult.direction;
             
-            // ATR-based SL/TP with max cap (prevents oversized stops on volatile altcoins)
-            const slMultiplier = 1.5;
-            const tpMultiplier = 2.5;
-            const maxSlPercent = 2.0; // Cap stop-loss at 2% max
+            // ATR-based SL/TP with SYMBOL-ADAPTIVE caps
+            const symP = getSymbolParams(symbol);
+            const slMultiplier = symP.stopLoss.atrMultiplier;
+            const tpMultiplier = symP.takeProfit.atrMultiplier;
+            const maxSlPercent = symP.stopLoss.maxCapPercent;
             let stopLoss: number, takeProfit: number;
             const atrStop = atr * slMultiplier;
             const maxStop = currentPrice * (maxSlPercent / 100);

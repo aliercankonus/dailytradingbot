@@ -263,6 +263,70 @@
 // Total exports: ~130 const + 7 types + 2 interfaces + 1 function
 // Last updated: 2026-03-03
 // ═══════════════════════════════════════════════════════════════════════════════
+// ============= SYMBOL-SPECIFIC PARAMETER SETS =============
+// BTC-optimized parameters (proven PF 9+)
+export const BTC_PARAMS = {
+  symbols: ['BTCUSDT'],
+  gates: {
+    STOCHRSI_LONG_OVERBOUGHT: 80,
+    STOCHRSI_SHORT_OVERSOLD: 20,
+    STRONG_TREND_MIN_MOM: 10,
+    PARABOLIC_ADX: 45,
+    MOMENTUM_OPPOSING_THRESHOLD: 15,
+    MIN_QUALITY_SCORE: 45,
+  },
+  stopLoss: {
+    atrMultiplier: 1.5,
+    maxCapPercent: 2.0,
+  },
+  takeProfit: {
+    atrMultiplier: 2.5,
+  },
+  exits: {
+    momentumReversalThreshold: -0.3,
+    momentumReversalScore: 35,
+    momentumReversalMinHours: 2,
+    earlyMomentumFlipThreshold: -0.5,
+    earlyMomentumFlipScore: 50,
+    earlyFlipMinHours: 1,
+    earlyFlipMaxHours: 2,
+  },
+} as const;
+
+// Altcoin-optimized parameters (tighter gates for higher volatility)
+export const ALTCOIN_PARAMS = {
+  symbols: ['ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'],
+  gates: {
+    STOCHRSI_LONG_OVERBOUGHT: 75,   // Tighter block
+    STOCHRSI_SHORT_OVERSOLD: 25,    // Tighter block
+    STRONG_TREND_MIN_MOM: 18,       // Much higher momentum requirement
+    PARABOLIC_ADX: 50,              // Higher ADX for trend confirmation
+    MOMENTUM_OPPOSING_THRESHOLD: 10, // Tighter opposing block
+    MIN_QUALITY_SCORE: 52,           // Higher quality floor
+  },
+  stopLoss: {
+    atrMultiplier: 1.0,             // Much tighter for altcoin volatility
+    maxCapPercent: 1.2,             // Hard cap at 1.2%
+  },
+  takeProfit: {
+    atrMultiplier: 1.8,             // Narrower TP — take profits faster
+  },
+  exits: {
+    momentumReversalThreshold: -0.15, // Cut very early on altcoins
+    momentumReversalScore: 25,        // Lower score threshold — exit sooner
+    momentumReversalMinHours: 1,      // Only 1 hour before momentum exit eligible
+    earlyMomentumFlipThreshold: -0.2,
+    earlyMomentumFlipScore: 35,
+    earlyFlipMinHours: 0.5,           // 30 min
+    earlyFlipMaxHours: 1.5,
+  },
+} as const;
+
+// Helper to get params for a symbol
+export function getSymbolParams(symbol: string) {
+  if (BTC_PARAMS.symbols.includes(symbol)) return BTC_PARAMS;
+  return ALTCOIN_PARAMS;
+}
 
 // ============= TRADING FEE PARAMETERS =============
 // Exchange trading fees for accurate P&L calculation
