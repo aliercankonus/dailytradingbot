@@ -5209,7 +5209,7 @@ serve(async (req) => {
           : momentumDirectionOverrideApplied ? ' [MOMENTUM_OVERRIDE]' 
           : orderFlowDirectionOverrideApplied ? ' [ORDER_FLOW_OVERRIDE]' 
           : lateGrindAccepted ? ' [LATE_GRIND]' : '';
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${overrideSuffix}`);
+        logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${overrideSuffix}`);
         if (directionResult.reasons.some(r => r.includes("Warning"))) {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
