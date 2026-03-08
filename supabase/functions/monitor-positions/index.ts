@@ -757,7 +757,7 @@ serve(async (req) => {
       }
 
       // Get current trend for this position's symbol
-      const trendData = trendDataMap.get(position.symbol);
+      // MFS-NATIVE: All trend reads from mfsForPosition — no raw trendData access
 
       // ============================================================
       // 🚨 EMERGENCY PROTECTION SYSTEMS
