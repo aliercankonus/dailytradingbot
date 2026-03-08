@@ -6666,7 +6666,7 @@ serve(async (req) => {
             // ===== MICRO COUNTER-TREND PROBE CHECK =====
             // Before hard blocking, check if deeply oversold/overbought warrants a micro probe
             const ctMicroProbe = COUNTER_TREND_PROTECTION.MICRO_PROBE;
-            const ctStochK = stochK4h;
+            const ctStochK = mfs.stochRsi["4h"].k;
             const ctAdxSlope = fullAdxResult.adxSlope ?? 0;
             const ctAbsMomentum = Math.abs(smartMomentum.score);
             
