@@ -17979,7 +17979,7 @@ serve(async (req) => {
               regime: currentRegimeType, 
               strategiesFiltered: candidates.map(c => c.strategy.name) 
             },
-            trendData, riskParams.ai_analysis_enabled !== false);
+            mfs, riskParams.ai_analysis_enabled !== false);
           continue;
         }
         
