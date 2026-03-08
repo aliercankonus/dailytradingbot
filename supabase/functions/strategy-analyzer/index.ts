@@ -4170,7 +4170,7 @@ serve(async (req) => {
           
           // Evaluate counter-trend admission
           counterTrendAdmissionResult = evaluateCounterTrendAdmission(
-            trendData,
+            mfs,
             directionResult.direction,
             htfTrend4h
           );
