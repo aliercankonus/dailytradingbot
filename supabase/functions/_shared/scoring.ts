@@ -720,48 +720,42 @@ export const getMomentumScore = (momentum: any, adx: number = 0, adxRising: bool
 
 // ============= ALIGNMENT SCORE (0-14 points) =============
 // Directional consistency with strong 1h trend credit
+// MFS MIGRATED: Now reads from MarketFeatureSnapshot
 export const getAlignmentScore = (
   confidence: number, 
   consistency: number, 
   aligned: boolean, 
-  trendData: any
+  mfs: MarketFeatureSnapshot
 ): number => {
   let score = 0;
   
-  const tf = trendData?.timeframes;
-  const trend4h = tf?.['4h']?.trend || "neutral";
-  const trend1h = tf?.['1h']?.trend || "neutral";
-  const trend30m = tf?.['30m']?.trend || "neutral";
-  const conf1h = tf?.['1h']?.confidence || 50;
-  const conf4h = tf?.['4h']?.confidence || 50;
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
+  const trend30m = mfs.timeframes['30m'].trend || "neutral";
+  const conf1h = mfs.timeframes['1h'].confidence || 50;
+  const adx = mfs.adx;
   
   // Full alignment bonus (0-8)
   if (aligned) {
     score += ALIGNMENT_SCORE_PARAMS.FULL_ALIGNMENT_SCORE;
-  } else if (tf) {
-    // ============= STRONG 1H TREND CREDIT (NEW) =============
-    const ASP = ALIGNMENT_SCORE_PARAMS;
-    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= ASP.STRONG_1H_MIN_CONFIDENCE) {
-      score += ASP.STRONG_1H_NEUTRAL_4H_SCORE;
+  } else {
+    const ASP2 = ALIGNMENT_SCORE_PARAMS;
+    if (trend4h === "neutral" && trend1h !== "neutral" && conf1h >= ASP2.STRONG_1H_MIN_CONFIDENCE) {
+      score += ASP2.STRONG_1H_NEUTRAL_4H_SCORE;
     }
-    // 4h neutral with 1h+30m aligned = partial alignment
     else if (trend4h === "neutral" && trend1h === trend30m && trend1h !== "neutral") {
-      score += ASP.PARTIAL_ALIGNMENT_SCORE;
+      score += ASP2.PARTIAL_ALIGNMENT_SCORE;
     }
-    // 1h and 30m agree but different from 4h
     else if (trend1h === trend30m && trend1h !== "neutral") {
-      score += ASP.LOWER_TF_ALIGNMENT_SCORE;
+      score += ASP2.LOWER_TF_ALIGNMENT_SCORE;
     }
-    // Strong 1h alone (without 30m confirmation) still gets some credit
-    else if (trend1h !== "neutral" && conf1h >= ASP.STRONG_1H_ALONE_MIN_CONFIDENCE) {
-      score += ASP.STRONG_1H_ALONE_SCORE;
+    else if (trend1h !== "neutral" && conf1h >= ASP2.STRONG_1H_ALONE_MIN_CONFIDENCE) {
+      score += ASP2.STRONG_1H_ALONE_SCORE;
     }
   }
   
   // ============= PHASE 4 FIX: LOADING ZONE BONUS =============
-  const stochRsi1h = trendData?.stochasticRsi?.['1h'];
-  const stochK1h = stochRsi1h?.k ?? 50;
+  const stochK1h = mfs.stochRsi['1h'].k;
   const ASP = ALIGNMENT_SCORE_PARAMS;
   
   if (stochK1h >= ASP.LOADING_ZONE_WIDE_K_MIN && stochK1h <= ASP.LOADING_ZONE_WIDE_K_MAX && adx >= ASP.LOADING_ZONE_WIDE_ADX_MIN) {
@@ -770,7 +764,7 @@ export const getAlignmentScore = (
     score += ASP.LOADING_ZONE_NARROW_BONUS;
   }
   
-  // ============= 1H CONFIDENCE BONUS (NEW) =============
+  // ============= 1H CONFIDENCE BONUS =============
   if (conf1h >= ASP.VERY_STRONG_1H_CONFIDENCE) {
     score += ASP.VERY_STRONG_1H_BONUS;
   } else if (conf1h >= ASP.STRONG_1H_CONFIDENCE) {
@@ -787,47 +781,38 @@ export const getAlignmentScore = (
 };
 
 // ============= TECHNICAL INDICATOR SCORE (0-15 points) =============
+// MFS MIGRATED: Now reads from MarketFeatureSnapshot
 export const getTechnicalScore = (
-  trendData: any, 
+  mfs: MarketFeatureSnapshot, 
   effectiveTrend: string, 
   symbol: string
 ): number => {
   let score = 0;
   
-  const stochRsi = trendData?.stochasticRsi;
-  const bollinger = trendData?.bollingerBands;
-  const adx = trendData?.volatility?.adx || 0;
-  const momentum = trendData?.momentum || {};
-  const timeframes = trendData?.timeframes || {};
+  const adx = mfs.adx;
   
-  if (!stochRsi || !bollinger) {
-    return 0;
-  }
+  const primarySignal = mfs.stochRsi['1h'].signal;
+  const primaryK = mfs.stochRsi['1h'].k;
+  const k4h = mfs.stochRsi['4h'].k;
   
-  const primarySignal = stochRsi.primarySignal || stochRsi["1h"]?.signal;
-  const primaryK = stochRsi.primaryK || stochRsi["1h"]?.k || 50;
-  const stoch4h = stochRsi['4h'] || {};
-  const k4h = stoch4h.k ?? 50;
-  
-  const squeeze = bollinger.squeeze || bollinger.squeezeActive || bollinger["1h"]?.squeeze;
-  const pricePosition = bollinger.pricePosition || bollinger["1h"]?.pricePosition;
-  const percentB = bollinger.percentB || bollinger["1h"]?.percentB || 50;
+  const squeeze = mfs.bollinger['1h'].squeeze || mfs.bollinger.squeezeActive;
+  const pricePosition = mfs.bollinger['1h'].pricePosition;
+  const percentB = mfs.bollinger['1h'].percentB;
   
   let stochScore = 0;
   let bbScore = 0;
   
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
-  const rsi4h = trendData?.timeframes?.['4h']?.indicators?.rsi ?? 50;
+  const rsi4h = mfs.timeframes['4h'].rsi;
   
   // Strong Trend Continuation Exception Check
-  // When momentum is building/confirmed AND timeframes are aligned, allow partial credit at extremes
-  const momentumState = momentum.state || "none";
-  const momentumConfirmed = momentum.confirms === true;
-  const macdExpanding = momentum.macdExpanding === true;
+  const momentumState = mfs.momentumState || "none";
+  const momentumConfirmed = mfs.momentumConfirms;
+  const macdExpanding = mfs.macdExpanding;
   const isActiveMomentum = momentumState === "building" || momentumState === "confirmed" || momentumConfirmed;
   
-  const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
-  const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
   
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
@@ -1572,15 +1557,15 @@ export const calculateUnifiedReversalScore = (
 // ============= MARKET REGIME DETECTION =============
 export type MarketRegime = "trending" | "ranging" | "choppy" | "volatile";
 
-export const detectMarketRegime = (trendData: any): { 
+export const detectMarketRegime = (mfs: MarketFeatureSnapshot): { 
   regime: MarketRegime; 
   tradeable: boolean; 
   reason: string 
 } => {
-  const adx = trendData?.volatility?.adx || 0;
-  const atrPercent = trendData?.volatility?.atrPercent || 0;
-  const confidence = trendData?.confidence || 0;
-  const consistency = trendData?.trueAlignment?.score || 0;
+  const adx = mfs.adx;
+  const atrPercent = mfs.atrPercent;
+  const confidence = mfs.confidence;
+  const consistency = mfs.trueAlignment.score;
   
   // Ranging market (ADX low, mixed signals)
   if (adx < MARKET_REGIME_DETECTION.RANGING_ADX_MAX && confidence < MARKET_REGIME_DETECTION.RANGING_CONFIDENCE_MAX) {
@@ -1644,23 +1629,24 @@ export interface MarketRegimeEnhancedResult {
   };
 }
 
-export const detectMarketRegimeEnhanced = (trendData: any): MarketRegimeEnhancedResult => {
+export const detectMarketRegimeEnhanced = (mfs: MarketFeatureSnapshot): MarketRegimeEnhancedResult => {
   const P = REGIME_SCORE_PARAMS;
   
-  // Extract data with safe defaults
-  const adx = trendData?.volatility?.adx || 0;
-  const atrPercent = trendData?.volatility?.atrPercent || 0;
-  const confidence = trendData?.confidence || 0;
-  const consistency = trendData?.trueAlignment?.score || 0;
-  const volumeRatio = trendData?.volatility?.volumeRatio || 1.0;
-  const momentum = trendData?.momentum || {};
-  const timeframes = trendData?.timeframes || {};
+  // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const atrPercent = mfs.atrPercent;
+  const confidence = mfs.confidence;
+  const consistency = mfs.trueAlignment.score;
+  const volumeRatio = mfs.volume['1h'].volumeRatio || 1.0;
   
   // HTF slope for flattening detection
-  const htf4hSlope = timeframes?.['4h']?.indicators?.emaSlope || 0;
-  const htf1hSlope = timeframes?.['1h']?.indicators?.emaSlope || 0;
+  const htf4hSlope = 0; // emaSlope not available in MFS - defaults to 0
+  const htf1hSlope = 0;
   
-  let regimeScore = 50;  // Start at neutral baseline
+  // HTF trends
+  const htf4hTrend = mfs.timeframes['4h'].trend || "neutral";
+  const htf1hTrend = mfs.timeframes['1h'].trend || "neutral";
+  const primaryTrend = mfs.primaryTrend || "neutral";
   
   // ============= ADX CONTRIBUTION (0-30 points) =============
   if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
@@ -1701,11 +1687,12 @@ export const detectMarketRegimeEnhanced = (trendData: any): MarketRegimeEnhanced
   
   // ============= MOMENTUM CONTRIBUTION (0-10 points) =============
   let momentumPoints = 0;
-  if (momentum?.state === "confirmed") {
+  const momentumState = mfs.momentumState || "none";
+  if (momentumState === "confirmed") {
     momentumPoints = 10;
-  } else if (momentum?.state === "building") {
+  } else if (momentumState === "building") {
     momentumPoints = 7;
-  } else if (momentum?.confirms) {
+  } else if (mfs.momentumConfirms) {
     momentumPoints = 5;
   }
   regimeScore += momentumPoints;
@@ -1823,7 +1810,7 @@ export interface SqueezeBreakoutResult {
 }
 
 export const isValidSqueezeBreakout = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   intendedDirection: "long" | "short" | null
 ): SqueezeBreakoutResult => {
   const reasons: string[] = [];
@@ -1840,32 +1827,25 @@ export const isValidSqueezeBreakout = (
     hasDivergence: false,
   };
   
-  if (!trendData || !intendedDirection) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"], checkDetails };
+  if (!mfs || !intendedDirection) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No MFS data or direction"], checkDetails };
   }
   
-  const adx = trendData?.volatility?.adx || 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? 0;
-  const bollinger = trendData?.bollingerBands || {};
-  const momentum = trendData?.momentum || {};
-  const stochRsi = trendData?.stochasticRsi || {};
-  const timeframes = trendData?.timeframes || {};
+  // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  const adxSlope = mfs.adxSlope;
   
   // v1.1: Update check details
   checkDetails.adxSlope = adxSlope;
-  checkDetails.momentumState = momentum.state || 'none';
-  checkDetails.hasDivergence = momentum.hasDivergence ?? false;
+  checkDetails.momentumState = mfs.momentumState as string || 'none';
+  checkDetails.hasDivergence = mfs.hasDivergence;
   
   // Get 4H data for HTF confirmation
-  const bb4h = bollinger['4h'] || bollinger;
-  const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
-  const percentB4h = bb4h.percentB ?? 50;
-  const bandwidth4h = bb4h.bandwidth || 0;
+  const squeeze4h = mfs.bollinger['4h'].squeeze;
+  const percentB4h = mfs.bollinger['4h'].percentB;
   
   // Get 1H data
-  const bb1h = bollinger['1h'] || {};
-  const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
-  const percentB1h = bb1h.percentB ?? 50;
+  const squeeze1h = mfs.bollinger['1h'].squeeze;
+  const percentB1h = mfs.bollinger['1h'].percentB;
   
   // Condition 1: HTF squeeze active (4h preferred, 1h acceptable) - BB compressed
   const hasHTFSqueeze = squeeze4h || squeeze1h;
@@ -1901,14 +1881,11 @@ export const isValidSqueezeBreakout = (
   confidence += 25;
   reasons.push(`Price at ${isLong ? "upper" : "lower"} band edge (%B4h=${percentB4h.toFixed(0)}, %B1h=${percentB1h.toFixed(0)})`);
   
-  // Condition 3: Momentum building or confirmed (not 'none' or 'mixed')
-  const macdExpanding = momentum.macdExpanding ?? false;
-  const momentumState = momentum.state || 'none';
+  // Condition 3: Momentum building or confirmed
+  const macdExpanding = mfs.macdExpanding;
+  const momentumState = mfs.momentumState || 'none';
   const momentumBuilding = momentumState === "building" || momentumState === "confirmed";
-  const stoch4h = stochRsi['4h'] || {};
-  const stoch1h = stochRsi['1h'] || {};
-  const stochK4h = stoch4h.k ?? 50;
-  const stochK1h = stoch1h.k ?? 50;
+  const stochK1h = mfs.stochRsi['1h'].k;
   
   // StochRSI should be moving in trade direction
   const stochDirectionOk = isLong 
@@ -1925,11 +1902,10 @@ export const isValidSqueezeBreakout = (
   }
   if (momentumBuilding) {
     confidence += 15;
-    reasons.push(`Momentum ${momentum.state}`);
+    reasons.push(`Momentum ${momentumState}`);
   }
   
   // v1.1 NEW: Condition 3.5 - ADX slope must be rising (≥ 0.05)
-  // This prevents fake squeezes that never expand
   const MIN_ADX_SLOPE_FOR_SQUEEZE = 0.05;
   checkDetails.slopeOk = adxSlope >= MIN_ADX_SLOPE_FOR_SQUEEZE;
   
@@ -1947,16 +1923,15 @@ export const isValidSqueezeBreakout = (
   reasons.push(`ADX slope rising (${adxSlope.toFixed(3)} ≥ ${MIN_ADX_SLOPE_FOR_SQUEEZE})`);
   
   // Condition 4: No reversal divergence (critical for squeeze entries)
-  const hasDivergence = momentum.hasDivergence ?? false;
-  if (hasDivergence) {
+  if (mfs.hasDivergence) {
     return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["MACD divergence detected - not safe for squeeze entry"], checkDetails };
   }
   confidence += 10;
   reasons.push("No reversal divergence");
   
   // Condition 5: HTF trend not opposing (4h neutral is OK, 4h opposite is NOT)
-  const trend4h = timeframes['4h']?.trend || "neutral";
-  const trend1h = timeframes['1h']?.trend || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
   
   const htfOpposing = isLong 
     ? trend4h === "bearish"
@@ -2013,7 +1988,7 @@ export interface EarlyIgnitionResult {
 }
 
 export const checkEarlyIgnitionException = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   intendedDirection: "long" | "short" | null,
   regime: string
 ): EarlyIgnitionResult => {
@@ -2031,24 +2006,21 @@ export const checkEarlyIgnitionException = (
     trend1h: 'neutral',
   };
   
-  if (!trendData || !intendedDirection) {
-    return { isValid: false, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"], checkDetails };
+  if (!mfs || !intendedDirection) {
+    return { isValid: false, positionSizeMultiplier: 1.0, reasons: ["No MFS data or direction"], checkDetails };
   }
   
-  const adxSlope = trendData?.volatility?.adxSlope ?? 0;
-  const timeframes = trendData?.timeframes || {};
-  const stochFilter4h = trendData?.stochFilter?.['4h'] || {};
-  const stochFilter1h = trendData?.stochFilter?.['1h'] || {};
-  
-  const trend4h = stochFilter4h.trend || timeframes['4h']?.trend || "neutral";
-  const conf4h = stochFilter4h.confidence || timeframes['4h']?.confidence || 0;
-  const trend1h = stochFilter1h.trend || timeframes['1h']?.trend || "neutral";
+  // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  const adxSlope = mfs.adxSlope;
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const conf4h = mfs.timeframes['4h'].confidence || 0;
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
   
   // Update check details
   checkDetails.adxSlope = adxSlope;
   checkDetails.htfConfidence = conf4h;
-  checkDetails.trend4h = trend4h;
-  checkDetails.trend1h = trend1h;
+  checkDetails.trend4h = trend4h as string;
+  checkDetails.trend1h = trend1h as string;
   
   // Condition 1: Must be EARLY_TREND regime
   const isEarlyTrendRegime = regime === 'EARLY_TREND';
@@ -2068,7 +2040,7 @@ export const checkEarlyIgnitionException = (
   }
   reasons.push(`ADX slope rising (${adxSlope.toFixed(3)} > 0)`);
   
-  // Condition 3: 4H confidence ≥ 55% (from FOUR_STATE_REGIME.UPPER_TRANSITION_CONFIDENCE)
+  // Condition 3: 4H confidence ≥ 55%
   const MIN_4H_CONFIDENCE = FOUR_STATE_REGIME.UPPER_TRANSITION_CONFIDENCE;
   if (conf4h < MIN_4H_CONFIDENCE) {
     return { isValid: false, positionSizeMultiplier: 1.0, reasons: [`4H confidence ${conf4h.toFixed(0)}% < ${MIN_4H_CONFIDENCE}%`], checkDetails };
@@ -5011,27 +4983,10 @@ export const calculateQualityScore = (
   
   // PHASE 1 FIX: Pass adxSlope to getMomentumScore for momentum floor calculation
   const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData, adxSlope);
-  // Build trendData shim for getAlignmentScore and getTechnicalScore (legacy functions)
-  const trendDataShim = {
-    confidence,
-    trueAlignment: mfs.trueAlignment,
-    isAligned: aligned,
-    timeframes: {
-      "4h": { trend: mfs.timeframes["4h"].trend, confidence: mfs.timeframes["4h"].confidence, indicators: { rsi: mfs.timeframes["4h"].rsi } },
-      "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
-      "30m": { trend: mfs.timeframes["30m"].trend, confidence: mfs.timeframes["30m"].confidence, indicators: { rsi: mfs.timeframes["30m"].rsi } },
-      "15m": { trend: mfs.timeframes["15m"].trend, confidence: mfs.timeframes["15m"].confidence, indicators: { rsi: mfs.timeframes["15m"].rsi } },
-    },
-    stochasticRsi: {
-      "4h": { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
-      "1h": { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
-    },
-    bollingerBand: { percentB: mfs.bollinger["4h"].percentB, squeeze: mfs.bollinger["4h"].squeeze },
-    volatility: { adx, adxSlope, adxRising },
-    momentum,
-  };
-  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendDataShim);
-  const technicalScore = getTechnicalScore(trendDataShim, effectiveTrend, symbol);
+  // MFS MIGRATED: getAlignmentScore and getTechnicalScore now accept MFS directly
+  // MFS MIGRATED: getAlignmentScore and getTechnicalScore now accept MFS directly
+  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, mfs);
+  const technicalScore = getTechnicalScore(mfs, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);
   const confidencePenalty = getConfidencePenalty(confidence, adx, momentum.confirms);
   

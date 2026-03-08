@@ -5654,8 +5654,8 @@ serve(async (req) => {
 
         // ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
         // Finding 2 & 5: Use quantified regime score with graduated penalties
-        const regimeEnhanced = detectMarketRegimeEnhanced(trendData);
-        const regime = detectMarketRegime(trendData);  // Keep legacy for compatibility
+        const regimeEnhanced = detectMarketRegimeEnhanced(mfs);
+        const regime = detectMarketRegime(mfs);  // Keep legacy for compatibility
         
         if (!regimeEnhanced.tradeable) {
           rejectedByRegime++;
@@ -9940,8 +9940,8 @@ serve(async (req) => {
              const earlyQualityFactors: QualityFactors = {
                adxScore: getAdxScore(adx),
                momentumScore: getMomentumScore(momentum, adx, smartAdxRising),
-               alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
-               technicalScore: getTechnicalScore(trendData, trend, symbol),
+                alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, mfs),
+                technicalScore: getTechnicalScore(mfs, trend, symbol),
                entryTimingScore: 10, // Conservative default before pullback analysis
                volumeScore: getVolumeScore(mfs, trend),
                orderFlowScore: 0,
@@ -10880,7 +10880,7 @@ serve(async (req) => {
         // Finding 1: In pre-recovery state, require deep pullback OR squeeze breakout
         // Get pullback analysis early for pre-recovery gate check
         const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
-        const squeezeBreakoutForPreRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
+        const squeezeBreakoutForPreRecovery = isValidSqueezeBreakout(mfs, derivedDirection);
         
         // Check for deep pullback conditions (RSI + structure)
         const isDeepPullbackLong = derivedDirection === "long" && 
@@ -13882,7 +13882,7 @@ serve(async (req) => {
           
           // Check Squeeze Expansion Exception first
           if (ADX_GATE.SQUEEZE_EXPANSION.ENABLED && isInTransitionalZone) {
-            const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
+            const squeezeResult = isValidSqueezeBreakout(mfs, derivedDirection);
             
             if (squeezeResult.isValid) {
               // Squeeze Expansion exception approved
@@ -13905,7 +13905,7 @@ serve(async (req) => {
           
           // Check Early Ignition Exception if squeeze didn't pass
           if (!squeezeBreakoutActive && ADX_GATE.EARLY_IGNITION.ENABLED && isInTransitionalZone) {
-            const ignitionResult = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
+            const ignitionResult = checkEarlyIgnitionException(mfs, derivedDirection, regime.regime);
             
             if (ignitionResult.isValid) {
               // Early Ignition exception approved
@@ -14018,8 +14018,8 @@ serve(async (req) => {
           // If no exception passed, block the signal
           if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive && !earlyTrendIgnitionActive) {
             // Get diagnostic info for squeeze and ignition checks
-            const squeezeCheck = isValidSqueezeBreakout(trendData, derivedDirection);
-            const ignitionCheck = checkEarlyIgnitionException(trendData, derivedDirection, regime.regime);
+            const squeezeCheck = isValidSqueezeBreakout(mfs, derivedDirection);
+            const ignitionCheck = checkEarlyIgnitionException(mfs, derivedDirection, regime.regime);
             
             rejectedByHardGates++;
             perSymbolGateAttribution.set(symbol, { 
@@ -15955,7 +15955,7 @@ serve(async (req) => {
           
           // ===== PHASE 5: RECOVERY SQUEEZE EXCEPTION (Finding 6) =====
           // Allow recovery trade if squeeze breakout + HTF aligned, skip pullback score check
-          const squeezeBreakoutRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
+          const squeezeBreakoutRecovery = isValidSqueezeBreakout(mfs, derivedDirection);
           const hasRecoverySqueezeException = squeezeBreakoutRecovery.isValid && htfAlignedForRecovery;
           
           if (hasRecoverySqueezeException) {
@@ -16150,8 +16150,8 @@ serve(async (req) => {
         const qualityFactors: QualityFactors = {
           adxScore: getAdxScore(adx),
           momentumScore: getMomentumScore(momentum, adx, trendData.volatility?.adxRising ?? false),
-          alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
-          technicalScore: getTechnicalScore(trendData, trend, symbol),
+          alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, mfs),
+          technicalScore: getTechnicalScore(mfs, trend, symbol),
           entryTimingScore: entryTimingScore,
           volumeScore: volumeScore,                // Volume confirmation
           orderFlowScore: orderFlowScore,          // NEW: Order flow analysis (-15 to +15)
