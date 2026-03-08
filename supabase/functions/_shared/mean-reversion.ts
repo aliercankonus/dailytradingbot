@@ -858,59 +858,25 @@ function checkOverboughtExhaustion(mfs: MarketFeatureSnapshot): ExhaustionCheck 
  * Runs BEFORE blocking gates to prevent gate collision
  * Returns signal with direction-aware gate bypasses
  * 
- * FIX: Evaluates exhaustion FIRST, then applies regime as modifier (not blocker)
- * when extreme exhaustion is detected. This prevents the deadlock where
- * regime blocks MR before exhaustion is even evaluated.
+ * MFS MIGRATION: Now accepts MarketFeatureSnapshot directly.
+ * The trendData parameter is fully removed — all reads come from mfs.
  * 
  * @param options.skipRegimeGating - When true, bypasses isMeanReversionAllowed() check.
- *   Used by the ADX transitional zone (18-22) bypass, which already constrains the ADX range
- *   and doesn't need the regime filter to re-block based on trend phase classification.
  */
-export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: boolean; mfs?: MarketFeatureSnapshot }): ExhaustionSignal {
+export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipRegimeGating?: boolean }): ExhaustionSignal {
   // 1. FIRST: Evaluate exhaustion checks BEFORE regime gating
-  // This prevents the regime from blocking detection of extreme exhaustion
-  const oversoldSignal = checkOversoldExhaustion(trendData);
-  const overboughtSignal = checkOverboughtExhaustion(trendData);
+  const oversoldSignal = checkOversoldExhaustion(mfs);
+  const overboughtSignal = checkOverboughtExhaustion(mfs);
   
-  // 2. Classify regime using orthogonal checks
-  // MFS MIGRATION: classifyTrendPhase and classifyExpansionState now require MFS.
-  // If MFS is provided, use it directly. Otherwise build a minimal shim from trendData.
-  let mfsForClassification: MarketFeatureSnapshot;
-  if (options?.mfs) {
-    mfsForClassification = options.mfs;
-  } else {
-    // Minimal shim for classifyTrendPhase (adx, adxSlope) and classifyExpansionState (volume, squeeze, adxSlope)
-    const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-    const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
-    const volumeRatio = trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0;
-    const squeezeReleased = trendData?.squeeze?.justReleased ?? false;
-    mfsForClassification = {
-      adx,
-      adxSlope,
-      adxRising: adxSlope > 0,
-      adxArray: trendData?.volatility?.adxArray ?? [],
-      squeezeJustReleased: squeezeReleased,
-      volume: {
-        "15m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "30m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "1h": { volumeRatio, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        "4h": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
-        confirmsDirection: false,
-        hasRangeExpansion1h: false,
-      },
-    } as any as MarketFeatureSnapshot;
-  }
-  const trendPhase = classifyTrendPhase(mfsForClassification);
-  const expansionState = classifyExpansionState(mfsForClassification);
+  // 2. Classify regime using orthogonal checks (MFS is always available now)
+  const trendPhase = classifyTrendPhase(mfs);
+  const expansionState = classifyExpansionState(mfs);
   
   // 3. Check if regime allows mean reversion
-  //    skipRegimeGating: ADX transitional zone (18-22) already constrains the range,
-  //    so we don't need classifyTrendPhase to re-block (avoids the EARLY_TREND dead zone)
   const skipRegime = options?.skipRegimeGating === true;
   const regimeAllowsMR = skipRegime || isMeanReversionAllowed(trendPhase, expansionState);
   
-  // 4. CRITICAL: Extreme exhaustion can override regime blocking
-  // If K is at statistical extremes, regime becomes informational, not blocking
+  // 4. Extreme exhaustion can override regime blocking
   const extremeExhaustionDetected = oversoldSignal.isExtremeExhaustion || overboughtSignal.isExtremeExhaustion;
   
   // Log regime override for diagnostics
@@ -920,9 +886,7 @@ export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: 
       `(phase=${trendPhase}/${expansionState}, would have ${isMeanReversionAllowed(trendPhase, expansionState) ? 'PASSED' : 'BLOCKED'})`
     );
   } else if (extremeExhaustionDetected && !regimeAllowsMR) {
-    const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                   trendData?.stochasticRsi?.['4h']?.k ?? 
-                   trendData?.stochasticRsi?.aggregated?.k ?? 50;
+    const stochK = mfs.stochRsi['4h'].k;
     console.log(
       `[MEAN_REVERSION] EXTREME_EXHAUSTION_OVERRIDE: Regime ${trendPhase}/${expansionState} would block, ` +
       `but K=${stochK.toFixed(1)} at extreme → allowing evaluation`
@@ -930,7 +894,6 @@ export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: 
   }
   
   // 5. Determine if we should proceed
-  // Proceed if: regime allows MR OR extreme exhaustion detected OR regime gating skipped
   const allowed = regimeAllowsMR || extremeExhaustionDetected;
   
   if (!allowed) {
