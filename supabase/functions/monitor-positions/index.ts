@@ -475,10 +475,11 @@ serve(async (req) => {
       // Use ADX and volume to determine exit sensitivity
       // ============================================================
       const trendDataForPosition = trendDataMap.get(position.symbol);
-      // CENTRALIZED: Use shared extractors for consistent ADX access across all edge functions
-      const positionAdx = extractADX(trendDataForPosition);
+      const mfsForPosition = mfsMap.get(position.symbol);
+      // MFS MIGRATION: Use MFS for ADX instead of individual extractors
+      const positionAdx = mfsForPosition?.adx ?? 20;
       const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
-      const positionConfidence = trendDataForPosition?.confidence ?? 50;
+      const positionConfidence = mfsForPosition?.confidence ?? trendDataForPosition?.confidence ?? 50;
       
       // ============================================================
       // CONFIDENCE PENALTY (imported from shared scoring module)
