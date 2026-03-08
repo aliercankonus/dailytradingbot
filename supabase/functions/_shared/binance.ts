@@ -36,7 +36,10 @@ export async function getSymbolFilters(symbol: string): Promise<SymbolFilters> {
   }
 
   try {
-    const response = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(`https://api.binance.com/api/v3/exchangeInfo?symbol=${symbol}`, { signal: controller.signal });
+    clearTimeout(timeoutId);
     if (!response.ok) {
       throw new Error(`Failed to fetch exchange info: ${response.status}`);
     }
