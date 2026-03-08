@@ -9613,8 +9613,8 @@ serve(async (req) => {
                               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 💧 LSRD shadow signal logged: LONG bounce probe, score=${lsrdResult.score}, SL=${lsrdSL.toFixed(4)}, TP=${lsrdTP.toFixed(4)}`);
                             }
                           }
-                        } else if (LIQUIDITY_SWEEP_REVERSAL.LOG_NEAR_MISSES && lsrdResult.score > 15) {
-                          logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.GATE} 💧 LSRD near-miss: score=${lsrdResult.score} (need >=${LIQUIDITY_SWEEP_REVERSAL.MIN_PATTERN_SCORE}) | ${lsrdResult.signals.join(', ')}`);
+                        } else {
+                          logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 💧 LSRD EVAL (HARD): score=${lsrdResult.score}/${LIQUIDITY_SWEEP_REVERSAL.MIN_PATTERN_SCORE} pattern=${lsrdResult.patternType || 'none'} sweep=${lsrdResult.sweepDepthATR?.toFixed(2) ?? '0'}ATR recovery=${lsrdResult.recoveryPercent?.toFixed(2) ?? '0'}% vol=${lsrdResult.volumeConfirmed} | ${lsrdResult.signals.slice(0, 3).join('; ')}`);
                         }
                       }
                     } catch (lsrdErr) {
