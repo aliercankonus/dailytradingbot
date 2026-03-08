@@ -897,15 +897,42 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
  *   Used by the ADX transitional zone (18-22) bypass, which already constrains the ADX range
  *   and doesn't need the regime filter to re-block based on trend phase classification.
  */
-export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: boolean }): ExhaustionSignal {
+export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: boolean; mfs?: MarketFeatureSnapshot }): ExhaustionSignal {
   // 1. FIRST: Evaluate exhaustion checks BEFORE regime gating
   // This prevents the regime from blocking detection of extreme exhaustion
   const oversoldSignal = checkOversoldExhaustion(trendData);
   const overboughtSignal = checkOverboughtExhaustion(trendData);
   
   // 2. Classify regime using orthogonal checks
-  const trendPhase = classifyTrendPhase(trendData);
-  const expansionState = classifyExpansionState(trendData);
+  // MFS MIGRATION: classifyTrendPhase and classifyExpansionState now require MFS.
+  // If MFS is provided, use it directly. Otherwise build a minimal shim from trendData.
+  let mfsForClassification: MarketFeatureSnapshot;
+  if (options?.mfs) {
+    mfsForClassification = options.mfs;
+  } else {
+    // Minimal shim for classifyTrendPhase (adx, adxSlope) and classifyExpansionState (volume, squeeze, adxSlope)
+    const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+    const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+    const volumeRatio = trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0;
+    const squeezeReleased = trendData?.squeeze?.justReleased ?? false;
+    mfsForClassification = {
+      adx,
+      adxSlope,
+      adxRising: adxSlope > 0,
+      adxArray: trendData?.volatility?.adxArray ?? [],
+      squeezeJustReleased: squeezeReleased,
+      volume: {
+        "15m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "30m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "1h": { volumeRatio, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "4h": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        confirmsDirection: false,
+        hasRangeExpansion1h: false,
+      },
+    } as any as MarketFeatureSnapshot;
+  }
+  const trendPhase = classifyTrendPhase(mfsForClassification);
+  const expansionState = classifyExpansionState(mfsForClassification);
   
   // 3. Check if regime allows mean reversion
   //    skipRegimeGating: ADX transitional zone (18-22) already constrains the range,
