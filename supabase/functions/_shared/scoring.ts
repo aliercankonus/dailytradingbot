@@ -1411,10 +1411,10 @@ export const calculateUnifiedReversalScore = (
   
   // 4. MACD ALIGNMENT (0-15 points) - PHASE 2: Apply cap
   let rawMacdScore = 0;
-  if (momentum.hasDivergence) {
+  if (mfs.hasDivergence) {
     rawMacdScore += REVERSAL_CROSS_SCORES.DIVERGENCE;
     reasons.push("MACD divergence detected");
-  } else if (!momentum.macdDirectionAligned) {
+  } else if (!mfs.macdDirectionAligned) {
     rawMacdScore += REVERSAL_CROSS_SCORES.DIRECTION_MISALIGNED;
     reasons.push("MACD direction misaligned");
   } else if (!macdExpanding) {
