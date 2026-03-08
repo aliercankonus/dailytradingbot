@@ -3190,10 +3190,10 @@ export const deriveTradeDirection = (
     // Conditions: directionNullified + baseWeightedSum had valid direction + ADX >= 25 + |priceImpulse| >= 2
     let structuralDirectionRescued = false;
     if (directionNullified && baseDirection) {
-      const smartMomentum = trendData.smartMomentum;
-      const rescueAdx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 0;
+      const smartMomentum = mfs.smartMomentum;
+      const rescueAdx = mfs.adx;
       const rescuePriceImpulse = Math.abs(smartMomentum?.components?.priceImpulse ?? 0);
-      const rescueAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      const rescueAdxSlope = mfs.adxSlope;
       
       if (rescueAdx >= 25 && rescuePriceImpulse >= 2 && rescueAdxSlope >= 0) {
         // Price impulse confirms direction, ADX confirms energy — rescue with micro position
