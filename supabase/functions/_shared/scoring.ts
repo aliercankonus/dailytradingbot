@@ -4622,7 +4622,7 @@ export const deriveTradeDirection = (
     const tier105OfSignal = orderFlowData?.signal?.toLowerCase() ?? "";
     const tier105OfBullish = tier105OfSignal.includes("buy") || tier105OfSignal === "bullish";
     const tier105OfBearish = tier105OfSignal.includes("sell") || tier105OfSignal === "bearish";
-    const tier105MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const tier105MomentumScore = mfs.smartMomentum?.score ?? 0;
     const tier105AbsMomentum = Math.abs(tier105MomentumScore);
     
     const ofIsStrongBullish = tier105OfBullish && tier105OfScore >= DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD;
