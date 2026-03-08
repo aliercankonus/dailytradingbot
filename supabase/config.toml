@@ -59,3 +59,10 @@ verify_jwt = true
 [functions.fetch-klines]
 verify_jwt = false
 
+[functions.kline-collector]
+verify_jwt = false
+
+[functions.kline-collector.schedule]
+enabled = true
+cron = "*/1 * * * *"
+
