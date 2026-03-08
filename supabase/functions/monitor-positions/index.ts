@@ -1445,10 +1445,11 @@ serve(async (req) => {
       // ============= PHASE 3: DYNAMIC R-MULTIPLE TRAILING =============
       // Use ADX-aware activation and momentum-based trailing distance
       // FIXED: Calculate momentum with ACTUAL ADX values from trend data (not hardcoded 20)
-      // CENTRALIZED: Use shared extractors for consistent ADX access
+      // MFS MIGRATION: Use MFS for ADX and slope (momentum calculation context)
       const trendDataForMomentum = trendDataMap.get(position.symbol);
-      const adxForMomentum = extractADX(trendDataForMomentum);
-      const { slope: momentumAdxSlope, isRising: adxRisingForMomentum } = extractADXSlope(trendDataForMomentum);
+      const adxForMomentum = mfsForPosition?.adx ?? 20;
+      const momentumAdxSlope = mfsForPosition?.adxSlope ?? 0;
+      const adxRisingForMomentum = mfsForPosition?.adxRising ?? false;
       const currentAtrForMomentum = atrData?.atr || 0;
       const closesForMomentum = atrData?.closes || [];
       const klinesForMomentum = atrData?.klines || [];
