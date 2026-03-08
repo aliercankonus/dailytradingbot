@@ -299,26 +299,26 @@ export const ALTCOIN_PARAMS = {
   gates: {
     STOCHRSI_LONG_OVERBOUGHT: 75,   // Tighter block
     STOCHRSI_SHORT_OVERSOLD: 25,    // Tighter block
-    STRONG_TREND_MIN_MOM: 15,       // Higher momentum requirement
+    STRONG_TREND_MIN_MOM: 18,       // Much higher momentum requirement
     PARABOLIC_ADX: 50,              // Higher ADX for trend confirmation
-    MOMENTUM_OPPOSING_THRESHOLD: 12, // Tighter opposing block
-    MIN_QUALITY_SCORE: 50,           // Higher quality floor
+    MOMENTUM_OPPOSING_THRESHOLD: 10, // Tighter opposing block
+    MIN_QUALITY_SCORE: 52,           // Higher quality floor
   },
   stopLoss: {
-    atrMultiplier: 1.2,             // Tighter for altcoin volatility
-    maxCapPercent: 1.5,
+    atrMultiplier: 1.0,             // Much tighter for altcoin volatility
+    maxCapPercent: 1.2,             // Hard cap at 1.2%
   },
   takeProfit: {
-    atrMultiplier: 2.0,             // Narrower TP
+    atrMultiplier: 1.8,             // Narrower TP — take profits faster
   },
   exits: {
-    momentumReversalThreshold: -0.2, // Cut earlier
-    momentumReversalScore: 30,
-    momentumReversalMinHours: 1.5,
-    earlyMomentumFlipThreshold: -0.3,
-    earlyMomentumFlipScore: 40,
-    earlyFlipMinHours: 1,
-    earlyFlipMaxHours: 2,
+    momentumReversalThreshold: -0.15, // Cut very early on altcoins
+    momentumReversalScore: 25,        // Lower score threshold — exit sooner
+    momentumReversalMinHours: 1,      // Only 1 hour before momentum exit eligible
+    earlyMomentumFlipThreshold: -0.2,
+    earlyMomentumFlipScore: 35,
+    earlyFlipMinHours: 0.5,           // 30 min
+    earlyFlipMaxHours: 1.5,
   },
 } as const;
 
