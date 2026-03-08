@@ -419,6 +419,8 @@ export function buildMarketFeatureSnapshot(
     k: extractStochRsiK(trendData, tf),
     d: extractStochRsiD(trendData, tf),
     signal: trendData?.stochasticRsi?.[tf]?.signal ?? "neutral",
+    prevK: trendData?.stochasticRsi?.[tf]?.prevK ?? extractStochRsiK(trendData, tf),
+    kArray: trendData?.stochasticRsi?.[tf]?.kArray ?? [],
   });
   const stochRsi = {
     "15m": extractStochTF('15m'),
