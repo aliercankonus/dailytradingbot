@@ -34,6 +34,19 @@ export interface TimeframeFeatures {
 export interface StochRsiFeatures {
   k: number;
   d: number;
+  signal: string;
+}
+
+export interface BarsAtExtremeFeatures {
+  barsOverbought: number;
+  barsOversold: number;
+}
+
+export interface StochRsiAggregated {
+  bearishCrossCount: number;
+  bullishCrossCount: number;
+  overboughtCount: number;
+  oversoldCount: number;
 }
 
 // ============= BOLLINGER FEATURE SET =============
