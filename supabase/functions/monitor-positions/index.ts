@@ -1609,8 +1609,8 @@ serve(async (req) => {
         // EXIT TRIGGER 2: ADX flattening + opposing candle
         // ADX slope near zero or negative AND current candle closes against position
         if (!continuationModeExitTriggered && CONTINUATION_MODE_PARAMS.EXIT_ON_ADX_FLATTEN_PLUS_BEARISH_CANDLE) {
-          // CENTRALIZED: Use shared extractor for ADX slope
-          const { slope: contAdxSlope } = extractADXSlope(trendDataForPosition);
+          // MFS MIGRATION: Use MFS for ADX slope
+          const contAdxSlope = mfsForPosition?.adxSlope ?? 0;
           const adxFlattening = contAdxSlope <= 0.5; // ADX not rising anymore
           
           // Check if latest candle closed against position
