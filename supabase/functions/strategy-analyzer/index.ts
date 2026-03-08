@@ -1416,7 +1416,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // ACCEPTABLE: StochRSI bullish cross = reversal from pullback
-    if (stochRsi.bullishCrossCount >= 1) {
+    if (mfs.stochRsiAggregated.bullishCrossCount >= 1) {
       const baseScore = 12 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: StochRSI bullish cross" + mtfSuffix);
       return {
