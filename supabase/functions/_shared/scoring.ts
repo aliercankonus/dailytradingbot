@@ -4629,7 +4629,7 @@ export const deriveTradeDirection = (
     const ofIsStrongBearish = tier105OfBearish && tier105OfScore >= DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD;
     const momentumNotExtreme = tier105AbsMomentum < DIRECTION_TIER_10_5.EXTREME_MOMENTUM_THRESHOLD;
     
-    const tier105StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    const tier105StochK = mfs.stochRsi["1h"].k;
     const stochAllowsLong = tier105StochK < DIRECTION_TIER_10_5.STOCH_MAX_FOR_LONG;
     const stochAllowsShort = tier105StochK > DIRECTION_TIER_10_5.STOCH_MIN_FOR_SHORT;
     
