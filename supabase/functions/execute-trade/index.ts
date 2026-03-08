@@ -1267,7 +1267,7 @@ serve(async (req) => {
                 ? ` (graduated failed: rising=${adxRising}, macdAligns=${momentumDirectionAgrees}, quality=${qualityScore}>=${VWAP_FILTER.GRADUATED_MIN_QUALITY}?${qualityScore >= VWAP_FILTER.GRADUATED_MIN_QUALITY})`
                 : '';
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} below lower VWAP band $${vwapLowerBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD})${graduatedFailReason}`);
-              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, trendData, { 
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (SHORT)', signal, mfs, { 
                 currentPrice, vwapMid: currentVWAP, vwapMidDeviationPct: vwapDeviation, vwapLowerBand, vwapBandDeviationPct,
                 adx: adxValue, adxRising, macdHistogram, qualityScore,
                 graduatedEligible: adxValue >= ADX_GRADUATED_MIN,
