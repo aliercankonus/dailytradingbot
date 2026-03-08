@@ -330,7 +330,7 @@ export function evaluateCounterTrendAdmission(
   
   // ===== CHECK 5: LTF STRUCTURE FLIP (Optional Bonus) =====
   const ltfCheck = config.LTF_STRUCTURE_ENABLED 
-    ? checkLtfStructureFlip(trendData, derivedDirection)
+    ? checkLtfStructureFlip(mfs, derivedDirection)
     : { flipped: true, score: 0, details: 'LTF check disabled' };
   
   if (ltfCheck.flipped) {
