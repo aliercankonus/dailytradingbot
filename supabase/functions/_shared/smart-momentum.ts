@@ -2982,18 +2982,18 @@ export function detectLiquidityTrap(
   const lowerWickRatio = lowerWick / lastCandle.range;
   
   let wickRejection = false;
-  if (direction === "long" && upperWickRatio > 0.6 && bodyRatio < 0.3) {
+  if (direction === "long" && upperWickRatio > 0.6 && bodyRatio < 0.3 && lastCandleWickBodyRatio >= MIN_WICK_BODY_RATIO) {
     // Long upper wick with tiny body = bullish rejection → bull trap
     const wickPoints = Math.min(25, Math.round(upperWickRatio * 35));
     trapScore += wickPoints;
     wickRejection = true;
-    signals.push(`WICK_REJECTION_UPPER: ${(upperWickRatio * 100).toFixed(0)}% wick (+${wickPoints})`);
-  } else if (direction === "short" && lowerWickRatio > 0.6 && bodyRatio < 0.3) {
+    signals.push(`WICK_REJECTION_UPPER: ${(upperWickRatio * 100).toFixed(0)}% wick, w/b=${lastCandleWickBodyRatio.toFixed(1)} (+${wickPoints})`);
+  } else if (direction === "short" && lowerWickRatio > 0.6 && bodyRatio < 0.3 && lastCandleWickBodyRatio >= MIN_WICK_BODY_RATIO) {
     // Long lower wick with tiny body = bearish rejection → bear trap
     const wickPoints = Math.min(25, Math.round(lowerWickRatio * 35));
     trapScore += wickPoints;
     wickRejection = true;
-    signals.push(`WICK_REJECTION_LOWER: ${(lowerWickRatio * 100).toFixed(0)}% wick (+${wickPoints})`);
+    signals.push(`WICK_REJECTION_LOWER: ${(lowerWickRatio * 100).toFixed(0)}% wick, w/b=${lastCandleWickBodyRatio.toFixed(1)} (+${wickPoints})`);
   }
   // Also check prev candle for 2-bar wick rejection pattern
   if (!wickRejection && prevCandle.range > 0) {
