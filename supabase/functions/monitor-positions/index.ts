@@ -689,6 +689,84 @@ serve(async (req) => {
       const alignmentInfo = trueAlignment ? `Align=${alignmentExitAdjustment > 0 ? '+' : ''}${alignmentExitAdjustment}` : 'Align=N/A';
       positionLogger.debug(`Dynamic exit threshold=${dynamicReversalThreshold} (ADX=${positionAdx.toFixed(1)}, Vol=${positionVolumeScore}, Conf=${positionConfidence}%, Strategy=${strategyType}, ${alignmentInfo})`);
 
+      // ============================================================
+      // 5️⃣ LIQUIDITY TRAP DETECTION - Stop-tighten, reduce, or exit
+      // Reads from MFS (populated by strategy-analyzer via snapshot_data)
+      // Score 60-74: tighten stop by ATR/2
+      // Score 75-84: tighten stop by ATR×0.75
+      // Score ≥85: full exit (LIQUIDITY_TRAP_BLOCK)
+      // ============================================================
+      const liquidityTrap = mfsForPosition?.liquidityTrap;
+      if (liquidityTrap?.detected && liquidityTrap.score >= 60 && !emergencyClose) {
+        const trapScore = liquidityTrap.score;
+        const trapType = liquidityTrap.trapType || 'unknown';
+        const trapSignals = liquidityTrap.signals?.join(', ') || 'none';
+        const currentSL = position.stop_loss || 0;
+        const currentATR = atrData?.atr || (position.entry_price * 0.015);
+        
+        // Check if trap direction opposes position (trap is against us)
+        const trapAgainstPosition = 
+          (position.side === 'BUY' && (liquidityTrap.trapDirection === 'short' || liquidityTrap.trapDirection === 'neutral')) ||
+          (position.side === 'SELL' && (liquidityTrap.trapDirection === 'long' || liquidityTrap.trapDirection === 'neutral'));
+        
+        if (trapAgainstPosition) {
+          if (trapScore >= 85) {
+            // SEVERE TRAP: Full exit
+            emergencyClose = true;
+            emergencyReason = "liquidity_trap_block";
+            positionLogger.warn(`🪤 LIQUIDITY_TRAP_BLOCK: score=${trapScore} ≥85, type=${trapType}, signals=[${trapSignals}] — FULL EXIT triggered`);
+          } else if (trapScore >= 75) {
+            // AGGRESSIVE: Tighten stop by ATR×0.75
+            const tightenAmount = currentATR * 0.75;
+            let tightenedStop = currentSL;
+            if (position.side === 'BUY') {
+              tightenedStop = Math.max(currentSL, currentPrice - tightenAmount);
+            } else {
+              tightenedStop = currentSL > 0 ? Math.min(currentSL, currentPrice + tightenAmount) : currentPrice + tightenAmount;
+            }
+            
+            if (tightenedStop !== currentSL) {
+              const { error: trapSlError } = await supabase
+                .from("positions")
+                .update({ stop_loss: tightenedStop })
+                .eq("id", position.id)
+                .eq("status", "active");
+              
+              if (!trapSlError) {
+                position.stop_loss = tightenedStop;
+                updatedStopLossMap.set(position.id, tightenedStop);
+                positionLogger.warn(`🪤 LIQUIDITY_TRAP_AGGRESSIVE: score=${trapScore}, type=${trapType} — stop tightened $${currentSL.toFixed(2)} → $${tightenedStop.toFixed(2)} (ATR×0.75=$${tightenAmount.toFixed(2)}), signals=[${trapSignals}]`);
+              }
+            }
+          } else {
+            // MODERATE (60-74): Tighten stop by ATR/2
+            const tightenAmount = currentATR * 0.5;
+            let tightenedStop = currentSL;
+            if (position.side === 'BUY') {
+              tightenedStop = Math.max(currentSL, currentPrice - tightenAmount);
+            } else {
+              tightenedStop = currentSL > 0 ? Math.min(currentSL, currentPrice + tightenAmount) : currentPrice + tightenAmount;
+            }
+            
+            if (tightenedStop !== currentSL) {
+              const { error: trapSlError } = await supabase
+                .from("positions")
+                .update({ stop_loss: tightenedStop })
+                .eq("id", position.id)
+                .eq("status", "active");
+              
+              if (!trapSlError) {
+                position.stop_loss = tightenedStop;
+                updatedStopLossMap.set(position.id, tightenedStop);
+                positionLogger.info(`🪤 LIQUIDITY_TRAP_MODERATE: score=${trapScore}, type=${trapType} — stop tightened $${currentSL.toFixed(2)} → $${tightenedStop.toFixed(2)} (ATR×0.5=$${tightenAmount.toFixed(2)}), signals=[${trapSignals}]`);
+              }
+            }
+          }
+        } else {
+          positionLogger.info(`🪤 LIQUIDITY_TRAP_IGNORED: score=${trapScore}, type=${trapType} but trapDirection=${liquidityTrap.trapDirection} favors ${position.side} — no action`);
+        }
+      }
+
 
       // ============================================================
       // DRAWDOWN CIRCUIT BREAKER - Skip processing if triggered
