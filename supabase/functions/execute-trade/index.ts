@@ -1550,7 +1550,7 @@ serve(async (req) => {
     logger.info(`📊 Risk/Reward Analysis: Risk=$${riskAmount.toFixed(2)} (${((riskAmount/currentPrice)*100).toFixed(2)}%), Reward=$${rewardAmount.toFixed(2)} (${((rewardAmount/currentPrice)*100).toFixed(2)}%), R:R=${riskRewardRatio.toFixed(2)}:1`);
     
     if (riskRewardRatio < minRiskReward) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'R/R Ratio Too Low', signal, trendData, { riskRewardRatio, minRequired: minRiskReward, riskAmount, rewardAmount, currentPrice, stopLoss, takeProfit });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'R/R Ratio Too Low', signal, mfs, { riskRewardRatio, minRequired: minRiskReward, riskAmount, rewardAmount, currentPrice, stopLoss, takeProfit });
       throw new Error(`Risk/Reward ratio too low (${riskRewardRatio.toFixed(2)}:1 < ${minRiskReward}:1 required) - trade cancelled`);
     }
     logger.validation(`✓ R:R check passed: ${riskRewardRatio.toFixed(2)}:1 >= ${minRiskReward}:1 minimum`, true);
