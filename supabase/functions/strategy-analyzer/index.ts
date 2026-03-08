@@ -6541,7 +6541,7 @@ serve(async (req) => {
         // ============= PHASE 0: MASTER MARKET REGIME CLASSIFICATION =============
         // Critical foundation: ADX defines regime, all other gates change meaning based on regime
         // This runs ONCE at start of symbol processing - all subsequent gates reference this
-        const driftPercent = trendData.stealthTrend?.driftPercent || 0;
+        const driftPercent = stealthTrend.driftPercent || 0;
         
         // NEW: Pass DI values for accurate trend direction derivation
         const diPlusForRegime = earlyFullAdxResult.plusDI ?? 25;
