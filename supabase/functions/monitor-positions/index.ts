@@ -2342,7 +2342,8 @@ serve(async (req) => {
           }
           
           // RSI pullback detection for conflict resolution
-          const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+          // MFS MIGRATION: Use MFS for RSI 4h
+          const rsi4h = mfsForPosition?.timeframes?.["4h"]?.rsi ?? trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
           const momentumConfirms = momentum.confirms === true;
           
           // For SHORT positions: check for bullish reversal signals
