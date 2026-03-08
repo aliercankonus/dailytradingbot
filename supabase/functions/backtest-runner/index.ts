@@ -819,9 +819,19 @@ function checkProductionExits(
     }
   }
 
-  // 11. NEW: ADX collapse exit — exit when structure breaks down
+  // 11. ADX collapse exit — exit when structure breaks down
   if (adx < 15 && adxSlope < -1.0 && hoursHeld > 4 && pnlPercent < 0.3) {
     return { shouldExit: true, exitReason: 'adx_collapse_exit' };
+  }
+
+  // 12. ALTCOIN HARD PNL FLOOR — hard stop at maxCapPercent loss regardless of momentum
+  if (pnlPercent < -symParams.stopLoss.maxCapPercent) {
+    return { shouldExit: true, exitReason: 'hard_pnl_floor_exit' };
+  }
+
+  // 13. ALTCOIN QUICK LOSS CUT — if losing after 3+ hours with no recovery, cut
+  if (hoursHeld > 3 && pnlPercent < -0.5 && pnlPercent < position.peakPnl - 0.3) {
+    return { shouldExit: true, exitReason: 'stale_loss_exit' };
   }
 
   return { shouldExit: false, exitReason: '' };
