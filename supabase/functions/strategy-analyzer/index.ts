@@ -5511,7 +5511,7 @@ serve(async (req) => {
                 adxSlopeForBreakout: adxSlopeForBreakout.toFixed(2),
                 breakoutWatchBlocked: bbExpandingInCompression ? `ADX slope ${adxSlopeForBreakout.toFixed(2)} <= 0 (not rising)` : 'BB not expanding',
                 shadowIgnitionEligible: shadowIgnitionDiag || false,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
               } // end compressionMicroOverride else (standard block)
             }
@@ -5556,7 +5556,7 @@ serve(async (req) => {
                 cooldownMinutes: SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES,
                 triggerCloseReasons: SAME_DIRECTION_REENTRY_PROTECTION.TRIGGER_CLOSE_REASONS,
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -5601,7 +5601,7 @@ serve(async (req) => {
                   lastExitSide,
                   priceDiffPercent: parseFloat(priceDiffPct),
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -5639,7 +5639,7 @@ serve(async (req) => {
                   activePositionCount: activeForSymbol.length,
                   activeSides: activeForSymbol.map(p => p.side),
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -5697,7 +5697,7 @@ serve(async (req) => {
               reason: regimeEnhanced.reason, 
               adx, confidence, trendConsistency 
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
