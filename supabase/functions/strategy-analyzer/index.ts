@@ -11854,7 +11854,7 @@ serve(async (req) => {
         //   Tier 2 (STANDARD): K <= 20 & %B <= 25 or K >= 80 & %B >= 75 - Block with RESTRICTED bypass
         //   Tier 3 (CAUTION): K <= 30 or K >= 70 - Penalty scoring only (handled in reversal score)
         
-        const adxRisingForBypass = trendData.volatility?.adxRising ?? smartAdxRising ?? false;
+        const adxRisingForBypass = mfs.adxRising;
         const adxSlopeForParabolic = fullAdxResult.adxSlope ?? (adxRisingForBypass ? 0.5 : -0.5);
         const isInParabolicMode = adx >= (HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_MIN_ADX ?? 45) && 
           (!HTF_EXTREME_HARD_GATES.PARABOLIC_MODE_REQUIRE_ADX_RISING || adxSlopeForParabolic >= 0);
