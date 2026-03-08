@@ -276,7 +276,7 @@ import { buildMarketFeatureSnapshot, snapshotAlignedTFCount, type MarketFeatureS
 import { analyzeOrderFlow, getOrderFlowQualityBonus, type OrderFlowAnalysis } from "../_shared/orderflow.ts";
 import { checkPositionCorrelation, getCorrelationAdjustedSize } from "../_shared/correlation.ts";
 import { createLogger, logError, LOG_CATEGORIES } from "../_shared/logging.ts";
-import { getKlines, get24hrTicker, parseKlinePrices } from "../_shared/binance.ts";
+import { getKlines, get24hrTicker, parseKlinePrices, getAndResetFetchStats } from "../_shared/binance.ts";
 import { 
   isShadowModeEnabled, 
   logShadowSignal, 
