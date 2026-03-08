@@ -652,7 +652,7 @@ serve(async (req) => {
     }
     
     if (trendConsistency < dynamicMinConsistency) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, trendData, { 
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Low Trend Consistency', signal, mfs, { 
         trendConsistency, 
         minRequired: dynamicMinConsistency,
         adx: adxValueForConsistency,
