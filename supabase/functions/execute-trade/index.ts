@@ -809,9 +809,9 @@ serve(async (req) => {
     // PHASE 5: MOMENTUM STATE & FAKE BREAKOUT RISK CHECK
     // Adjust position size based on momentum quality from calculate-trend
     // ============================================================
-    const momentumState = trendData?.momentum?.state || 'none';
-    const fakeBreakoutRisk = trendData?.momentum?.fakeBreakoutRisk === true;
-    const genuineMomentum = trendData?.momentum?.genuineMomentum === true;
+    const momentumState = mfs.momentumState || 'none';
+    const fakeBreakoutRisk = mfs.momentum?.fakeBreakoutRisk === true;
+    const genuineMomentum = mfs.momentum?.genuineMomentum === true;
     
     // Start with 1.0 multiplier for momentum adjustments
     let momentumPositionMultiplier = 1.0;
