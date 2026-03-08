@@ -10417,7 +10417,7 @@ serve(async (req) => {
           const trend1h = mfs.timeframes['1h'].trend || "neutral";
           const conf4h = mfs.timeframes['4h'].confidence;
           const trend4h = mfs.timeframes['4h'].trend || "neutral";
-          const hasDivergence = trendData.momentum?.hasDivergence || false;
+          const hasDivergence = momentum.hasDivergence || false;
           const adxSlope = smartAdxRising ? 0.5 : -0.5;
           
           // Detect price action structure
