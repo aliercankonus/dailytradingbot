@@ -7865,28 +7865,26 @@ export const HTF_ALIGNMENT_EXIT = {
 // Together they create a tightening funnel: floor rises AND ceiling drops
 export const PEAK_ADAPTIVE_TRAILING = {
   ENABLED: true,
-  // TIGHTENED 40-50%: Previous distances caused 73% average giveback
-  // Root cause: a 0.7% peak trade would trail 0.45% → exit at 0.25% (64% giveback)
-  // Fix: shrink all distances so max giveback is ~35-45% of peak
+  // TIGHTENED v2: Data shows 100% giveback across 60 trades
+  // Root cause: even at 0.22% distance, a 0.5% peak trade exits at 0.28% (44% giveback)
+  // Fix: shrink probe/early tiers further — target max 30-40% giveback
   TIERS: [
-    // Below 0.3%: probe phase — tighter breathing room
-    { peakThreshold: 0.20, maxDistancePercent: 0.25 },  // NEW: catch early probes
-    { peakThreshold: 0.30, maxDistancePercent: 0.22 },  // Was 0.45 → 0.22 (-51%)
-    { peakThreshold: 0.50, maxDistancePercent: 0.18 },  // Was 0.30 → 0.18 (-40%)
-    { peakThreshold: 0.80, maxDistancePercent: 0.15 },  // Was 0.25 → 0.15 (-40%)
-    { peakThreshold: 1.00, maxDistancePercent: 0.12 },  // Was 0.22 → 0.12 (-45%)
-    { peakThreshold: 1.50, maxDistancePercent: 0.10 },  // Was 0.20 → 0.10 (-50%)
-    { peakThreshold: 2.00, maxDistancePercent: 0.08 },  // Was 0.18 → 0.08 (-56%)
+    { peakThreshold: 0.20, maxDistancePercent: 0.18 },  // Was 0.25 → 0.18 (catches early)
+    { peakThreshold: 0.30, maxDistancePercent: 0.15 },  // Was 0.22 → 0.15
+    { peakThreshold: 0.50, maxDistancePercent: 0.12 },  // Was 0.18 → 0.12
+    { peakThreshold: 0.80, maxDistancePercent: 0.10 },  // Was 0.15 → 0.10
+    { peakThreshold: 1.00, maxDistancePercent: 0.08 },  // Was 0.12 → 0.08
+    { peakThreshold: 1.50, maxDistancePercent: 0.06 },  // Was 0.10 → 0.06
+    { peakThreshold: 2.00, maxDistancePercent: 0.05 },  // Was 0.08 → 0.05
   ],
-  // Default distance for peak < 0.20% (probe phase — moderate breathing room)
-  DEFAULT_DISTANCE_PERCENT: 0.35,  // Was 0.55 → 0.35 (-36%)
+  // Default distance for peak < 0.20% (probe phase)
+  DEFAULT_DISTANCE_PERCENT: 0.25,  // Was 0.35 → 0.25
   // ADX-aware relaxation: in strong trends, allow slightly wider distance
-  // REDUCED: Was 30-50% wider, now 15-25% wider (still prevents chopout but less giveback)
   STRONG_TREND_RELAXATION_ENABLED: true,
   STRONG_TREND_MIN_ADX: 30,
-  STRONG_TREND_DISTANCE_MULTIPLIER: 1.15,  // Was 1.30 → 1.15
+  STRONG_TREND_DISTANCE_MULTIPLIER: 1.15,
   VERY_STRONG_TREND_MIN_ADX: 40,
-  VERY_STRONG_TREND_DISTANCE_MULTIPLIER: 1.25,  // Was 1.50 → 1.25
+  VERY_STRONG_TREND_DISTANCE_MULTIPLIER: 1.25,
   // Don't apply to MICRO_TREND entries (they have their own fixed distance)
   EXEMPT_MICRO_TREND: true,
   // Don't apply to MOMENTUM_CONTINUATION (they use decay as primary exit)
