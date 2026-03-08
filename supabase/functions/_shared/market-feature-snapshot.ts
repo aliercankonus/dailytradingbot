@@ -256,6 +256,21 @@ export interface MarketFeatureSnapshot {
     };
   };
   
+  // === LTF Micro Momentum (calculated from 5m/1m klines) ===
+  ltfMicroMomentum?: {
+    score5m: number;           // -100 to +100 momentum from 5m klines
+    direction5m: string;       // bullish/bearish/neutral from 5m
+    phase5m: string;           // momentum phase from 5m
+    score1m: number;           // -100 to +100 momentum from 1m klines
+    direction1m: string;       // bullish/bearish/neutral from 1m
+    isAccelerating5m: boolean; // 5m momentum accelerating
+    isReverting1m: boolean;    // 1m showing reversal vs 5m
+    ltfAlignment: number;      // -1 to +1: how aligned 1m/5m are
+    entryTimingScore: number;  // 0-100: optimal entry timing quality
+    microTrendConfirms: boolean; // 1m/5m agree with HTF direction
+    recentCandlePattern: string; // pattern from last 3-5 1m candles
+  };
+  
   // === Direction Derivation Support ===
   directionStableBars: number;
   momentumDirection: string;
@@ -370,9 +385,11 @@ export interface MarketFeatureSnapshot {
     "4h": number[];
   };
   
-  // === Raw Klines (for pullback detection) ===
+  // === Raw Klines (for pullback detection and LTF analysis) ===
   klines15m: any[];
   klines30m: any[];
+  klines5m: any[];
+  klines1m: any[];
   
   // === Top-level Volume Ratio (for early trend detection) ===
   volumeRatio: number;
@@ -746,6 +763,8 @@ export function buildMarketFeatureSnapshot(
     // Raw klines
     klines15m: trendData?.klines15m ?? [],
     klines30m: trendData?.klines30m ?? [],
+    klines5m: trendData?.klines5m ?? [],
+    klines1m: trendData?.klines1m ?? [],
     
     // Top-level volume ratio
     volumeRatio: trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0,
