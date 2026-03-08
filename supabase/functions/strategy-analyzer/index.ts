@@ -3259,6 +3259,14 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(
             `🔬 LTF_MICRO: 5m=${mom5m.score.toFixed(0)}(${mom5m.direction}/${mom5m.phase}) 1m=${mom1m.score.toFixed(0)}(${mom1m.direction}) align=${ltfAlignment.toFixed(2)} timing=${entryTimingScore} confirms=${microTrendConfirms} pattern=${recentCandlePattern}${isReverting1m ? ' ⚠️REVERTING' : ''}`
           );
+          
+          // Collect for batch snapshot persist (dashboard)
+          symbolLtfMicroMap.set(symbol, {
+            score5m: mom5m.score, direction5m: mom5m.direction,
+            score1m: mom1m.score, direction1m: mom1m.direction,
+            ltfAlignment, entryTimingScore, microTrendConfirms, recentCandlePattern,
+            isAccelerating5m: mom5m.isAccelerating, isReverting1m,
+          });
         } else {
           logger.forSymbol(symbol).debug(`🔬 LTF_MICRO: Insufficient 5m data (${ltfData?.prices5m.length ?? 0} candles)`);
         }
