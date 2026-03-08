@@ -3174,6 +3174,19 @@ serve(async (req) => {
         const _mc = earlySmartMomentum.components;
         logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning} microExh=${earlySmartMomentum.microExhaustion.detected}(${earlySmartMomentum.microExhaustion.score}/${earlySmartMomentum.microExhaustion.recommendation})`);
 
+        // Collect micro exhaustion data for dashboard snapshot
+        const _exh = earlySmartMomentum.microExhaustion;
+        symbolMicroExhaustionMap.set(symbol, {
+          score: _exh.score,
+          detected: _exh.detected,
+          recommendation: _exh.recommendation,
+          positionMultiplier: _exh.positionMultiplier,
+          momentumDecay: _exh.momentumDeceleration,
+          accelerationFlip: _exh.accelerationFlip,
+          priceDivergence: _exh.priceDivergence,
+          signals: _exh.signals,
+        });
+
         // ============= LTF MICRO-MOMENTUM (5m/1m) =============
         // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
         const ltfData = ltfDataMap.get(symbol);
