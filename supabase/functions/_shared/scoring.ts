@@ -4488,7 +4488,7 @@ export const deriveTradeDirection = (
   if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
     const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
     
-    // Get momentum data from trendData
+    // Get momentum data — MFS direct
     const momentumScore = mfs.smartMomentum?.score ?? 0;
     const tier10StochK = mfs.stochRsi["1h"].k;
     
