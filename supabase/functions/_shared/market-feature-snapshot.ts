@@ -147,7 +147,19 @@ export interface MarketFeatureSnapshot {
     isWeakening: boolean;
     isTransitioning: boolean;
     overextensionATR: number;
+    components?: {
+      macdSlope: number;
+      priceImpulse: number;
+      emaSpreadRoC: number;
+      rsiMomentum: number;
+    };
   };
+  
+  // === Direction Derivation Support ===
+  directionStableBars: number;
+  momentumDirection: string;
+  prevMacdHistogram: number;
+  squeezeJustReleased: boolean;
   
   // === Price Distance ===
   distanceFromHighPercent: number;
@@ -439,7 +451,19 @@ export function buildMarketFeatureSnapshot(
       isWeakening: smartMom.isWeakening ?? false,
       isTransitioning: smartMom.isTransitioning ?? false,
       overextensionATR: smartMom.overextensionATR ?? 0,
+      components: smartMom.components ? {
+        macdSlope: smartMom.components.macdSlope ?? 0,
+        priceImpulse: smartMom.components.priceImpulse ?? 0,
+        emaSpreadRoC: smartMom.components.emaSpreadRoC ?? 0,
+        rsiMomentum: smartMom.components.rsiMomentum ?? 0,
+      } : undefined,
     } : undefined,
+    
+    // Direction derivation support
+    directionStableBars: momentum.directionStableBars ?? 0,
+    momentumDirection: momentum.direction ?? "neutral",
+    prevMacdHistogram: momentum.prevMacdHistogram ?? 0,
+    squeezeJustReleased: trendData?.squeeze?.justReleased ?? false,
     
     // Price distance
     distanceFromHighPercent: priceDistance.distanceFromHighPercent ?? 0,

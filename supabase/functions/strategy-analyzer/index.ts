@@ -3059,8 +3059,8 @@ serve(async (req) => {
         // Uses 15m klines for momentum granularity, but ADX gate values remain from 1h
         const earlySmartMomentum = calculateMomentumScore(klines, earlyPriceData, adx, adxRising, earlyATR, adxSlope);
         
-        // INJECT into trendData so deriveTradeDirection can access it
-        // This is critical: deriveTradeDirection reads trendData.smartMomentum?.score
+        // INJECT into trendData for legacy code paths that still read from it
+        // deriveTradeDirection now reads from MFS directly
         trendData.smartMomentum = earlySmartMomentum;
         
         // UPDATE snapshot with smartMomentum (was unavailable at initial build)
@@ -3073,6 +3073,12 @@ serve(async (req) => {
           isWeakening: earlySmartMomentum.isWeakening ?? false,
           isTransitioning: earlySmartMomentum.isTransitioning ?? false,
           overextensionATR: earlySmartMomentum.overextensionATR ?? 0,
+          components: earlySmartMomentum.components ? {
+            macdSlope: earlySmartMomentum.components.macdSlope ?? 0,
+            priceImpulse: earlySmartMomentum.components.priceImpulse ?? 0,
+            emaSpreadRoC: earlySmartMomentum.components.emaSpreadRoC ?? 0,
+            rsiMomentum: earlySmartMomentum.components.rsiMomentum ?? 0,
+          } : undefined,
         };
         
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
@@ -3136,7 +3142,7 @@ serve(async (req) => {
         // ============= PHASE 1 IMPROVEMENT: EXPLICIT DIRECTION DERIVATION =============
         // Derive trade direction early in the pipeline to prevent inconsistent direction evaluation
         // This ensures all downstream gates use the same direction logic
-        const directionResult = deriveTradeDirection(trendData, trend, earlyOrderFlowAnalysis ? { score: earlyOrderFlowAnalysis.score, signal: earlyOrderFlowAnalysis.signal } : null);
+        const directionResult = deriveTradeDirection(mfs, trend, earlyOrderFlowAnalysis ? { score: earlyOrderFlowAnalysis.score, signal: earlyOrderFlowAnalysis.signal } : null);
         
         // Track if Strong Trend Tier 0 Override was applied (for position sizing)
         let strongTrendTier0OverrideApplied = false;
