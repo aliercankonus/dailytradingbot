@@ -4988,22 +4988,10 @@ export const calculateQualityScore = (
     confidence,
     trueAlignment: mfs.trueAlignment,
     isAligned: aligned,
-    timeframes: {
-      "4h": { trend: mfs.timeframes["4h"].trend, confidence: mfs.timeframes["4h"].confidence, indicators: { rsi: mfs.timeframes["4h"].rsi } },
-      "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
-      "30m": { trend: mfs.timeframes["30m"].trend, confidence: mfs.timeframes["30m"].confidence, indicators: { rsi: mfs.timeframes["30m"].rsi } },
-      "15m": { trend: mfs.timeframes["15m"].trend, confidence: mfs.timeframes["15m"].confidence, indicators: { rsi: mfs.timeframes["15m"].rsi } },
-    },
-    stochasticRsi: {
-      "4h": { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
-      "1h": { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
-    },
-    bollingerBand: { percentB: mfs.bollinger["4h"].percentB, squeeze: mfs.bollinger["4h"].squeeze },
-    volatility: { adx, adxSlope, adxRising },
-    momentum,
   };
-  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendDataShim);
-  const technicalScore = getTechnicalScore(trendDataShim, effectiveTrend, symbol);
+  // MFS MIGRATED: getAlignmentScore and getTechnicalScore now accept MFS directly
+  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, mfs);
+  const technicalScore = getTechnicalScore(mfs, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);
   const confidencePenalty = getConfidencePenalty(confidence, adx, momentum.confirms);
   
