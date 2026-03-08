@@ -1609,7 +1609,7 @@ serve(async (req) => {
           
           // AI can BLOCK a trade if it recommends "avoid" OR risk level is "high"
           if (analysis.recommendation === 'avoid') {
-            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Recommends AVOID', signal, trendData, { aiRecommendation: analysis.recommendation, aiReasoning: analysis.reasoning, aiKeyFactors: analysis.keyFactors });
+            await logExecutionRejection(supabase, user.id, signal.symbol, 'AI Recommends AVOID', signal, mfs, { aiRecommendation: analysis.recommendation, aiReasoning: analysis.reasoning, aiKeyFactors: analysis.keyFactors });
             throw new Error(`AI recommends AVOID: ${analysis.reasoning?.slice(0, 100)}`);
           }
           if (analysis.riskLevel === 'high') {
