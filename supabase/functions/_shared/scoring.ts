@@ -4710,14 +4710,12 @@ export const deriveTradeDirection = (
     const regimeAllows = !EE.REQUIRE_EXHAUSTION_REGIME || regime === 'EXHAUSTION';
     
     if (regimeAllows) {
-      // Get StochRSI and Bollinger data
-      const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
-                       trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
-      const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
-                       trendData.bollingerBands?.['1h']?.percentB ?? 50;
+      // Get StochRSI and Bollinger data — MFS direct
+      const stochK4h = mfs.stochRsi["4h"].k;
+      const percentB = mfs.bollinger["4h"].percentB ?? mfs.bollinger["1h"].percentB ?? 50;
       
-      // Get momentum score (use different names to avoid shadowing outer scope)
-      const tier11MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+      // Get momentum score (use different names to avoid shadowing outer scope) — MFS direct
+      const tier11MomentumScore = mfs.smartMomentum?.score ?? 0;
       const tier11AbsMomentum = Math.abs(tier11MomentumScore);
       
       // Get order flow data (use different names to avoid shadowing outer scope)
