@@ -154,8 +154,10 @@ serve(async (req) => {
             const signalsGenerated = analyzerResult?.totalSignalsGenerated || 0;
             const signalsExecuted = analyzerResult?.executedSignals || 0;
             
+            // ===== Aggregate Binance fetch stats from strategy-analyzer =====
+            const userFetchStats = analyzerResult?.binanceFetchStats || { cacheHits: 0, cacheMisses: 0, timeoutCount: 0, fetchOkCount: 0 };
+            
             // ===== PHASE 1: COMPREHENSIVE REJECTION LOGGING =====
-            // Extract ALL rejection categories from analyzer result for proper visibility
             const rejections = analyzerResult?.rejections || {};
             const totalRejected = (rejections.byHardGates || 0) + 
                                   (rejections.byQuality || 0) + 
@@ -207,6 +209,9 @@ serve(async (req) => {
               }
             }
 
+            // Log Binance fetch stats per user
+            userLogger.info(`🔶 Binance: OK=${userFetchStats.fetchOkCount} CACHE_HIT=${userFetchStats.cacheHits} CACHE_MISS=${userFetchStats.cacheMisses} TIMEOUT=${userFetchStats.timeoutCount}`);
+
             userLogger.summary(`Generated ${signalsGenerated} signals, executed ${signalsExecuted}, rejected ${totalRejected} (gates=${rejections.byHardGates || 0}, quality=${rejections.byQuality || 0}, strategy=${rejections.byStrategy || 0})`);
             if (signalsExecuted > 0) {
               userLogger.info(`Strategy breakdown: Momentum=${strategyBreakdown.momentum}, MeanReversion=${strategyBreakdown.meanReversion}, TrendFollow=${strategyBreakdown.trendFollowing}, Other=${strategyBreakdown.other}`);
@@ -222,6 +227,7 @@ serve(async (req) => {
               perSymbolAttribution: activeSymbols.length > 0 ? perSymbolAttribution : undefined,
               message: analyzerResult?.message || 'Auto-trader processing completed',
               strategyBreakdown: signalsExecuted > 0 ? strategyBreakdown : undefined,
+              binanceFetchStats: userFetchStats,
             };
           } catch (userError) {
             const errorMessage = userError instanceof Error ? userError.message : "Unknown error";
