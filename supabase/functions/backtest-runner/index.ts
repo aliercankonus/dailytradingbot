@@ -398,17 +398,20 @@ function evaluateProductionGates(
     }
   }
 
-  // ===== GATE 3: Deep StochRSI Extremes (production DEEP_STOCHRSI_HARD_GATE) =====
+  // ===== GATE 3: Deep StochRSI Extremes — OPTIMIZED: ADX-aware relaxation =====
   if (stochK < STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERSOLD || stochK > STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERBOUGHT) {
-    // Strong Trend Tier0 Override
-    if (adx >= ADX_THRESHOLDS.EXTREME) {
+    // Strong Trend Tier0 Override — expanded from EXTREME to VERY_STRONG
+    if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.30);
+    } else if (adx >= ADX_THRESHOLDS.STRONG && adxSlope > 0.2) {
+      // NEW: Allow with reduced sizing when trend is building
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
     } else {
       return fail('DEEP_STOCHRSI_EXTREME');
     }
   }
 
-  // ===== GATE 4: Determine Direction =====
+  // ===== GATE 4: Determine Direction — OPTIMIZED: relaxed thresholds =====
   let direction: 'LONG' | 'SHORT' | null = null;
   const emaBullish = primaryTrend === 'bullish';
   const emaBearish = primaryTrend === 'bearish';
@@ -417,10 +420,17 @@ function evaluateProductionGates(
     direction = 'LONG';
   } else if (emaBearish && momentumResult.score < 0) {
     direction = 'SHORT';
-  } else if (momentumResult.score > 20 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score > 15 && adx > ADX_THRESHOLDS.STRONG) {
+    // Relaxed from >20 to >15
     direction = 'LONG';
-  } else if (momentumResult.score < -20 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score < -15 && adx > ADX_THRESHOLDS.STRONG) {
     direction = 'SHORT';
+  } else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
+    // NEW: Strong structural trend can derive direction from DI
+    const diPlus = mfs.diPlus || 0;
+    const diMinus = mfs.diMinus || 0;
+    if (diPlus > diMinus + 5) direction = 'LONG';
+    else if (diMinus > diPlus + 5) direction = 'SHORT';
   }
   
   if (!direction) {
