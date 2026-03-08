@@ -3087,7 +3087,7 @@ serve(async (req) => {
         // Gate decisions use trendData ADX (1h closed candles) — set above as const.
         const earlyFullAdxResult = calculateADXWithDirection(klines, 14);
         const earlyAdxSlope = earlyFullAdxResult.adxSlope ?? 0;
-        const earlySmartAdxRising = earlyAdxSlope > 0 || (trendData.volatility?.adxRising === true);
+        const earlySmartAdxRising = earlyAdxSlope > 0 || mfs.adxRising;
         
         // Log if 15m and 1h ADX diverge significantly (diagnostic only)
         const adxDrift = Math.abs(adx - earlyFullAdxResult.adx);
