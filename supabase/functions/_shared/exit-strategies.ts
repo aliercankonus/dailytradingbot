@@ -46,7 +46,13 @@ export interface MarketContext {
   pnlPercent: number;
   atrPercent: number;
   atr: number;
-  trendData: any; // snapshot_data from trend_snapshots
+  // MFS-backed fields (pre-extracted by caller)
+  adx: number;
+  adxSlope: number;
+  primaryTrend: string;
+  momentumScore: number;
+  /** @deprecated kept for backward compat — callers should migrate to direct fields */
+  trendData?: any;
 }
 
 export interface UserExitSettings {
