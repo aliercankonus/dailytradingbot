@@ -1629,23 +1629,24 @@ export interface MarketRegimeEnhancedResult {
   };
 }
 
-export const detectMarketRegimeEnhanced = (trendData: any): MarketRegimeEnhancedResult => {
+export const detectMarketRegimeEnhanced = (mfs: MarketFeatureSnapshot): MarketRegimeEnhancedResult => {
   const P = REGIME_SCORE_PARAMS;
   
-  // Extract data with safe defaults
-  const adx = trendData?.volatility?.adx || 0;
-  const atrPercent = trendData?.volatility?.atrPercent || 0;
-  const confidence = trendData?.confidence || 0;
-  const consistency = trendData?.trueAlignment?.score || 0;
-  const volumeRatio = trendData?.volatility?.volumeRatio || 1.0;
-  const momentum = trendData?.momentum || {};
-  const timeframes = trendData?.timeframes || {};
+  // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const atrPercent = mfs.atrPercent;
+  const confidence = mfs.confidence;
+  const consistency = mfs.trueAlignment.score;
+  const volumeRatio = mfs.volume['1h'].volumeRatio || 1.0;
   
   // HTF slope for flattening detection
-  const htf4hSlope = timeframes?.['4h']?.indicators?.emaSlope || 0;
-  const htf1hSlope = timeframes?.['1h']?.indicators?.emaSlope || 0;
+  const htf4hSlope = 0; // emaSlope not available in MFS - defaults to 0
+  const htf1hSlope = 0;
   
-  let regimeScore = 50;  // Start at neutral baseline
+  // HTF trends
+  const htf4hTrend = mfs.timeframes['4h'].trend || "neutral";
+  const htf1hTrend = mfs.timeframes['1h'].trend || "neutral";
+  const primaryTrend = mfs.primaryTrend || "neutral";
   
   // ============= ADX CONTRIBUTION (0-30 points) =============
   if (adx >= ADX_THRESHOLDS.EXCEPTIONAL) {
