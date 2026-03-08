@@ -9721,6 +9721,8 @@ serve(async (req) => {
                       riskParams.ai_analysis_enabled !== false,
                       earlyOrderFlowAnalysis
                     );
+                    // Track NEAR_24H_LOW expanded fallback event for bounce study
+                    await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED_FALLBACK', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
                     continue;
                   }
                 }
