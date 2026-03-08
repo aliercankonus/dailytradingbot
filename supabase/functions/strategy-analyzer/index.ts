@@ -9550,7 +9550,7 @@ serve(async (req) => {
                     earlyOrderFlowAnalysis
                   );
                   // Track NEAR_24H_LOW event for bounce study (location-based, skip stochK filter)
-                  await trackOversoldEvent(symbol, 'NEAR_24H_LOW_HARD', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                  await trackOversoldEvent(symbol, 'NEAR_24H_LOW_HARD', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
                   continue;
                 } else {
                   // Bypass allowed but with reduced size
@@ -9692,7 +9692,7 @@ serve(async (req) => {
                         earlyOrderFlowAnalysis
                       );
                       // Track NEAR_24H_LOW expanded event for bounce study
-                      await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                      await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
                       continue;
                       } // end bearish bypass else (standard block)
                     }
@@ -9722,7 +9722,7 @@ serve(async (req) => {
                       earlyOrderFlowAnalysis
                     );
                     // Track NEAR_24H_LOW expanded fallback event for bounce study
-                    await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED_FALLBACK', stochRsiK4h, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                    await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED_FALLBACK', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
                     continue;
                   }
                 }
