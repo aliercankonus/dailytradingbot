@@ -1988,7 +1988,7 @@ export interface EarlyIgnitionResult {
 }
 
 export const checkEarlyIgnitionException = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   intendedDirection: "long" | "short" | null,
   regime: string
 ): EarlyIgnitionResult => {
@@ -2006,24 +2006,21 @@ export const checkEarlyIgnitionException = (
     trend1h: 'neutral',
   };
   
-  if (!trendData || !intendedDirection) {
-    return { isValid: false, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"], checkDetails };
+  if (!mfs || !intendedDirection) {
+    return { isValid: false, positionSizeMultiplier: 1.0, reasons: ["No MFS data or direction"], checkDetails };
   }
   
-  const adxSlope = trendData?.volatility?.adxSlope ?? 0;
-  const timeframes = trendData?.timeframes || {};
-  const stochFilter4h = trendData?.stochFilter?.['4h'] || {};
-  const stochFilter1h = trendData?.stochFilter?.['1h'] || {};
-  
-  const trend4h = stochFilter4h.trend || timeframes['4h']?.trend || "neutral";
-  const conf4h = stochFilter4h.confidence || timeframes['4h']?.confidence || 0;
-  const trend1h = stochFilter1h.trend || timeframes['1h']?.trend || "neutral";
+  // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  const adxSlope = mfs.adxSlope;
+  const trend4h = mfs.timeframes['4h'].trend || "neutral";
+  const conf4h = mfs.timeframes['4h'].confidence || 0;
+  const trend1h = mfs.timeframes['1h'].trend || "neutral";
   
   // Update check details
   checkDetails.adxSlope = adxSlope;
   checkDetails.htfConfidence = conf4h;
-  checkDetails.trend4h = trend4h;
-  checkDetails.trend1h = trend1h;
+  checkDetails.trend4h = trend4h as string;
+  checkDetails.trend1h = trend1h as string;
   
   // Condition 1: Must be EARLY_TREND regime
   const isEarlyTrendRegime = regime === 'EARLY_TREND';
@@ -2043,7 +2040,7 @@ export const checkEarlyIgnitionException = (
   }
   reasons.push(`ADX slope rising (${adxSlope.toFixed(3)} > 0)`);
   
-  // Condition 3: 4H confidence ≥ 55% (from FOUR_STATE_REGIME.UPPER_TRANSITION_CONFIDENCE)
+  // Condition 3: 4H confidence ≥ 55%
   const MIN_4H_CONFIDENCE = FOUR_STATE_REGIME.UPPER_TRANSITION_CONFIDENCE;
   if (conf4h < MIN_4H_CONFIDENCE) {
     return { isValid: false, positionSizeMultiplier: 1.0, reasons: [`4H confidence ${conf4h.toFixed(0)}% < ${MIN_4H_CONFIDENCE}%`], checkDetails };
