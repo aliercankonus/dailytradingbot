@@ -4117,8 +4117,8 @@ export const deriveTradeDirection = (
   }
   
   // ============= PRIORITY 2.5: BUILDING TREND DIRECTION OVERRIDE =============
-  const adxRising = trendData.momentum?.adxRising || trendData.volatility?.adxRising || false;
-  const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+  const adxRising = mfs.adxRising;
+  const priceMove = mfs.priceActionMomentum?.movePercent || 0;
   
   if (
     trend4h === "neutral" &&
