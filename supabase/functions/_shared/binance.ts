@@ -271,29 +271,44 @@ function releaseFetchSlot(): void {
   }
 }
 
+// ============= OBSERVABILITY COUNTERS =============
+let cacheHits = 0;
+let cacheMisses = 0;
+let timeoutCount = 0;
+let fetchOkCount = 0;
+
+/** Get and reset fetch stats for cycle-end logging */
+export function getAndResetFetchStats() {
+  const stats = { cacheHits, cacheMisses, timeoutCount, fetchOkCount };
+  cacheHits = cacheMisses = timeoutCount = fetchOkCount = 0;
+  return stats;
+}
+
 // ============= API HELPERS =============
 
 /**
  * Fetch current price for a symbol
  */
 export async function getCurrentPrice(symbol: string): Promise<number | null> {
+  await acquireFetchSlot();
   try {
-    await acquireFetchSlot();
     const response = await fetchWithTimeout(
       `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
       FETCH_TIMEOUTS.ticker
     );
-    releaseFetchSlot();
     if (!response.ok) {
       logger.warn(`Failed to fetch price for ${symbol}: ${response.status}`);
       return null;
     }
     const data = await response.json();
+    fetchOkCount++;
     return parseFloat(data.price);
   } catch (error) {
-    releaseFetchSlot();
+    if (String(error).includes('BINANCE_TIMEOUT')) timeoutCount++;
     logger.error(`Error fetching price for ${symbol}: ${error}`);
     return null;
+  } finally {
+    releaseFetchSlot();
   }
 }
 
