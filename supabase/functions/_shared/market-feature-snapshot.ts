@@ -110,6 +110,8 @@ export interface StochRsiFeatures {
   k: number;
   d: number;
   signal: string;
+  prevK: number;       // Previous K value for momentum delta
+  kArray: number[];    // K history for temporal analysis
 }
 
 export interface BarsAtExtremeFeatures {
@@ -349,10 +351,35 @@ export interface MarketFeatureSnapshot {
   
   // === Market Regime (raw from trendData) ===
   regime: string;
+  
+  // === Aggregate Scores (top-level trendData fields) ===
+  volumeScore: number;           // Aggregate volume quality score
+  reversalScore: number;         // Reversal risk metric
+  volumeZScore: number;          // Volume z-score from volatility
+  
+  // === Momentum Extended ===
+  lastCloseAlignsWithTrend: boolean;
+  momentumRsi: number;           // RSI from momentum object
+  
+  // === Trend Age ===
+  trendAgeBars: number;          // Bars since trend started
+  
+  // === StochRSI History (for Flash Crash detection) ===
+  stochRsiHistory: {
+    "1h": number[];
+    "4h": number[];
+  };
+  
+  // === Raw Klines (for pullback detection) ===
+  klines15m: any[];
+  klines30m: any[];
+  
+  // === Top-level Volume Ratio (for early trend detection) ===
+  volumeRatio: number;
 }
 
 // ============= DEFAULTS =============
-const defaultStochRsi: StochRsiFeatures = { k: 50, d: 50, signal: "neutral" };
+const defaultStochRsi: StochRsiFeatures = { k: 50, d: 50, signal: "neutral", prevK: 50, kArray: [] };
 
 const defaultBarsAtExtreme: BarsAtExtremeFeatures = { barsOverbought: 0, barsOversold: 0 };
 
@@ -392,6 +419,8 @@ export function buildMarketFeatureSnapshot(
     k: extractStochRsiK(trendData, tf),
     d: extractStochRsiD(trendData, tf),
     signal: trendData?.stochasticRsi?.[tf]?.signal ?? "neutral",
+    prevK: trendData?.stochasticRsi?.[tf]?.prevK ?? extractStochRsiK(trendData, tf),
+    kArray: trendData?.stochasticRsi?.[tf]?.kArray ?? [],
   });
   const stochRsi = {
     "15m": extractStochTF('15m'),
@@ -695,6 +724,31 @@ export function buildMarketFeatureSnapshot(
     
     // Market regime
     regime: trendData?.regime?.regime || 'RANGING',
+    
+    // Aggregate scores
+    volumeScore: trendData?.volumeScore ?? 0,
+    reversalScore: trendData?.reversalScore ?? 0,
+    volumeZScore: trendData?.volatility?.volumeZScore ?? 0,
+    
+    // Momentum extended
+    lastCloseAlignsWithTrend: momentum.lastCloseAlignsWithTrend ?? false,
+    momentumRsi: momentum.rsi ?? 50,
+    
+    // Trend age
+    trendAgeBars: trendData?.trendAge?.bars ?? 0,
+    
+    // StochRSI history
+    stochRsiHistory: {
+      "1h": trendData?.stochRsiHistory?.['1h'] ?? [],
+      "4h": trendData?.stochRsiHistory?.['4h'] ?? [],
+    },
+    
+    // Raw klines
+    klines15m: trendData?.klines15m ?? [],
+    klines30m: trendData?.klines30m ?? [],
+    
+    // Top-level volume ratio
+    volumeRatio: trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0,
   };
 }
 
