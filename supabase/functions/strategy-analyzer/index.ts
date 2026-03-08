@@ -1359,7 +1359,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
   
   // Derive 30m pullback confirmation from 30m data
   const has30mPullbackConfirm = (() => {
-    const trend30m = timeframes['30m']?.trend || timeframes['30m']?.indicators?.emaSignal || 'neutral';
+    const trend30m = mfs.timeframes['30m'].trend || mfs.timeframes['30m'].emaSignal || 'neutral';
     if (trend === 'bullish') {
       return (trend30m === 'bullish' || trend30m === 'neutral') && rsi30m < 55 && k30m < 60;
     }
@@ -3700,13 +3700,8 @@ serve(async (req) => {
                 if (earlyAdxSlope < TEE.MIN_ADX_SLOPE) return { allowed: false, reason: `ADX slope ${earlyAdxSlope.toFixed(2)} < ${TEE.MIN_ADX_SLOPE}`, multiplier: 0 };
                 const momScore = earlySmartMomentum.score ?? 0;
                 if (momScore > -TEE.MIN_MOMENTUM_SCORE) return { allowed: false, reason: `Momentum ${momScore.toFixed(0)} > ${-TEE.MIN_MOMENTUM_SCORE}`, multiplier: 0 };
-                // Count bearish aligned TFs
-                let bearishCount = 0;
-                const tfTrends = trendData.timeframes || {};
-                for (const tf of ['15m', '30m', '1h', '4h']) {
-                  const tfTrend = tfTrends[tf]?.trend;
-                  if (tfTrend === 'bearish' || tfTrend === 'weak_bearish') bearishCount++;
-                }
+                // Count bearish aligned TFs (from snapshot convenience function)
+                const bearishCount = snapshotAlignedTFCount(mfs, 'short');
                 if (bearishCount < TEE.MIN_ALIGNED_TIMEFRAMES) return { allowed: false, reason: `${bearishCount} bearish TFs < ${TEE.MIN_ALIGNED_TIMEFRAMES}`, multiplier: 0 };
                 
                 // Weighted StochRSI: 70% 4H + 30% 1H (symmetric with LONG side)
@@ -5026,15 +5021,7 @@ serve(async (req) => {
           // Pre-compute rally alignment to avoid blocking entries during broad rallies
           let earlyRallyBypass = false;
           if (RALLY_OVERRIDE.ENABLED && RALLY_OVERRIDE.BYPASSES_REGIME_AGE_EXHAUSTED) {
-            let earlyAlignedCount = 0;
-            const earlyTfTrends = trendData.timeframes || {};
-            for (const tf of ['15m', '30m', '1h', '4h']) {
-              const tfTrend = earlyTfTrends[tf]?.trend;
-              if ((derivedDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
-                  (derivedDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
-                earlyAlignedCount++;
-              }
-            }
+            const earlyAlignedCount = snapshotAlignedTFCount(mfs, derivedDirection as 'long' | 'short');
             const earlyMomScore = earlySmartMomentum?.score ?? 0;
             const earlyMomConfirms = derivedDirection === 'long' 
               ? earlyMomScore >= RALLY_OVERRIDE.MIN_MOMENTUM_SCORE_LONG
@@ -5088,7 +5075,7 @@ serve(async (req) => {
               // Check LTF alignment with 4h direction
               const trend4hDir = htfTrend4h;
               const trend1hDir = htfTrend1h;
-              const trend30mDir = trendData.timeframes?.['30m']?.trend || trendData.multiTimeframeTrends?.timeframe30m?.trend || 'neutral';
+              const trend30mDir = mfs.timeframes['30m'].trend || 'neutral';
               
               const is1hAligned = (trend4hDir === 'bullish' && trend1hDir === 'bullish') || 
                                   (trend4hDir === 'bearish' && trend1hDir === 'bearish');
@@ -5994,16 +5981,8 @@ serve(async (req) => {
         let rallyOverrideMultiplier = 1.0;
         
         if (RALLY_OVERRIDE.ENABLED) {
-          // Count timeframes aligned with derived direction
-          let rallyAlignedCount = 0;
-          const rallyTfTrends = trendData.timeframes || {};
-          for (const tf of ['15m', '30m', '1h', '4h']) {
-            const tfTrend = rallyTfTrends[tf]?.trend;
-            if ((derivedDirection === 'long' && (tfTrend === 'bullish' || tfTrend === 'weak_bullish')) ||
-                (derivedDirection === 'short' && (tfTrend === 'bearish' || tfTrend === 'weak_bearish'))) {
-              rallyAlignedCount++;
-            }
-          }
+          // Count timeframes aligned with derived direction (from snapshot convenience function)
+          const rallyAlignedCount = snapshotAlignedTFCount(mfs, derivedDirection as 'long' | 'short');
           
           // Check momentum confirmation
           const momScoreForRally = smartMomentum.score;
@@ -6772,8 +6751,8 @@ serve(async (req) => {
         if (TREND_EXHAUSTION_PROTECTION.ENABLED) {
           // Calculate trend strength from timeframe confidences (0-100 scale)
           // Uses 4h and 1h confidence weighted average as proxy for trend strength
-          const conf4h = trendData.timeframes?.['4h']?.confidence ?? 50;
-          const conf1h = trendData.timeframes?.['1h']?.confidence ?? 50;
+          const conf4h = mfs.timeframes['4h'].confidence;
+          const conf1h = mfs.timeframes['1h'].confidence;
           const trendStrength = Math.round((conf4h * 0.6 + conf1h * 0.4));  // Weighted average
           const adxSlope = fullAdxResult.adxSlope ?? 0;
           const adxDeclining = adxSlope < TREND_EXHAUSTION_PROTECTION.ADX_SLOPE_DECLINE_THRESHOLD;
@@ -6781,8 +6760,8 @@ serve(async (req) => {
           const adxWasMeaningful = adx >= TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK;
           
           // Get the prior trend direction to determine if entry is continuation or reversal
-          const trend4h = trendData.timeframes?.['4h']?.trend ?? "neutral";
-          const trend1h = trendData.timeframes?.['1h']?.trend ?? "neutral";
+          const trend4h = mfs.timeframes['4h'].trend;
+          const trend1h = mfs.timeframes['1h'].trend;
           const priorTrendBullish = trend4h === "bullish" || (trend4h === "neutral" && trend1h === "bullish");
           const priorTrendBearish = trend4h === "bearish" || (trend4h === "neutral" && trend1h === "bearish");
           
@@ -7045,8 +7024,8 @@ serve(async (req) => {
             // ===== STEP 4: LTF ALIGNMENT CONTEXT — Determines normalization vs exhaustion =====
             const contReq = ADX_SLOPE_GRADUATED_GATE.CONTINUATION_REQUIREMENTS;
             if (contReq?.ENABLED && adx >= contReq.MIN_ADX && adxSlope < contReq.MIN_ADX_SLOPE) {
-              const tf1hTrend = trendData.timeframes?.['1h']?.trend || 'neutral';
-              const tf30mTrend = trendData.timeframes?.['30m']?.trend || 'neutral';
+              const tf1hTrend = mfs.timeframes['1h'].trend || 'neutral';
+              const tf30mTrend = mfs.timeframes['30m'].trend || 'neutral';
               const ltfAligned = (derivedDirection === 'long' && (tf1hTrend === 'bullish' || tf30mTrend === 'bullish')) ||
                                  (derivedDirection === 'short' && (tf1hTrend === 'bearish' || tf30mTrend === 'bearish'));
               
@@ -7167,8 +7146,8 @@ serve(async (req) => {
         let highAdx1hGateApplied = false;
         
         if (HIGH_ADX_1H_CONFIRMATION_GATE.ENABLED && adx >= HIGH_ADX_1H_CONFIRMATION_GATE.MIN_ADX_FOR_CHECK) {
-          const tf1hDir = trendData.timeframes?.['1h']?.direction?.toLowerCase() || 'neutral';
-          const tf30mDir = trendData.timeframes?.['30m']?.direction?.toLowerCase() || 'neutral';
+          const tf1hDir = (mfs.timeframes['1h'].trend || 'neutral').toLowerCase();
+          const tf30mDir = (mfs.timeframes['30m'].trend || 'neutral').toLowerCase();
           const is1hNeutral = tf1hDir === 'neutral';
           const expectedDir = derivedDirection === 'long' ? 'bullish' : 'bearish';
           const is30mAligned = tf30mDir === expectedDir;
@@ -8679,12 +8658,10 @@ serve(async (req) => {
         
         if (LTF_CONFIRMATION_GATE.ENABLED) {
           const priceDistance = trendData.priceDistanceFromSwing;
-          const tf30m = trendData.timeframes?.['30m'];
-          const tf30mDir = tf30m?.trend || tf30m?.indicators?.emaSignal || "neutral";
-          // Extract directly from trendData instead of using later-declared variables
-          const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
-          const tf4hDir = trendData.timeframes?.['4h']?.trend || trendData.timeframes?.['4h']?.indicators?.emaSignal || "neutral";
-          const conf4h = trendData.timeframes?.['4h']?.confidence || 50;
+          const tf30mDir = mfs.timeframes['30m'].trend || mfs.timeframes['30m'].emaSignal || "neutral";
+          const tf1hDir = mfs.timeframes['1h'].trend || mfs.timeframes['1h'].emaSignal || "neutral";
+          const tf4hDir = mfs.timeframes['4h'].trend || mfs.timeframes['4h'].emaSignal || "neutral";
+          const conf4h = mfs.timeframes['4h'].confidence || 50;
           
           // Only apply when 4h is strongly directional
           const is4hStronglyDirectional = (tf4hDir === 'bullish' || tf4hDir === 'bearish') && 
@@ -9114,8 +9091,8 @@ serve(async (req) => {
             // Check for shorts near 24h low
             if (derivedDirection === 'short' && distanceFromLow <= effectiveSoftThreshold) {
               // Get LTF alignment check
-              const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
-              const tf30mDir = trendData.timeframes?.['30m']?.trend || 'neutral';
+              const tf1hDir = mfs.timeframes['1h'].trend || mfs.timeframes['1h'].emaSignal || "neutral";
+              const tf30mDir = mfs.timeframes['30m'].trend || 'neutral';
               const ltfSupportsShort = tf1hDir === 'bearish' || tf30mDir === 'bearish';
               
               // Check for hard zone (very close to low)
@@ -9137,7 +9114,7 @@ serve(async (req) => {
                 // ===== BEARISH TREND BYPASS =====
                 // In confirmed bearish trends, making new lows is structural — not a location failure
                 const bearishBypass = NEAR_EXTREME_PROTECTION_GATE.BEARISH_TREND_BYPASS;
-                const trend4hForNearExtreme = trendData.timeframes?.['4h']?.trend || 'neutral';
+                const trend4hForNearExtreme = mfs.timeframes['4h'].trend || 'neutral';
                 const bearishTrendBypass = bearishBypass?.ENABLED && 
                   adx >= bearishBypass.MIN_ADX && 
                   (!bearishBypass.REQUIRE_BEARISH_4H || trend4hForNearExtreme === 'bearish') &&
@@ -9279,7 +9256,7 @@ serve(async (req) => {
                     else {
                       // ===== BEARISH TREND BYPASS FOR EXPANDED BLOCK =====
                       const bearishBypassExpanded = NEAR_EXTREME_PROTECTION_GATE.BEARISH_TREND_BYPASS;
-                      const trend4hExpanded = trendData.timeframes?.['4h']?.trend || 'neutral';
+                      const trend4hExpanded = mfs.timeframes['4h'].trend || 'neutral';
                       const bearishBypassApplies = bearishBypassExpanded?.ENABLED && 
                         adx >= bearishBypassExpanded.MIN_ADX && 
                         (!bearishBypassExpanded.REQUIRE_BEARISH_4H || trend4hExpanded === 'bearish') &&
@@ -9443,8 +9420,8 @@ serve(async (req) => {
             
             // Check for longs near 24h high
             if (derivedDirection === 'long' && distanceFromHigh <= effectiveSoftThreshold) {
-              const tf1hDir = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
-              const tf30mDir = trendData.timeframes?.['30m']?.trend || 'neutral';
+              const tf1hDir = mfs.timeframes['1h'].trend || mfs.timeframes['1h'].emaSignal || "neutral";
+              const tf30mDir = mfs.timeframes['30m'].trend || 'neutral';
               const ltfSupportsLong = tf1hDir === 'bullish' || tf30mDir === 'bullish';
               
               const inHardZone = distanceFromHigh <= effectiveHardThreshold;
@@ -9862,9 +9839,9 @@ serve(async (req) => {
         
         if (RANGING_MARKET_PROTECTION.ENABLED) {
           // Check if all timeframes are neutral/low confidence
-          const htf4hConf = trendData.timeframes?.['4h']?.confidence ?? 0;
-          const htf1hConf = trendData.timeframes?.['1h']?.confidence ?? 0;
-          const htf30mConf = trendData.timeframes?.['30m']?.confidence ?? 0;
+          const htf4hConf = mfs.timeframes['4h'].confidence;
+          const htf1hConf = mfs.timeframes['1h'].confidence;
+          const htf30mConf = mfs.timeframes['30m'].confidence;
           
           const all4hNeutral = htfTrend4h === 'neutral' || htf4hConf < RANGING_MARKET_PROTECTION.MIN_CONFIDENCE_TO_BREAK_RANGE;
           const all1hNeutral = htfTrend1h === 'neutral' || htf1hConf < RANGING_MARKET_PROTECTION.MIN_CONFIDENCE_TO_BREAK_RANGE;
@@ -10386,10 +10363,10 @@ serve(async (req) => {
         // Check continuation mode when momentum is exhausted
         if (CONTINUATION_MODE_PARAMS.ENABLED && smartMomentum.isExhausted) {
           // Get trend data for continuation check
-          const conf1h = trendData.timeframes?.['1h']?.confidence || 50;
-          const trend1h = trendData.timeframes?.['1h']?.trend || "neutral";
-          const conf4h = trendData.timeframes?.['4h']?.confidence || 50;
-          const trend4h = trendData.timeframes?.['4h']?.trend || "neutral";
+          const conf1h = mfs.timeframes['1h'].confidence;
+          const trend1h = mfs.timeframes['1h'].trend || "neutral";
+          const conf4h = mfs.timeframes['4h'].confidence;
+          const trend4h = mfs.timeframes['4h'].trend || "neutral";
           const hasDivergence = trendData.momentum?.hasDivergence || false;
           const adxSlope = smartAdxRising ? 0.5 : -0.5;
           
@@ -10704,8 +10681,8 @@ serve(async (req) => {
             const momentumState = mfs.momentumState || "none";
             // PHASE 3 MIGRATION: Read from snapshot
             const stoch4h = mfs.stochRsi["4h"].k;
-            const trend1h = trendData.timeframes?.['1h'];
-            const trend30m = trendData.timeframes?.['30m'];
+            const trend1h = mfs.timeframes['1h'];
+            const trend30m = mfs.timeframes['30m'];
             
             // Calculate exhaustion age proxy: if regimeScore < 70, it's been a while (mature)
             const exhaustionMature = smartRegime.regimeScore < overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD;
@@ -11077,10 +11054,10 @@ serve(async (req) => {
         const STRONG_TREND_ADX_THRESHOLD = ADX_THRESHOLDS.VERY_STRONG;  // ADX >= 30 = strong trend
         
         // Get trend data for both timeframes (for StochRSI filter) - use correct paths with emaSignal fallback
-        const stochFilterTrend4h = trendData.timeframes?.['4h']?.trend || trendData.timeframes?.['4h']?.indicators?.emaSignal || "neutral";
-        const stochFilterTrend1h = trendData.timeframes?.['1h']?.trend || trendData.timeframes?.['1h']?.indicators?.emaSignal || "neutral";
-        const stochFilterConf4h = trendData.timeframes?.['4h']?.confidence || 50;
-        const stochFilterConf1h = trendData.timeframes?.['1h']?.confidence || 50;
+        const stochFilterTrend4h = mfs.timeframes['4h'].trend || mfs.timeframes['4h'].emaSignal || "neutral";
+        const stochFilterTrend1h = mfs.timeframes['1h'].trend || mfs.timeframes['1h'].emaSignal || "neutral";
+        const stochFilterConf4h = mfs.timeframes['4h'].confidence || 50;
+        const stochFilterConf1h = mfs.timeframes['1h'].confidence || 50;
         
         // Get momentum and divergence info
         const hasBearishDivergence = trendData.momentum?.hasDivergence && trend === "bullish";
@@ -11157,7 +11134,7 @@ serve(async (req) => {
               const meetsAdxSlope = adxSlope >= TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_ADX_SLOPE;
               
               // Check HTF alignment
-              const htf4hConfidenceForExit = trendData.timeframes?.['4h']?.confidence ?? 0;
+              const htf4hConfidenceForExit = mfs.timeframes['4h'].confidence;
               const meetsHtf = htf4hConfidenceForExit >= TREND_CONTINUATION_AFTER_EXIT_PARAMS.MIN_HTF_4H_CONFIDENCE;
               
               // Check if current direction matches original
@@ -11190,8 +11167,8 @@ serve(async (req) => {
         let bollingerExtPositionMultiplier = 1.0;
         
         if (STRONG_TREND_BOLLINGER_EXTENSION_PARAMS.ENABLED) {
-          const htfConf4hForBB = trendData.timeframes?.['4h']?.confidence ?? 0;
-          const htfDir4hForBB = trendData.timeframes?.['4h']?.trend ?? 'neutral';
+          const htfConf4hForBB = mfs.timeframes['4h'].confidence;
+          const htfDir4hForBB = mfs.timeframes['4h'].trend || 'neutral';
           
           // Check if direction matches 4h trend
           const htf4hAlignedForBB = (derivedDirection === 'long' && htfDir4hForBB === 'bullish') ||
@@ -11241,10 +11218,10 @@ serve(async (req) => {
         let earlyTrendPositionMultiplier = 1.0;
         
         if (EARLY_TREND_DETECTION_PARAMS.ENABLED) {
-          const htfConf4hForET = trendData.timeframes?.['4h']?.confidence ?? 0;
-          const htfDir4hForET = trendData.timeframes?.['4h']?.trend ?? 'neutral';
-          const htfConf1hForET = trendData.timeframes?.['1h']?.confidence ?? 0;
-          const htfDir1hForET = trendData.timeframes?.['1h']?.trend ?? 'neutral';
+          const htfConf4hForET = mfs.timeframes['4h'].confidence;
+          const htfDir4hForET = mfs.timeframes['4h'].trend || 'neutral';
+          const htfConf1hForET = mfs.timeframes['1h'].confidence;
+          const htfDir1hForET = mfs.timeframes['1h'].trend || 'neutral';
           
           // Check if ADX is in early trend range (18-25) with rising slope
           const isEarlyAdxRange = adx >= EARLY_TREND_DETECTION_PARAMS.MIN_ADX && adx < ADX_THRESHOLDS.STRONG;
@@ -11871,12 +11848,12 @@ serve(async (req) => {
         // ============= NEW: STRONG TREND HTF BYPASS CHECK =============
         // Allow bypass when trend is very strong and no exhaustion signals
         // Note: adxRisingForBypass already declared above
-        const tf30m = trendData.timeframes?.['30m'];
+        const tf30mForBypass = mfs.timeframes['30m'];
         
         // Check 4h alignment for relaxed mode
         const tf4hDir = stochFilterTrend4h;
         const tf1hDir = stochFilterTrend1h;
-        const tf30mDir = tf30m?.trend || tf30m?.indicators?.emaSignal || "neutral";
+        const tf30mDir = tf30mForBypass.trend || tf30mForBypass.emaSignal || "neutral";
         
         const is4hAligned = (() => {
           if (intendedTradeDirection === "long") {
@@ -13244,7 +13221,7 @@ serve(async (req) => {
           // SHORT momentum zone: 35-55 (bearish-to-neutral bias)
           // Entries outside these zones get 25% additional position reduction
           if (momentumContinuationAllowedLong && !stochRsiRising) {
-            const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+            const rsi4h = mfs.timeframes['4h'].rsi;
             const rsiInMomentumZone = rsi4h >= 45 && rsi4h <= 65; // LONG zone
             
             if (rsiInMomentumZone) {
@@ -13520,7 +13497,7 @@ serve(async (req) => {
           // SHORT momentum zone: 35-55 (bearish-to-neutral bias)
           // Entries outside these zones get 25% additional position reduction
           if (momentumContinuationAllowed && !stochRsiFalling) {
-            const rsi4h = trendData.timeframes?.['4h']?.indicators?.rsi ?? 50;
+            const rsi4h = mfs.timeframes['4h'].rsi;
             const rsiInMomentumZone = rsi4h >= 35 && rsi4h <= 55; // SHORT zone
             
             if (rsiInMomentumZone) {
@@ -17064,7 +17041,7 @@ serve(async (req) => {
                 const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
                 
                 // IMPROVEMENT 2: Get 1h confidence for ADX relaxation
-                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const conf1h = mfs.timeframes['1h'].confidence;
                 const is1hVeryConfident = conf1h >= 70;
                 const is1hBearish = htfTrend1h === "bearish";
                 
@@ -17159,7 +17136,7 @@ serve(async (req) => {
                 const isStrongTrendMode = adx >= constraints.STRONG_TREND_ADX_THRESHOLD;
                 
                 // IMPROVEMENT 2: Get 1h confidence for ADX relaxation
-                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const conf1h = mfs.timeframes['1h'].confidence;
                 const is1hVeryConfident = conf1h >= 70;
                 const is1hBullish = htfTrend1h === "bullish";
                 
@@ -17250,7 +17227,7 @@ serve(async (req) => {
               if (isMomentumType && !is4hDirectional) {
                 // 4h is neutral - check if we can allow via 1h directional + momentum building
                 const is1hDirectional = htfTrend1h === "bullish" || htfTrend1h === "bearish";
-                const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+                const conf1h = mfs.timeframes['1h'].confidence;
                 const is1hConfident = conf1h >= 60;
                 const is1hVeryConfident = conf1h >= 62;  // PHASE 1 FIX: Lowered from 70 - 62%+ 1h conf is already directional
                 const isMomentumBuilding = earlyMomentumScore >= MOMENTUM_THRESHOLDS.MIN_SCORE;
@@ -17429,7 +17406,7 @@ serve(async (req) => {
         
         if (candidates.length === 0 && passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES) {
           // Check if convergence conditions are met
-          const conf1h = trendData.timeframes?.['1h']?.confidence || 0;
+          const conf1h = mfs.timeframes['1h'].confidence;
           const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown');
           
           // PHASE 3 FIX: Allow dominant direction with HTF alignment, not just strict consensus
@@ -18589,9 +18566,9 @@ serve(async (req) => {
         ].filter(Boolean);
         
         if (unifiedPositionSize < 0.3 && beGatesApplied.length >= 2) {
-          const tf1hDir = trendData.timeframes?.['1h']?.direction || 'N/A';
-          const tf30mDir = trendData.timeframes?.['30m']?.direction || 'N/A';
-          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final size ${unifiedPositionSize.toFixed(2)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${trendData.adx?.toFixed(1)}, Slope=${trendData.adxSlope?.toFixed(2)}, StochK=${trendData.stochrsiK?.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
+          const tf1hDir = mfs.timeframes['1h'].trend || 'N/A';
+          const tf30mDir = mfs.timeframes['30m'].trend || 'N/A';
+          logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.RISK} 🛡️ TRIPLE STACK REDUCTION: Final size ${unifiedPositionSize.toFixed(2)}% - effectively a probe trade. Gates: ${beGatesApplied.join(' × ')}. ADX=${adx.toFixed(1)}, Slope=${adxSlope.toFixed(2)}, StochK=${mfs.stochRsi["4h"].k.toFixed(0)}, 1h=${tf1hDir}, 30m=${tf30mDir}`);
         }
         
         // Cap position size AFTER all gates applied
@@ -18775,9 +18752,9 @@ serve(async (req) => {
               stealthDrift: trendData.stealthTrend?.driftPercent || 0,
               direction: lateGrindDirection,
               conditions: lateGrindAccepted ? {
-                htfBias: trendData.timeframes?.['4h']?.confidence || 0,
-                adxSlope: trendData.volatility?.adxSlope || 0,
-                stochK4h: (trendData.stochasticRsi?.['4h']?.k ?? 50),
+                htfBias: mfs.timeframes['4h'].confidence,
+                adxSlope: mfs.adxSlope,
+                stochK4h: mfs.stochRsi['4h'].k,
               } : null,
             },
             // PHASE 2: Price Action Early Entry tracking for dashboard analytics
