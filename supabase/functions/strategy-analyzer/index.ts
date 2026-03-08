@@ -13661,7 +13661,7 @@ serve(async (req) => {
         
         // ============= PHASE 2: HARD CONTRADICTION CHECK =============
         // Block if momentum/MACD strongly contradicts derived direction
-        const hardContradiction = checkHardContradictions(trendData, derivedDirection);
+        const hardContradiction = checkHardContradictions(mfs, derivedDirection);
         if (hardContradiction.hasContradiction) {
           rejectedByHardGates++;
           perSymbolGateAttribution.set(symbol, { 
@@ -16691,7 +16691,7 @@ serve(async (req) => {
           const signalTypeValidation = validateSignalTypeRequirements(
             strategy.id || '',
             strategy.name,
-            trendData,
+            mfs,
             derivedDirection
           );
           
@@ -16737,7 +16737,7 @@ serve(async (req) => {
           
           // ============= PHASE 4: SQUEEZE STATE CLASSIFICATION =============
           // Block breakout strategies during low-ADX squeeze (reclassify as watchlist)
-          const squeezeClass = classifySqueezeState(trendData, strategy.name);
+          const squeezeClass = classifySqueezeState(mfs, strategy.name);
           if (squeezeClass.shouldReclassify) {
             rejectedByStrategy++;
             perSymbolGateAttribution.set(symbol, { 
