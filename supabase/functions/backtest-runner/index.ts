@@ -635,8 +635,15 @@ function evaluateProductionGates(
     const macdHist = mfs.macdHistogram;
     const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
                                  (direction === 'SHORT' && macdHist < 0 && mfs.macdExpanding);
+    // RELAXED: Also allow squeeze with MACD direction match (even without expansion) at strong ADX
+    const squeezeDirPartial = (direction === 'LONG' && macdHist > 0) ||
+                               (direction === 'SHORT' && macdHist < 0);
     if (squeezeDirConfirmed) {
       strategyName = 'SQUEEZE_BREAKOUT';
+    } else if (squeezeDirPartial && adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0) {
+      // Partial confirmation: MACD direction matches but not yet expanding
+      strategyName = 'SQUEEZE_BREAKOUT';
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
     } else {
       // No direction confirmation after squeeze — block entry
       return fail('SQUEEZE_NO_DIRECTION');
