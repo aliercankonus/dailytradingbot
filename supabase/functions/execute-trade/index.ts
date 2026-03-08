@@ -1710,7 +1710,8 @@ serve(async (req) => {
         strategyPositionMultiplier = 0.6;
         strategyPositionNote = `Grid/range strategy = -40% size (more frequent trades)`;
       } else if (strategyType === 'NEUTRAL_BREAKOUT') {
-        const breakoutConfirmed = trendData?.momentum?.confirms === true;
+        // MFS MIGRATED: momentum confirms read from snapshot
+        const breakoutConfirmed = mfs.momentum?.confirms === true;
         
         if (breakoutConfirmed) {
           strategyPositionMultiplier = 1.1;
