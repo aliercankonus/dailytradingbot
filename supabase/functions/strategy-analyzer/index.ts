@@ -18867,7 +18867,23 @@ serve(async (req) => {
           }
         }
 
-        // Cap position size AFTER all gates applied (including LTF micro timing)
+        // ============= MICRO EXHAUSTION POSITION SIZING =============
+        // v5.0: Reduce position size when momentum exhaustion is detected
+        // >70 score → 0.65x, >85 → 0.4x, >90 → 0.35x (soft block territory)
+        const microExhEntry = mfs?.smartMomentum?.microExhaustion;
+        if (microExhEntry && microExhEntry.detected && microExhEntry.positionMultiplier < 1.0) {
+          const prevSize = unifiedPositionSize;
+          unifiedPositionSize *= microExhEntry.positionMultiplier;
+          
+          const blockEntry = microExhEntry.score > 90;
+          if (blockEntry) {
+            logger.forSymbol(symbol).warn(`🔥 MICRO_EXHAUSTION_SOFT_BLOCK: score=${microExhEntry.score}, signals=[${microExhEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${microExhEntry.positionMultiplier})`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🔥 MICRO_EXHAUSTION_SIZING: score=${microExhEntry.score}, signals=[${microExhEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${microExhEntry.positionMultiplier})`);
+          }
+        }
+
+        // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion)
         unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
 
 
