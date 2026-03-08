@@ -6032,6 +6032,7 @@ serve(async (req) => {
             symbol,
             `Market regime not tradeable: ${regimeEnhanced.reason}`,
             { 
+              gate: gateType,
               regime: regimeEnhanced.regime, 
               regimeScore: regimeEnhanced.regimeScore,
               allowedSetups: regimeEnhanced.allowedSetups,
