@@ -5097,7 +5097,7 @@ serve(async (req) => {
         // ============= BYPASS EVALUATION LOGGING =============
         const dirCtx = directionResult?.directionContext;
         const dirWeightedScoreForLog = dirCtx?.weightedScore ?? 0;
-        logger.forSymbol(symbol).info(
+        logger.forSymbol(symbol).debug(
           `${LOG_CATEGORIES.GATE} 📊 DIRECTION_EVAL: direction=${directionResult.direction || 'null'}, ` +
           `weightedScore=${dirWeightedScoreForLog.toFixed(3)}, source=${directionResult.source}, ` +
           `weakProbe=${weakDirectionProbeApplied}, lateGrind=${lateGrindAccepted}, ` +
