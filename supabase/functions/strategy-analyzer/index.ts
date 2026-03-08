@@ -10880,7 +10880,7 @@ serve(async (req) => {
         // Finding 1: In pre-recovery state, require deep pullback OR squeeze breakout
         // Get pullback analysis early for pre-recovery gate check
         const rsi = trendData?.timeframes?.['1h']?.indicators?.rsi ?? 50;
-        const squeezeBreakoutForPreRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
+        const squeezeBreakoutForPreRecovery = isValidSqueezeBreakout(mfs, derivedDirection);
         
         // Check for deep pullback conditions (RSI + structure)
         const isDeepPullbackLong = derivedDirection === "long" && 
