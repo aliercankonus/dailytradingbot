@@ -5985,7 +5985,7 @@ serve(async (req) => {
                   },
                   severity: momentumCheck.severity 
                 },
-                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else if (adxExceptionAllowed) {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MOMENTUM_HARD_GATE bypassed: ADX=${adx.toFixed(1)} >= ${MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_MIN_ADX}`);
@@ -6090,7 +6090,7 @@ serve(async (req) => {
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
                 { gate: 'OPPOSING_SMART_MOMENTUM', derivedDirection, smartMomentumScore: momScore, absMomScore, adx, htfTrend4h, htfTrend1h, threshold: HARD_BLOCK_THRESHOLD, phase: momPhase, isTransitioning },
-                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else if (adxException) {
               // ADX exception: allow with 0.30x position
@@ -6243,7 +6243,7 @@ serve(async (req) => {
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
                 { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h, regime: fourStateRegime.regime },
-                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
             
@@ -6267,7 +6267,7 @@ serve(async (req) => {
                 
                 await logRejectionWithAI(supabase, userId, symbol, blockReason,
                   { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h },
-                  trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                  mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               }
             } else {
@@ -9432,7 +9432,7 @@ serve(async (req) => {
                         ? `ADX >= ${hardGrad.MODERATE_TREND.MIN_ADX} + slope >= ${hardGrad.MODERATE_TREND.MIN_ADX_SLOPE} for 15%, ADX >= ${hardGrad.STRONG_TREND.MIN_ADX} + slope >= ${hardGrad.STRONG_TREND.MIN_ADX_SLOPE} for 25%`
                         : `LTF (1h or 30m) must be bearish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9509,7 +9509,7 @@ serve(async (req) => {
                       relaxationApplied: nearExtremeRelaxationApplied,
                       wouldPassWith: `ADX >= ${regimeBlockLong.MIN_ADX_TO_BYPASS} OR momentum >= +${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow >= +${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9682,7 +9682,7 @@ serve(async (req) => {
                             block: `< ${graduatedMomentumLong.NEUTRAL_LONG_MIN}`,
                           },
                         },
-                        trendData,
+                        mfs,
                         riskParams.ai_analysis_enabled !== false,
                         earlyOrderFlowAnalysis
                       );
@@ -9709,7 +9709,7 @@ serve(async (req) => {
                         smartMomentumScore: smartMomentum.score.toFixed(1),
                         momentumRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
                       },
-                      trendData,
+                      mfs,
                       riskParams.ai_analysis_enabled !== false,
                       earlyOrderFlowAnalysis
                     );
