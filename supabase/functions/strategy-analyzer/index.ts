@@ -4677,9 +4677,9 @@ serve(async (req) => {
           
           // Check for early ignition entry conditions
           const volumeInfo = {
-            ratio: trendData.volatility?.volumeRatio || 1.0,
-            zScore: trendData.volatility?.volumeZScore || 0,
-            spike: trendData.volatility?.volumeSpike || false,
+            ratio: mfs.volume["1h"].volumeRatio || 1.0,
+            zScore: trendData.volatility?.volumeZScore || 0, // NOT in MFS
+            spike: mfs.volume["1h"].volumeSpike || false,
           };
           
           const earlyIgnitionResult = detectEarlyIgnitionEntry(
