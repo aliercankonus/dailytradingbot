@@ -1053,7 +1053,6 @@ const calculateSeparatedRisk = (
     timeframeScore: number;
     volumeScore: number;
   },
-  trendData: any,
   signalType: string
 ): SeparatedRiskResult => {
   const continuationReasons: string[] = [];
