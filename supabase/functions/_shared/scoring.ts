@@ -1687,11 +1687,12 @@ export const detectMarketRegimeEnhanced = (mfs: MarketFeatureSnapshot): MarketRe
   
   // ============= MOMENTUM CONTRIBUTION (0-10 points) =============
   let momentumPoints = 0;
-  if (momentum?.state === "confirmed") {
+  const momentumState = mfs.momentumState || "none";
+  if (momentumState === "confirmed") {
     momentumPoints = 10;
-  } else if (momentum?.state === "building") {
+  } else if (momentumState === "building") {
     momentumPoints = 7;
-  } else if (momentum?.confirms) {
+  } else if (mfs.momentumConfirms) {
     momentumPoints = 5;
   }
   regimeScore += momentumPoints;
