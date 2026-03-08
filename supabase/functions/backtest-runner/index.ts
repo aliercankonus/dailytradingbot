@@ -1022,10 +1022,21 @@ serve(async (req) => {
     }
 
     const body = await req.json();
+    
+    // Support "days" shorthand: auto-calculate startDate/endDate
+    let startDate = body.startDate;
+    let endDate = body.endDate;
+    if (!startDate || !endDate) {
+      const days = body.days || 7;
+      const now = new Date();
+      endDate = now.toISOString();
+      startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+    }
+    
     const config: BacktestConfig = {
       symbols: body.symbols || ['BTCUSDT'],
-      startDate: body.startDate,
-      endDate: body.endDate,
+      startDate,
+      endDate,
       barInterval: body.barInterval || '1h',
     };
 
