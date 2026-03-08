@@ -543,6 +543,10 @@ export function buildMarketFeatureSnapshot(
     priceChange4h: extractPriceChange(trendData, '4h'),
     priceChange24h: extractPriceChange(trendData, '24h'),
     
+    // VWAP
+    vwapValue: trendData?.vwap?.value ?? 0,
+    vwapDistancePercent: trendData?.vwap?.distancePercent ?? 0,
+    
     // Pullback
     inPullback: pullback.inPullback ?? false,
     pullbackPercent: pullback.pullbackPercent ?? 0,
