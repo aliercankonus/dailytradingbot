@@ -1470,7 +1470,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // AVOID: Overbought in weak trend
-    if (rsi > RSI_THRESHOLDS.OVERBOUGHT || stochRsi.overboughtCount >= 2) {
+    if (rsi > RSI_THRESHOLDS.OVERBOUGHT || mfs.stochRsiAggregated.overboughtCount >= 2) {
       return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 0, reason: "Avoid: Overbought in weak trend" };
     }
   }
