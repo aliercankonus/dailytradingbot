@@ -292,8 +292,8 @@ function buildBacktestMFS(
     symbol, currentPrice,
     timestamp: new Date().toISOString(),
     primaryTrend, confidence,
-    isAligned: (emaBullish || emaBearish),
-    trendConsistency: emaBullish || emaBearish ? 70 : 30,
+    isAligned: (maxAligned >= 2),
+    trendConsistency,
 
     adx: adxResult.adx, adxSlope: adxResult.adxSlope ?? adxResult.slope ?? 0,
     adxRising: adxResult.adxRising,
