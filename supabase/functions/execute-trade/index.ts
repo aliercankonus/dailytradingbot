@@ -604,7 +604,7 @@ serve(async (req) => {
         const mismatchReason = currentTrend === 'bullish' 
           ? 'Trend Mismatch (Bullish vs SHORT) - High Confidence'
           : 'Trend Mismatch (Bearish vs LONG) - High Confidence';
-        await logExecutionRejection(supabase, user.id, signal.symbol, mismatchReason, signal, trendData, { 
+        await logExecutionRejection(supabase, user.id, signal.symbol, mismatchReason, signal, mfs, { 
           currentTrend, 
           signalDirection, 
           trendConfidence,
