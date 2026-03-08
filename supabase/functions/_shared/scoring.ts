@@ -2693,10 +2693,9 @@ export const deriveTradeDirection = (
     return { direction: null, confidence: 0, source: "none", reasons: ["No trend data"] };
   }
   
-  // ============= MFS ADAPTER LAYER =============
-  // Map MFS fields to local variables matching old trendData access patterns.
-  // This allows the 2000+ lines of tier logic below to remain unchanged.
-  // Future: inline these directly once migration is validated.
+  // ============= MFS DIRECT FIELD ACCESS =============
+  // All indicator reads use MarketFeatureSnapshot fields directly.
+  // Legacy trendData shim has been fully removed.
   const timeframes = mfs.timeframes;
   const trend4h = timeframes['4h']?.trend || "neutral";
   const trend1h = timeframes['1h']?.trend || "neutral";
@@ -2713,81 +2712,9 @@ export const deriveTradeDirection = (
   const adx = mfs.adx;
   const adxSlope = mfs.adxSlope;
   
-  // ============= trendData COMPATIBILITY SHIM =============
-  // Provides trendData-shaped access for code paths that still reference it.
-  // This is a read-only proxy — all data comes from MFS.
-  const trendData = {
-    timeframes: mfs.timeframes,
-    volatility: {
-      adx: mfs.adx,
-      adxSlope: mfs.adxSlope,
-      adxRising: mfs.adxRising,
-      volumeRatio: mfs.volume["1h"].volumeRatio,
-      relativeATR: mfs.relativeATR,
-    },
-    momentum: {
-      adx: mfs.adx,
-      adxSlope: mfs.adxSlope,
-      adxRising: mfs.adxRisingMomentum,
-      score: mfs.smartMomentum?.score ?? 0,
-      macdHistogram: mfs.macdHistogram,
-      macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0,
-      rsi: mfs.timeframes["1h"].rsi,
-      confirms: mfs.momentumConfirms,
-      state: mfs.momentumState,
-      volumeConfirms: mfs.volumeConfirms,
-      consecutiveBars1h: mfs.consecutiveBars1h,
-      consecutiveBars30m: mfs.consecutiveBars30m,
-      consecutiveBars: mfs.consecutiveBars1h,
-      direction: mfs.momentumDirection,
-      directionStableBars: mfs.directionStableBars,
-      prevMacdHistogram: mfs.prevMacdHistogram,
-      momentumScore: mfs.smartMomentum?.score ?? 0,
-      stochRsiK: mfs.stochRsi["4h"].k,
-    },
-    indicators: {
-      rsi: mfs.timeframes["1h"].rsi,
-      macdHistogram: mfs.macdHistogram,
-    },
-    smartMomentum: mfs.smartMomentum ? {
-      ...mfs.smartMomentum,
-      components: mfs.smartMomentum.components ?? {
-        macdSlope: 0,
-        priceImpulse: 0,
-        emaSpreadRoC: 0,
-        rsiMomentum: 0,
-      },
-    } : undefined,
-    stochasticRsi: {
-      '15m': mfs.stochRsi["15m"],
-      '30m': mfs.stochRsi["30m"],
-      '1h': mfs.stochRsi["1h"],
-      '4h': mfs.stochRsi["4h"],
-    },
-    stochRsi: mfs.stochRsi["1h"],
-    stochRsi1h: mfs.stochRsi["1h"],
-    bollingerBands: {
-      '15m': mfs.bollinger["15m"],
-      '30m': mfs.bollinger["30m"],
-      '1h': mfs.bollinger["1h"],
-      '4h': mfs.bollinger["4h"],
-      squeezeActive: mfs.bollinger.squeezeActive,
-    },
-    bollingerBand: {
-      squeeze: mfs.bollinger["4h"].squeeze,
-    },
-    confidence: mfs.confidence,
-    isAligned: mfs.isAligned,
-    trueAlignment: mfs.trueAlignment,
-    volume: {
-      ratio: mfs.volume["1h"].volumeRatio,
-    },
-    squeeze: {
-      justReleased: mfs.squeezeJustReleased,
-    },
-    priceActionMomentum: mfs.priceActionMomentum,
-    adx: mfs.adx,
-  };
+  // ============= MFS DIRECT ACCESS =============
+  // All indicator reads below use MFS fields directly.
+  // The legacy trendData compatibility shim has been removed.
   
   // ============= PHASE 1: REGIME CLASSIFICATION =============
   // Classify market regime BEFORE direction derivation to adjust gate behavior
@@ -2824,8 +2751,8 @@ export const deriveTradeDirection = (
     // This preserves directional pressure even when trend labels are conservative
     const getMomentumDirectionHint = (): number => {
       // Use MACD/RSI to infer direction when trend is neutral
-      const macdHistogram = trendData.momentum?.macdHistogram ?? trendData.indicators?.macdHistogram ?? 0;
-      const rsi = trendData.indicators?.rsi ?? trendData.momentum?.rsi ?? 50;
+      const macdHistogram = mfs.macdHistogram;
+      const rsi = mfs.timeframes["1h"].rsi;
       
       if (macdHistogram > 0 && rsi > RSI_ZONE_THRESHOLDS.BULLISH_HINT) return 1;  // Bullish hint
       if (macdHistogram < 0 && rsi < RSI_ZONE_THRESHOLDS.BEARISH_HINT) return -1; // Bearish hint
@@ -2888,7 +2815,7 @@ export const deriveTradeDirection = (
          // SAFEGUARD: Only amplify when there's a committed directional lean, NOT noise.
          // During compression breakouts ADX spikes from range contraction before price commits,
          // so we require: (1) minimum bias floor, (2) RSI+MACD agreement (same sign)
-         const adxVal = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+         const adxVal = adx;
          const preBias = combinedBias * uncertaintyBoost;
          const rsiAndMacdAgree = (rsiBias > 0 && macdBias >= 0) || (rsiBias < 0 && macdBias <= 0) || Math.abs(macdBias) < 0.01;
          const hasCommittedLean = Math.abs(preBias) >= 0.10 && rsiAndMacdAgree;
@@ -3563,30 +3490,28 @@ export const deriveTradeDirection = (
       const absoluteExtremePositionMult = ER.ABSOLUTE_EXTREME_POSITION_MULT ?? 0.30;
       const contextualExtremePositionMult = (ER as any).CONTEXTUAL_EXTREME_POSITION_MULT ?? 0.25;
       const decliningStrongTrendPositionMult = 0.20; // Most conservative: STRONG_TREND still active
-      // Get 4h StochRSI K value
-      const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
-                       trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
+      // Get 4h StochRSI K value — MFS direct
+      const stochK4h = mfs.stochRsi["4h"].k;
       
-      // Get Bollinger %B (4h preferred, fall back to 1h)
-      const percentB4h = trendData.bollingerBands?.['4h']?.percentB ?? 50;
-      const percentB1h = trendData.bollingerBands?.['1h']?.percentB ?? 50;
+      // Get Bollinger %B (4h preferred, fall back to 1h) — MFS direct
+      const percentB4h = mfs.bollinger["4h"].percentB ?? 50;
+      const percentB1h = mfs.bollinger["1h"].percentB ?? 50;
       const percentB = percentB4h !== 50 ? percentB4h : percentB1h;
       
-      // Get momentum data
-      const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-      const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? 
-                            trendData.momentum?.macdSlope ?? 0;
-      const macdHist = trendData.momentum?.macdHistogram ?? 0;
-      const prevMacdHist = trendData.momentum?.prevMacdHistogram ?? macdHist;
+      // Get momentum data — MFS direct
+      const momentumScore = mfs.smartMomentum?.score ?? 0;
+      const momentumSlope = mfs.smartMomentum?.components?.macdSlope ?? 0;
+      const macdHist = mfs.macdHistogram;
+      const prevMacdHist = mfs.prevMacdHistogram ?? macdHist;
       const macdImproving = macdHist > prevMacdHist;
       const macdDeclining = macdHist < prevMacdHist;
       
-      // Get ADX slope for acceleration check
-      const erAdxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
+      // Get ADX slope for acceleration check — MFS direct
+      const erAdxSlope = mfs.adxSlope;
       
-      // Get volume/expansion data
-      const volumeRatio = trendData.volume?.ratio ?? trendData.volatility?.volumeRatio ?? 1.0;
-      const squeezeJustReleased = trendData.squeeze?.justReleased ?? false;
+      // Get volume/expansion data — MFS direct
+      const volumeRatio = mfs.volume["1h"].volumeRatio;
+      const squeezeJustReleased = mfs.squeezeJustReleased;
       const isExpansion = (volumeRatio > ER.MAX_VOLUME_RATIO) || 
                           (ER.BLOCK_ON_SQUEEZE_RELEASE && squeezeJustReleased);
       
@@ -3596,8 +3521,8 @@ export const deriveTradeDirection = (
       const ofBullish = ofSignal.includes("buy") || ofSignal === "bullish";
       const ofBearish = ofSignal.includes("sell") || ofSignal === "bearish";
       
-      // Get ADX value for high ADX + declining check
-      const adxValue = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+      // Get ADX value — MFS direct
+      const adxValue = mfs.adx;
       
       // ===== CHECK FOR LONG EXHAUSTION REVERSAL =====
       // Path 1: Deep oversold (StochRSI K <= 10 AND %B <= 20)
@@ -3809,13 +3734,13 @@ export const deriveTradeDirection = (
     const MO = MOMENTUM_OVERRIDE_DIRECTION_PARAMS;
     const T2 = TIER2_WEIGHTED_CONFIRMATION;
     
-    // Get momentum data
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-    const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? trendData.momentum?.macdSlope ?? 0;
-    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    // Get momentum data — MFS direct
+    const momentumScore = mfs.smartMomentum?.score ?? 0;
+    const momentumSlope = mfs.smartMomentum?.components?.macdSlope ?? 0;
+    const stochK = mfs.stochRsi["1h"].k;
     
-    // Get 30m ADX data for blocking condition
-    const adx30m = timeframes['30m']?.adx ?? trendData.volatility?.adx ?? 0;
+    // Get 30m ADX data for blocking condition — MFS direct
+    const adx30m = timeframes['30m']?.adx ?? mfs.adx;
     
     // Get order flow data
     const ofScore = orderFlowData?.score ?? 0;
@@ -3958,7 +3883,7 @@ export const deriveTradeDirection = (
   // If price has moved strongly (2%+) in a clear direction, use that direction
   // even when all timeframes show neutral. This catches continuation moves.
   // PHASE 1 FIX: But ONLY if it aligns with HTF trend OR HTF is neutral
-  const priceActionMomentum = trendData.priceActionMomentum;
+  const priceActionMomentum = mfs.priceActionMomentum;
   if (priceActionMomentum?.canOverrideNeutralAlignment && priceActionMomentum?.hasStrongMove) {
     const priceDirection = priceActionMomentum.direction;
     const movePercent = Math.abs(priceActionMomentum.movePercent || 0);
@@ -3970,7 +3895,7 @@ export const deriveTradeDirection = (
       
       // ===== NEW: CHECK HTF ALIGNMENT BEFORE DERIVING DIRECTION =====
       // A bounce against a strong HTF trend is NOT momentum - it's a pullback
-      const htf4h = trendData.timeframes?.['4h'];
+      const htf4h = mfs.timeframes['4h'];
       const htfTrend4h = htf4h?.trend || "neutral";
       const htfConf4h = htf4h?.confidence ?? 50;
       const isHtfDirectional = htfTrend4h !== "neutral" && htfConf4h >= 60;
@@ -4143,8 +4068,8 @@ export const deriveTradeDirection = (
   
   // ============= PRIORITY 2.3: CONSECUTIVE CANDLE MOMENTUM OVERRIDE =============
   // When 1h has 5+ consecutive candles in the same direction, allow signal even if 4h is neutral
-  const consecutiveBars1h = trendData.momentum?.consecutiveBars1h ?? 0;
-  const consecutiveBars30m = trendData.momentum?.consecutiveBars30m ?? 0;
+  const consecutiveBars1h = mfs.consecutiveBars1h;
+  const consecutiveBars30m = mfs.consecutiveBars30m;
   
   if (
     trend4h === "neutral" &&
@@ -4191,8 +4116,8 @@ export const deriveTradeDirection = (
   }
   
   // ============= PRIORITY 2.5: BUILDING TREND DIRECTION OVERRIDE =============
-  const adxRising = trendData.momentum?.adxRising || trendData.volatility?.adxRising || false;
-  const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+  const adxRising = mfs.adxRising;
+  const priceMove = mfs.priceActionMomentum?.movePercent || 0;
   
   if (
     trend4h === "neutral" &&
@@ -4354,7 +4279,7 @@ export const deriveTradeDirection = (
       (trend1h === "neutral" && conf1h >= 50 && conf1h <= 65);
     
     const inferred1hDirection = trend1h !== "neutral" ? trend1h : 
-      (trendData.momentum?.confirms && trendData.momentum?.state !== "none" ? 
+      (mfs.momentumConfirms && mfs.momentumState !== "none" ? 
         (trend30m === "bullish" ? "bullish" : "bearish") : null);
     
     const is1hNotConflicting = 
@@ -4395,7 +4320,7 @@ export const deriveTradeDirection = (
   // Priority 6: Fall back to primary trend from 5m if directional
   if (primaryTrend === "bullish" || primaryTrend === "bearish") {
     const direction: TradeDirection = primaryTrend === "bullish" ? "long" : "short";
-    const primaryConf = trendData.confidence || 50;
+    const primaryConf = mfs.confidence || 50;
     const finalConf = primaryConf * 0.8;
     reasons.push(`Primary trend ${primaryTrend} (${primaryConf.toFixed(0)}% confidence)`);
     reasons.push("Warning: Using primary trend as fallback - lower conviction");
@@ -4429,14 +4354,13 @@ export const deriveTradeDirection = (
     let biasDirection: TradeDirection | null = null;
     let biasScore = 0;
     
-    // Get ADX for absolute extreme gating
-    const tier95Adx = trendData.volatility?.adx ?? trendData.momentum?.adx ?? 25;
+    // Get ADX for absolute extreme gating — MFS direct
+    const tier95Adx = mfs.adx;
     
-    // Evidence 1: Micro-direction (8+ consecutive bars)
-    const consecutiveBars = trendData.momentum?.consecutiveBars || 
-                           trendData.priceActionMomentum?.consecutiveBars || 0;
-    const microDirection = trendData.momentum?.direction || 
-                          trendData.priceActionMomentum?.direction || null;
+    // Evidence 1: Micro-direction (8+ consecutive bars) — MFS direct
+    const consecutiveBars = mfs.consecutiveBars1h || 0;
+    const microDirection = mfs.momentumDirection || 
+                          mfs.priceActionMomentum?.direction || null;
     
     if (consecutiveBars >= (BR.MICRO_DIRECTION_MIN_BARS || 8)) {
       biasScore += BR.MICRO_DIRECTION_SCORE || 2;
@@ -4447,7 +4371,7 @@ export const deriveTradeDirection = (
     
     // Evidence 2: StochRSI extreme (K >= 90 or K <= 10)
     // NEW: Absolute extreme (K >= 98 or K <= 2) counts as 2 points when ADX < strong trend
-    const stochK4h = extractStochRsiK(trendData, '4h');
+    const stochK4h = mfs.stochRsi["4h"].k;
     const absoluteExtremeHigh = BR.STOCHRSI_ABSOLUTE_EXTREME_K_HIGH ?? 98;
     const absoluteExtremeLow = BR.STOCHRSI_ABSOLUTE_EXTREME_K_LOW ?? 2;
     const absoluteExtremeMaxAdx = BR.STOCHRSI_ABSOLUTE_EXTREME_MAX_ADX ?? 30;
@@ -4488,7 +4412,7 @@ export const deriveTradeDirection = (
     }
     
     // Evidence 4: Price action momentum (significant move in one direction)
-    const priceMove = trendData.priceActionMomentum?.movePercent || 0;
+    const priceMove = mfs.priceActionMomentum?.movePercent || 0;
     if (Math.abs(priceMove) >= 1.5) {
       biasScore += 1;
       const priceDir: TradeDirection = priceMove > 0 ? "long" : "short";
@@ -4564,9 +4488,9 @@ export const deriveTradeDirection = (
   if (MOMENTUM_FALLBACK_DIRECTION_PARAMS.ENABLED) {
     const P = MOMENTUM_FALLBACK_DIRECTION_PARAMS;
     
-    // Get momentum data from trendData
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-    const tier10StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    // Get momentum data — MFS direct
+    const momentumScore = mfs.smartMomentum?.score ?? 0;
+    const tier10StochK = mfs.stochRsi["1h"].k;
     
     // Check if we have strong enough momentum signal
     const absMomentum = Math.abs(momentumScore);
@@ -4697,14 +4621,14 @@ export const deriveTradeDirection = (
     const tier105OfSignal = orderFlowData?.signal?.toLowerCase() ?? "";
     const tier105OfBullish = tier105OfSignal.includes("buy") || tier105OfSignal === "bullish";
     const tier105OfBearish = tier105OfSignal.includes("sell") || tier105OfSignal === "bearish";
-    const tier105MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+    const tier105MomentumScore = mfs.smartMomentum?.score ?? 0;
     const tier105AbsMomentum = Math.abs(tier105MomentumScore);
     
     const ofIsStrongBullish = tier105OfBullish && tier105OfScore >= DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD;
     const ofIsStrongBearish = tier105OfBearish && tier105OfScore >= DIRECTION_TIER_10_5.STRONG_OF_THRESHOLD;
     const momentumNotExtreme = tier105AbsMomentum < DIRECTION_TIER_10_5.EXTREME_MOMENTUM_THRESHOLD;
     
-    const tier105StochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    const tier105StochK = mfs.stochRsi["1h"].k;
     const stochAllowsLong = tier105StochK < DIRECTION_TIER_10_5.STOCH_MAX_FOR_LONG;
     const stochAllowsShort = tier105StochK > DIRECTION_TIER_10_5.STOCH_MIN_FOR_SHORT;
     
@@ -4785,14 +4709,12 @@ export const deriveTradeDirection = (
     const regimeAllows = !EE.REQUIRE_EXHAUSTION_REGIME || regime === 'EXHAUSTION';
     
     if (regimeAllows) {
-      // Get StochRSI and Bollinger data
-      const stochK4h = trendData.stochasticRsi?.['4h']?.k ?? 
-                       trendData.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 50;
-      const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
-                       trendData.bollingerBands?.['1h']?.percentB ?? 50;
+      // Get StochRSI and Bollinger data — MFS direct
+      const stochK4h = mfs.stochRsi["4h"].k;
+      const percentB = mfs.bollinger["4h"].percentB ?? mfs.bollinger["1h"].percentB ?? 50;
       
-      // Get momentum score (use different names to avoid shadowing outer scope)
-      const tier11MomentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
+      // Get momentum score (use different names to avoid shadowing outer scope) — MFS direct
+      const tier11MomentumScore = mfs.smartMomentum?.score ?? 0;
       const tier11AbsMomentum = Math.abs(tier11MomentumScore);
       
       // Get order flow data (use different names to avoid shadowing outer scope)
