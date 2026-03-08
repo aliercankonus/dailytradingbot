@@ -514,7 +514,7 @@ class RejectionBuffer {
                 symbol: entry.symbol,
                 rejection_reason: entry.rejection_reason,
                 filters_status: entry.filters_status,
-                trend_data: entry.ai_context.trendData,
+                trend_data: entry.ai_context.mfs,
               }).catch((err: any) => logger.warn(`AI analysis failed for ${entry.symbol}: ${err}`));
             }
           }
@@ -531,141 +531,109 @@ class RejectionBuffer {
 let activeRejectionBuffer: RejectionBuffer | null = null;
 
 // Helper function to log rejection with optional AI analysis and Order Flow data
-// ENHANCED: Automatically extracts StochRSI K/D and Bollinger %B values from trendData for all rejection logs
+// PHASE 3 MFS MIGRATION: Now reads all indicator data from MarketFeatureSnapshot when available
+// Falls back to empty defaults when mfs is null (pre-loop calls like symbol filters)
 const logRejectionWithAI = async (
   supabase: any,
   userId: string,
   symbol: string,
   rejectionReason: string,
   filtersStatus: any,
-  trendData: any,
+  mfs: MarketFeatureSnapshot | null,
   enableAI: boolean = false,
   orderFlow?: OrderFlowAnalysis | null
 ) => {
-  // CENTRALIZED: Use shared extractors for consistent StochRSI extraction across all edge functions
-  // Extract all timeframe K/D values for full diagnostic visibility
-  const stochK4h = extractStochRsiK(trendData, '4h');
-  const stochD4h = extractStochRsiD(trendData, '4h');
-  const stochK1h = extractStochRsiK(trendData, '1h');
-  const stochD1h = extractStochRsiD(trendData, '1h');
-  const stochK30m = extractStochRsiK(trendData, '30m');
-  const stochD30m = extractStochRsiD(trendData, '30m');
-  const stochK15m = extractStochRsiK(trendData, '15m');
-  const stochD15m = extractStochRsiD(trendData, '15m');
-  
-  const stochRsiData = {
+  // Extract all indicator data from MarketFeatureSnapshot (single source of truth)
+  const stochRsiData = mfs ? {
     // FLAT FIELDS for UI compatibility (Issue #1 & #2 fix)
-    stochRsiK: stochK4h,      // Primary 4h K (legacy field)
-    stochRsiD: stochD4h,      // Primary 4h D (NEW - Issue #2)
-    stochRsiK4h: stochK4h,    // Explicit 4h K
-    stochRsiD4h: stochD4h,    // Explicit 4h D (NEW - Issue #2)
-    stochRsiK1h: stochK1h,    // 1h K (NEW - Issue #1)
-    stochRsiD1h: stochD1h,    // 1h D (NEW - Issue #1)
-    stochRsiK30m: stochK30m,  // 30m K
-    stochRsiD30m: stochD30m,  // 30m D
-    stochRsiK15m: stochK15m,  // 15m K
-    stochRsiD15m: stochD15m,  // 15m D
+    stochRsiK: mfs.stochRsi["4h"].k,      // Primary 4h K (legacy field)
+    stochRsiD: mfs.stochRsi["4h"].d,      // Primary 4h D (NEW - Issue #2)
+    stochRsiK4h: mfs.stochRsi["4h"].k,    // Explicit 4h K
+    stochRsiD4h: mfs.stochRsi["4h"].d,    // Explicit 4h D (NEW - Issue #2)
+    stochRsiK1h: mfs.stochRsi["1h"].k,    // 1h K (NEW - Issue #1)
+    stochRsiD1h: mfs.stochRsi["1h"].d,    // 1h D (NEW - Issue #1)
+    stochRsiK30m: mfs.stochRsi["30m"].k,  // 30m K
+    stochRsiD30m: mfs.stochRsi["30m"].d,  // 30m D
+    stochRsiK15m: mfs.stochRsi["15m"].k,  // 15m K
+    stochRsiD15m: mfs.stochRsi["15m"].d,  // 15m D
     // NESTED OBJECTS for structured access
-    stochRsi4h: { k: stochK4h, d: stochD4h },
-    stochRsi1h: { k: stochK1h, d: stochD1h },
-    stochRsi30m: { k: stochK30m, d: stochD30m },
-    stochRsi15m: { k: stochK15m, d: stochD15m }
-  };
+    stochRsi4h: { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
+    stochRsi1h: { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
+    stochRsi30m: { k: mfs.stochRsi["30m"].k, d: mfs.stochRsi["30m"].d },
+    stochRsi15m: { k: mfs.stochRsi["15m"].k, d: mfs.stochRsi["15m"].d }
+  } : {};
   
-  // Extract Bollinger Band %B and squeeze values from trendData for consistent logging (all timeframes)
-  const bb4h = trendData?.bollingerBands?.["4h"];
-  const bb1h = trendData?.bollingerBands?.["1h"];
-  const bb30m = trendData?.bollingerBands?.["30m"];
-  const bb15m = trendData?.bollingerBands?.["15m"];
-  const bollingerData = {
+  // Extract Bollinger Band %B and squeeze values from MFS
+  const bollingerData = mfs ? {
     bollinger4h: {
-      percentB: bb4h?.percentB ?? null,
-      squeeze: bb4h?.squeeze ?? null,
-      squeezeIntensity: bb4h?.squeezeIntensity ?? null,
-      pricePosition: bb4h?.pricePosition ?? null,
+      percentB: mfs.bollinger["4h"].percentB,
+      squeeze: mfs.bollinger["4h"].squeeze,
+      squeezeIntensity: mfs.bollinger["4h"].squeezeIntensity,
+      pricePosition: mfs.bollinger["4h"].pricePosition,
     },
     bollinger1h: {
-      percentB: bb1h?.percentB ?? null,
-      squeeze: bb1h?.squeeze ?? null,
-      squeezeIntensity: bb1h?.squeezeIntensity ?? null,
-      pricePosition: bb1h?.pricePosition ?? null,
+      percentB: mfs.bollinger["1h"].percentB,
+      squeeze: mfs.bollinger["1h"].squeeze,
+      squeezeIntensity: mfs.bollinger["1h"].squeezeIntensity,
+      pricePosition: mfs.bollinger["1h"].pricePosition,
     },
     bollinger30m: {
-      percentB: bb30m?.percentB ?? null,
-      squeeze: bb30m?.squeeze ?? null,
-      squeezeIntensity: bb30m?.squeezeIntensity ?? null,
-      pricePosition: bb30m?.pricePosition ?? null,
+      percentB: mfs.bollinger["30m"].percentB,
+      squeeze: mfs.bollinger["30m"].squeeze,
+      squeezeIntensity: mfs.bollinger["30m"].squeezeIntensity,
+      pricePosition: mfs.bollinger["30m"].pricePosition,
     },
     bollinger15m: {
-      percentB: bb15m?.percentB ?? null,
-      squeeze: bb15m?.squeeze ?? null,
-      squeezeIntensity: bb15m?.squeezeIntensity ?? null,
-      pricePosition: bb15m?.pricePosition ?? null,
+      percentB: mfs.bollinger["15m"].percentB,
+      squeeze: mfs.bollinger["15m"].squeeze,
+      squeezeIntensity: mfs.bollinger["15m"].squeezeIntensity,
+      pricePosition: mfs.bollinger["15m"].pricePosition,
     }
-  };
+  } : {};
   
-  // Extract ADX and ADX slope for mean reversion diagnostics
-  // IMPORTANT: Only use trendData values as FALLBACKS - never overwrite explicitly passed values
-  const adxData = {
-    adx: trendData?.volatility?.adx ?? trendData?.adx ?? null,
-    adxSlope: trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? null,
-    adxRising: trendData?.volatility?.adxRising ?? trendData?.momentum?.adxRising ?? null,
-    // Also include ADX from other timeframes if available
-    adx15m: trendData?.volatility?.adx15m ?? null,
-    adx30m: trendData?.volatility?.adx30m ?? null,
-    adx4h: trendData?.volatility?.adx4h ?? null,
-  };
+  // Extract ADX and ADX slope from MFS
+  const adxData = mfs ? {
+    adx: mfs.adx,
+    adxSlope: mfs.adxSlope,
+    adxRising: mfs.adxRising,
+    adx15m: mfs.adx15m ?? null,
+    adx30m: mfs.adx30m ?? null,
+    adx4h: mfs.adx4h ?? null,
+  } : {};
   
-  // Extract momentum score and phase for gate analysis (fixes NEAR_24H_HIGH shadow condition NULL issue)
-  const momentumData = {
-    momentumScore: trendData?.smartMomentum?.score ?? trendData?.momentum?.momentumScore ?? null,
-    momentumPhase: trendData?.smartMomentum?.phase ?? null,
-    momentumDirection: trendData?.smartMomentum?.direction ?? null,
-    isAccelerating: trendData?.smartMomentum?.isAccelerating ?? null,
-    isWeakening: trendData?.smartMomentum?.isWeakening ?? null,
-    isTransitioning: trendData?.smartMomentum?.isTransitioning ?? null,
-  };
+  // Extract momentum data from MFS
+  const momentumData = mfs ? {
+    momentumScore: mfs.smartMomentum?.score ?? null,
+    momentumPhase: mfs.smartMomentum?.phase ?? null,
+    momentumDirection: mfs.smartMomentum?.direction ?? null,
+    isAccelerating: mfs.smartMomentum?.isAccelerating ?? null,
+    isWeakening: mfs.smartMomentum?.isWeakening ?? null,
+    isTransitioning: mfs.smartMomentum?.isTransitioning ?? null,
+  } : {};
   
-  // Extract regime data centrally — prevents reliance on gate-specific passthrough
-  const regimeData = {
-    effectiveRegime: trendData?.regime?.regime ?? trendData?.effectiveRegime ?? null,
-    regimeConfidence: trendData?.regime?.confidence ?? trendData?.regimeConfidence ?? null,
-    regimePersistence: trendData?.regime?.persistedBars ?? null,
-    regimeCandidate: trendData?.regime?.candidate ?? null,
-  };
+  // Regime data is not in MFS (computed separately) — pass empty, let filtersStatus override
+  const regimeData = {};
   
-  // PHASE FIX: Always include volumeRatio unconditionally in rejection logs
-  // Contract: volumeRatio must always be present (null = not computed, number = actual value)
-  // This fixes the UI bug where missing volumeRatio defaulted to 1.0 ("100% Normal") incorrectly
-  const volumeData = {
-    // Extract volumeRatio from 1h timeframe (primary reference) with fallbacks to other timeframes
-    // The volume object is structured as { "15m": {...volumeRatio...}, "30m": {...}, "1h": {...}, "4h": {...} }
-    volumeRatio: trendData?.volume?.["1h"]?.volumeRatio ?? 
-                 trendData?.volume?.["30m"]?.volumeRatio ?? 
-                 trendData?.volume?.["4h"]?.volumeRatio ?? 
-                 trendData?.volume?.["15m"]?.volumeRatio ?? 
-                 trendData?.volume?.ratio ?? 
-                 null,  // null = not computed, DO NOT default to 1.0
-    volumeTrend: trendData?.volume?.["1h"]?.volumeTrend ?? 
-                 trendData?.volume?.trend ?? 
+  // Extract volume data from MFS
+  const volumeData = mfs ? {
+    volumeRatio: mfs.volume["1h"].volumeRatio ?? 
+                 mfs.volume["30m"].volumeRatio ?? 
+                 mfs.volume["4h"].volumeRatio ?? 
+                 mfs.volume["15m"].volumeRatio ?? 
                  null,
-    volumeSpike: trendData?.volume?.["1h"]?.volumeSpike ?? 
-                 trendData?.volume?.spike ?? 
-                 null,
-    volumeAboveMA: trendData?.volume?.aboveMA ?? 
-                   (trendData?.volume?.["1h"]?.volumeRatio > 1.0 ? true : 
-                    trendData?.volume?.["1h"]?.volumeRatio !== undefined ? false : null),
-  };
+    volumeTrend: mfs.volume["1h"].volumeTrend ?? null,
+    volumeSpike: mfs.volume["1h"].volumeSpike ?? null,
+    volumeAboveMA: mfs.volume["1h"].volumeRatio > 1.0 ? true : false,
+  } : {};
   
-  // Merge Order Flow data, StochRSI data, Bollinger data, ADX data, and Volume data into filters_status
+  // Merge all extracted data into filters_status
   // CRITICAL FIX: filtersStatus takes precedence for explicitly passed values (like adxSlope from gate checks)
-  // Spread order: base data first, then filtersStatus last to preserve gate-specific values
   let enrichedFiltersStatus = {
     ...stochRsiData,
     ...bollingerData,
     ...adxData,
     ...momentumData,
-    ...regimeData, // Centralized regime info (effectiveRegime, confidence, persistence, candidate)
+    ...regimeData,
     ...volumeData,
     ...filtersStatus, // LAST: Gate-specific values override defaults
   };
@@ -693,7 +661,7 @@ const logRejectionWithAI = async (
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
-      ai_context: { trendData, enableAI },
+      ai_context: { mfs, enableAI },
     });
     return;
   }
@@ -716,12 +684,12 @@ const logRejectionWithAI = async (
     return;
   }
 
-  if (enableAI && data?.id && trendData) {
+  if (enableAI && data?.id && mfs) {
     analyzeRejectionWithAI(supabase, data.id, {
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
-      trend_data: trendData,
+      trend_data: mfs, // Pass snapshot as trend_data for AI analysis
     }).catch(err => logger.forSymbol(symbol).error(`AI analysis failed: ${err}`));
   }
 };
@@ -1235,16 +1203,12 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
 };
 
 // ============= VOLUME SCORE WRAPPER =============
-// Wraps shared getVolumeScore with trendData extraction for local usage
-const getVolumeScore = (trendData: any, trend: string): number => {
-  const momentum = trendData?.momentum || {};
-  const volatility = trendData?.volatility || {};
-  
-  const volumeConfirms = momentum.volumeConfirms ?? false;
-  const volumeSpike = volatility.volumeSpike ?? false;
-  const volumeRatio = volatility.volumeRatio ?? 1.0;
-  const relativeATR = volatility.relativeATR ?? 1.0;
-  const hasRangeExpansion = relativeATR > 1.0;
+// MFS MIGRATION: Reads volume data from MarketFeatureSnapshot
+const getVolumeScore = (mfs: MarketFeatureSnapshot, trend: string): number => {
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeSpike = mfs.volume["1h"].volumeSpike;
+  const volumeRatio = mfs.volume["1h"].volumeRatio;
+  const hasRangeExpansion = mfs.volume.hasRangeExpansion1h;
   
   return sharedGetVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, trend);
 };
@@ -1323,23 +1287,17 @@ interface PullbackAnalysis {
   hasBothConditions: boolean; // RSI + Bollinger combined
 }
 
-const analyzePullbackEntry = (trendData: any, trend: string, smartPullback: PullbackResult): PullbackAnalysis => {
-  const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
-  const indicators30m = trendData?.timeframes?.['30m']?.indicators || {};
-  // CENTRALIZED: Use shared extractors for StochRSI K values
-  const k4h = extractStochRsiK(trendData, '4h');
-  const k30m = extractStochRsiK(trendData, '30m');
-  const stochRsi = trendData.stochasticRsi?.aggregated || {};
-  const bollingerBands = trendData.bollingerBands || {};
-  const bb1h = bollingerBands["1h"] || {};
-  const bb30m = bollingerBands["30m"] || {};
-  const rsi1h = indicators1h.rsi ?? 50;
-  const rsi30m = indicators30m.rsi ?? 50;
-  const adx = extractADX(trendData);
-  const momentum = trendData?.momentum || {};
+const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPullback: PullbackResult): PullbackAnalysis => {
+  // MFS MIGRATION: All indicators read from snapshot
+  const k4h = mfs.stochRsi["4h"].k;
+  const k30m = mfs.stochRsi["30m"].k;
+  const bb1h = mfs.bollinger["1h"];
+  const bb30m = mfs.bollinger["30m"];
+  const rsi1h = mfs.timeframes["1h"].rsi;
+  const rsi30m = mfs.timeframes["30m"].rsi;
+  const adx = mfs.adx;
   const percentB1h = bb1h.percentB || 50;
   const percentB30m = bb30m.percentB || 50;
-  const timeframes = trendData?.timeframes || {};
   
   // Use 1h RSI as primary, 30m for confirmation
   const rsi = rsi1h;
@@ -1348,23 +1306,23 @@ const analyzePullbackEntry = (trendData: any, trend: string, smartPullback: Pull
   // Strong ADX = momentum continuation is valid strategy
   const isStrongTrend = adx >= ADX_THRESHOLDS.VERY_STRONG;
   const isMinTrend = adx >= ADX_THRESHOLDS.MINIMUM; // 20+
-  const hasMacdExpanding = momentum.macdExpanding === true;
-  const momentumState = momentum.state || "none";
+  const hasMacdExpanding = mfs.macdExpanding;
+  const momentumState = mfs.momentumState || "none";
   const isMomentumConfirmed = momentumState === "confirmed" || momentumState === "mixed";
   const isMomentumBuilding = momentumState === "building";
-  const isActiveMomentum = isMomentumConfirmed || isMomentumBuilding || momentum.confirms === true;
+  const isActiveMomentum = isMomentumConfirmed || isMomentumBuilding || mfs.momentumConfirms;
   
   // Strong Trend Continuation Check: 4h + 1h aligned + CONFIRMED momentum
   // PATCH: Require strict momentum confirmation for STC — 'mixed' state with score=0
   // was allowing entries on symbols like ETHUSDT where price never moved favorably
-  const trend4h = timeframes['4h']?.trend || timeframes['4h']?.indicators?.emaSignal || "neutral";
-  const trend1h = timeframes['1h']?.trend || timeframes['1h']?.indicators?.emaSignal || "neutral";
+  const trend4h = mfs.timeframes['4h'].trend;
+  const trend1h = mfs.timeframes['1h'].trend;
   const isBullishAligned = trend4h === "bullish" && trend1h === "bullish";
   const isBearishAligned = trend4h === "bearish" && trend1h === "bearish";
   
   // Strict momentum for STC: must be confirmed/building OR momentum.confirms=true
   // Explicitly exclude 'mixed' state unless momentum.confirms is independently true
-  const isStrictMomentumConfirmed = momentumState === "confirmed" || isMomentumBuilding || momentum.confirms === true;
+  const isStrictMomentumConfirmed = momentumState === "confirmed" || isMomentumBuilding || mfs.momentumConfirms;
   
   const hasStrongTrendContinuation = isMinTrend && isStrictMomentumConfirmed && (
     (trend === "bullish" && isBullishAligned) ||
@@ -1979,7 +1937,7 @@ serve(async (req) => {
               strategiesCount: stats.uniqueStrategies.size,
               threshold: SYMBOL_WIN_RATE_THRESHOLD
             },
-            { direction: 'blocked' },
+            null,  // No mfs available for symbol-level blocks
             false  // No AI analysis for symbol-level blocks
           );
         } else if (hasEnoughTrades && !hasEnoughDiversity && isBelowThreshold) {
@@ -3879,7 +3837,7 @@ serve(async (req) => {
                     isPreStrategy: true,
                     message: `Bounce probability ~80%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Flash Crash Phase 2: ${phase2Triggered ? 'TRIGGERED' : (Object.keys(phase2Diagnostics).length > 0 ? 'EVALUATED' : 'NOT_CHECKED')}`
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -4043,7 +4001,7 @@ serve(async (req) => {
                       isPreStrategy: true,
                       message: `Pullback probability ~90%+ at K=${earlyStochRsiK4h.toFixed(1)}. Strong Trend Override failed: ${overrideCheck.reason}. Parabolic probe ineligible.`
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -4327,7 +4285,7 @@ serve(async (req) => {
                 microAdmissionSlopeRelatedBlock: isSlopeRelatedBlock,
                 message: `Counter-trend ${directionResult.direction.toUpperCase()} blocked: trend energy not exhausted`
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -4859,7 +4817,7 @@ serve(async (req) => {
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -5553,7 +5511,7 @@ serve(async (req) => {
                 adxSlopeForBreakout: adxSlopeForBreakout.toFixed(2),
                 breakoutWatchBlocked: bbExpandingInCompression ? `ADX slope ${adxSlopeForBreakout.toFixed(2)} <= 0 (not rising)` : 'BB not expanding',
                 shadowIgnitionEligible: shadowIgnitionDiag || false,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
               } // end compressionMicroOverride else (standard block)
             }
@@ -5598,7 +5556,7 @@ serve(async (req) => {
                 cooldownMinutes: SAME_DIRECTION_REENTRY_PROTECTION.COOLDOWN_MINUTES,
                 triggerCloseReasons: SAME_DIRECTION_REENTRY_PROTECTION.TRIGGER_CLOSE_REASONS,
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -5643,7 +5601,7 @@ serve(async (req) => {
                   lastExitSide,
                   priceDiffPercent: parseFloat(priceDiffPct),
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -5681,7 +5639,7 @@ serve(async (req) => {
                   activePositionCount: activeForSymbol.length,
                   activeSides: activeForSymbol.map(p => p.side),
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -5739,7 +5697,7 @@ serve(async (req) => {
               reason: regimeEnhanced.reason, 
               adx, confidence, trendConsistency 
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -6027,7 +5985,7 @@ serve(async (req) => {
                   },
                   severity: momentumCheck.severity 
                 },
-                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else if (adxExceptionAllowed) {
               logger.forSymbol(symbol).warn(`${LOG_CATEGORIES.GATE} ⚠️ MOMENTUM_HARD_GATE bypassed: ADX=${adx.toFixed(1)} >= ${MOMENTUM_DIRECTION_HARD_GATE.EXCEPTION_MIN_ADX}`);
@@ -6132,7 +6090,7 @@ serve(async (req) => {
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
                 { gate: 'OPPOSING_SMART_MOMENTUM', derivedDirection, smartMomentumScore: momScore, absMomScore, adx, htfTrend4h, htfTrend1h, threshold: HARD_BLOCK_THRESHOLD, phase: momPhase, isTransitioning },
-                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else if (adxException) {
               // ADX exception: allow with 0.30x position
@@ -6285,7 +6243,7 @@ serve(async (req) => {
               
               await logRejectionWithAI(supabase, userId, symbol, blockReason,
                 { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h, regime: fourStateRegime.regime },
-                trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
             
@@ -6309,7 +6267,7 @@ serve(async (req) => {
                 
                 await logRejectionWithAI(supabase, userId, symbol, blockReason,
                   { gate: 'NO_MOMENTUM_STATE', derivedDirection, momentumState: momState, smartMomentumScore: smartMomentum.score, adx, adxSlope, htfTrend4h },
-                  trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                  mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               }
             } else {
@@ -6359,7 +6317,7 @@ serve(async (req) => {
                 htfTrend4h,
                 adx: adx.toFixed(1),
                 threshold: MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTED_REVERSAL bypassed: ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`);
@@ -6380,7 +6338,7 @@ serve(async (req) => {
               priceChange4h: priceChange4h.toFixed(2),
               stochRsiK4h: stochRsiK4h.toFixed(1),
               reason: "oversold_during_rally",
-            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
             continue;
           }
         }
@@ -6439,7 +6397,7 @@ serve(async (req) => {
                 priceChange4h: priceChange4h.toFixed(2),
                 stochCrossingUp,
                 macdFlippingPositive,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6467,7 +6425,7 @@ serve(async (req) => {
                 priceChange4h: priceChange4h.toFixed(2),
                 stochCrossingDown,
                 macdFlippingNegative,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6815,7 +6773,7 @@ serve(async (req) => {
                   signalTimeframe: '15m',
                 }
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -6893,7 +6851,7 @@ serve(async (req) => {
                       minAdxForCheck: TREND_EXHAUSTION_PROTECTION.MIN_ADX_FOR_CHECK,
                     }
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -6947,7 +6905,7 @@ serve(async (req) => {
                   blockShortIfSlopeAbove: MOMENTUM_SLOPE_GATE.BLOCK_SHORT_IF_SLOPE_ABOVE,
                   blockLongIfSlopeBelow: MOMENTUM_SLOPE_GATE.BLOCK_LONG_IF_SLOPE_BELOW,
                 }
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6993,7 +6951,7 @@ serve(async (req) => {
                 adxSlope: adxSlope.toFixed(2),
                 adx: adx.toFixed(1),
                 architecture: "Priority 2 gate - no ADX exception",
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -7019,7 +6977,7 @@ serve(async (req) => {
                 adxSlope: adxSlope.toFixed(2),
                 adx: adx.toFixed(1),
                 architecture: "Priority 2 gate - no ADX exception",
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -7068,7 +7026,7 @@ serve(async (req) => {
                   collapseToExhaustionMinAdx,
                 },
                 analysis: `ADX slope < ${directionSpecificThreshold} AND ADX < ${collapseToExhaustionMinAdx} — no energy reservoir, hard block justified`
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -7134,7 +7092,7 @@ serve(async (req) => {
                   tf30mTrend,
                   ltfAligned: false,
                   wouldPassWith: `Slope >= ${contReq.BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD} OR 1h/30m aligned with ${derivedDirection}`,
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               } else {
                 // No LTF but decline is moderate — apply penalty, don't block
@@ -8722,7 +8680,7 @@ serve(async (req) => {
                 swingLow24h: priceDistance?.low24h,
                 currentPrice: trendData.currentPrice,
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -8801,7 +8759,7 @@ serve(async (req) => {
                     ltfConfirmationRequired: true,
                     wouldPassWith: `1h or 30m trend must be ${expectedLtfTrend} or neutral`,
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -8915,7 +8873,7 @@ serve(async (req) => {
                       mrProbe: true,
                       wouldPassWith: `Momentum must be less extreme (|score| <= ${mrTolerance.EXTREME_OPPOSING_THRESHOLD})`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -8953,7 +8911,7 @@ serve(async (req) => {
                       failureReasons,
                       wouldPassWith: `ADX persistence >= ${mrTolerance.ADX_PERSISTENCE_BYPASS_THRESHOLD} AND momentum delta improving`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -8983,7 +8941,7 @@ serve(async (req) => {
                       ltfConfirmationRequired: true,
                       wouldPassWith: `Either 1h or 30m must align with direction, OR momentum must not oppose (|score| <= ${LTF_CONFIRMATION_GATE.MOMENTUM_OPPOSING_THRESHOLD})`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9240,7 +9198,7 @@ serve(async (req) => {
                       relaxationApplied: nearExtremeRelaxationApplied,
                       wouldPassWith: `ADX >= ${regimeBlock.MIN_ADX_TO_BYPASS} OR momentum <= -${regimeBlock.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow <= -${regimeBlock.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9380,7 +9338,7 @@ serve(async (req) => {
                             block: `> ${graduatedMomentum.NEUTRAL_SHORT_MAX}`,
                           },
                         },
-                        trendData,
+                        mfs,
                         riskParams.ai_analysis_enabled !== false,
                         earlyOrderFlowAnalysis
                       );
@@ -9408,7 +9366,7 @@ serve(async (req) => {
                         smartMomentumScore: smartMomentum.score.toFixed(1),
                         momentumRequired: expandedBlock.MIN_MOMENTUM_SCORE_SHORT,
                       },
-                      trendData,
+                      mfs,
                       riskParams.ai_analysis_enabled !== false,
                       earlyOrderFlowAnalysis
                     );
@@ -9474,7 +9432,7 @@ serve(async (req) => {
                         ? `ADX >= ${hardGrad.MODERATE_TREND.MIN_ADX} + slope >= ${hardGrad.MODERATE_TREND.MIN_ADX_SLOPE} for 15%, ADX >= ${hardGrad.STRONG_TREND.MIN_ADX} + slope >= ${hardGrad.STRONG_TREND.MIN_ADX_SLOPE} for 25%`
                         : `LTF (1h or 30m) must be bearish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9551,7 +9509,7 @@ serve(async (req) => {
                       relaxationApplied: nearExtremeRelaxationApplied,
                       wouldPassWith: `ADX >= ${regimeBlockLong.MIN_ADX_TO_BYPASS} OR momentum >= +${regimeBlockLong.MIN_MOMENTUM_SCORE_TO_BYPASS} OR orderFlow >= +${regimeBlockLong.MIN_ORDER_FLOW_SCORE_TO_BYPASS}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9724,7 +9682,7 @@ serve(async (req) => {
                             block: `< ${graduatedMomentumLong.NEUTRAL_LONG_MIN}`,
                           },
                         },
-                        trendData,
+                        mfs,
                         riskParams.ai_analysis_enabled !== false,
                         earlyOrderFlowAnalysis
                       );
@@ -9751,7 +9709,7 @@ serve(async (req) => {
                         smartMomentumScore: smartMomentum.score.toFixed(1),
                         momentumRequired: expandedBlockLong.MIN_MOMENTUM_SCORE_LONG,
                       },
-                      trendData,
+                      mfs,
                       riskParams.ai_analysis_enabled !== false,
                       earlyOrderFlowAnalysis
                     );
@@ -9812,7 +9770,7 @@ serve(async (req) => {
                         ? `ADX >= ${hardGradLong.MODERATE_TREND.MIN_ADX} + slope >= ${hardGradLong.MODERATE_TREND.MIN_ADX_SLOPE} for 15%, ADX >= ${hardGradLong.STRONG_TREND.MIN_ADX} + slope >= ${hardGradLong.STRONG_TREND.MIN_ADX_SLOPE} for 25%`
                         : `LTF (1h or 30m) must be bullish, or ADX >= ${NEAR_EXTREME_PROTECTION_GATE.ADX_OVERRIDE_THRESHOLD}`,
                     },
-                    trendData,
+                    mfs,
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
@@ -9903,7 +9861,7 @@ serve(async (req) => {
                       neutralZoneThreshold: MOMENTUM_REVERSAL_PROTECTION.NEUTRAL_ZONE_THRESHOLD,
                     }
                   },
-                  trendData,
+                  mfs,
                   riskParams.ai_analysis_enabled !== false,
                   earlyOrderFlowAnalysis
                 );
@@ -9999,7 +9957,7 @@ serve(async (req) => {
                   bypassEligible,
                   weakDirectionProbeApplied,
                   wouldPassWith: `ADX >= ${hardBlock.MAX_ADX} OR momentum_state=confirmed/building OR |momentum_score| >= ${hardBlock.MAX_ABS_MOMENTUM_SCORE}`,
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               }
             }
@@ -10018,7 +9976,7 @@ serve(async (req) => {
                alignmentScore: getAlignmentScore(confidence, trendConsistency, isAligned || false, trendData),
                technicalScore: getTechnicalScore(trendData, trend, symbol),
                entryTimingScore: 10, // Conservative default before pullback analysis
-               volumeScore: sharedGetVolumeScore(trendData, trend),
+               volumeScore: getVolumeScore(mfs, trend),
                orderFlowScore: 0,
                confidencePenalty: getConfidencePenalty(confidence),
                directionBonus: trend === "bearish" ? 3 : 0,
@@ -10085,7 +10043,7 @@ serve(async (req) => {
                    adx: adx.toFixed(1),
                    adxSlope: adxSlope.toFixed(2),
                    wouldPassWith: 'momentum_confirms=true OR quality_score >= 80 OR (ADX_rising + ADX >= 18)',
-                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                 }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                  continue;
                }
              }
@@ -10134,7 +10092,7 @@ serve(async (req) => {
                   currentPrice: currentPrice.toFixed(2),
                   atr: currentATR.toFixed(4),
                   wouldPassWith: `ATR% >= ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%`,
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               } else {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}% but allowing Mean Reversion`);
@@ -10393,7 +10351,7 @@ serve(async (req) => {
                   allowNeutralAboveADX: MOMENTUM_DIRECTION_ALIGNMENT.ALLOW_NEUTRAL_ABOVE_ADX,
                 }
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -10527,7 +10485,7 @@ serve(async (req) => {
               continuationModeRejection: continuationModeResult?.reason || "N/A",
               continuationGateResults: continuationModeResult?.gateResults || []
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -10643,7 +10601,7 @@ serve(async (req) => {
                 momentumScore: smartMomentum.score,
                 architecture: "Strict block — shadow audit 48h: 392 signals, 0% win rate, all SL_HIT",
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -10684,7 +10642,7 @@ serve(async (req) => {
               currentPrice: feeCheckPrice,
               architecture: "Hard block — no exceptions"
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -10739,7 +10697,7 @@ serve(async (req) => {
               adxRising: smartAdxRising,
               isExhausted: adxExhaustion.isExhausted
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -10855,7 +10813,7 @@ serve(async (req) => {
                   exhaustionMature: { regimeScore: smartRegime.regimeScore, threshold: overrideParams.MATURE_EXHAUSTION_SCORE_THRESHOLD }
                 } : undefined
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -11010,7 +10968,7 @@ serve(async (req) => {
                 meanReversionScore: earlyMeanReversionSignal?.exhaustionScore ?? 0,
                 preRecoveryOverrideAllowed: earlyMeanReversionSignal?.preRecoveryOverrideAllowed ?? false
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -11048,7 +11006,7 @@ serve(async (req) => {
               threshold: REGIME_SCORE_PARAMS.BLOCK_CONTINUATION_BELOW,
               penalties: regimeEnhanced.penalties
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -11100,7 +11058,7 @@ serve(async (req) => {
               stochRsi: trendData.stochasticRsi?.aggregated,
               trend1h: htfTrend1h
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -11467,7 +11425,7 @@ serve(async (req) => {
                   tier1Thresholds: { adx: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX, slope: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE, diGap: STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP },
                   message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion OR recent profitable exit with ADX>=30"
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -11513,7 +11471,7 @@ serve(async (req) => {
                   tier1Thresholds: { adx: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX, slope: STOCHRSI_THRESHOLDS.TIER1_MIN_ADX_SLOPE, diGap: STOCHRSI_THRESHOLDS.TIER1_MIN_DI_GAP },
                   message: "Tiered bypass conditions not met - need ADX>=25/30/35, slope>=0.03/0.05/0.08, DI gap>=10/12/15, no exhaustion OR recent profitable exit with ADX>=30"
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false,
                 earlyOrderFlowAnalysis
               );
@@ -11684,7 +11642,7 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               bollingerPosition
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -11718,7 +11676,7 @@ serve(async (req) => {
               percentB: percentB.toFixed(1),
               bollingerPosition
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -11829,7 +11787,7 @@ serve(async (req) => {
               priceActionOverride: priceActionMomentumOverride,
               message: "Price extremely above upper Bollinger with overbought StochRSI"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -11866,7 +11824,7 @@ serve(async (req) => {
               priceActionOverride: priceActionMomentumOverride,
               message: "Price extremely below lower Bollinger with oversold StochRSI"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -12233,7 +12191,7 @@ serve(async (req) => {
                 meanReversionBypass: false,
                 message: `Bounce probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO EXCEPTIONS`
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -12270,7 +12228,7 @@ serve(async (req) => {
                 meanReversionBypass: false,
                 message: `Pullback probability extremely high (~80%+) at K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO EXCEPTIONS`
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -12349,7 +12307,7 @@ serve(async (req) => {
                   shortFlipReason: `K>D=${stochTurningUp}, strongTrend=${isStrongTrendRegimeOS}, adx<40=${adxAllowsMRLong}`,
                   message: `Bounce probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking SHORT with NO bypass allowed`
                 },
-                trendData,
+                mfs,
                 false,
                 earlyOrderFlowAnalysis
               );
@@ -12417,7 +12375,7 @@ serve(async (req) => {
                   shortFlipReason: `K<D=${stochTurningDown}, strongTrend=${isStrongTrendRegime}, adx<40=${adxAllowsMRShort}`,
                   message: `Pullback probability ~70%+ in severe zone K=${stochRsiK4h.toFixed(1)}, blocking LONG with NO bypass allowed`
                 },
-                trendData,
+                mfs,
                 false,
                 earlyOrderFlowAnalysis
               );
@@ -12887,7 +12845,7 @@ serve(async (req) => {
                 negativePercentBBypassChecked: percentB < 0,
                 message: "Shorts at low %B blocked - no bearish trend confirmation"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13105,7 +13063,7 @@ serve(async (req) => {
                 adx: adx.toFixed(1),
                 message: "Longs at high %B blocked - no bullish trend confirmation"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13158,7 +13116,7 @@ serve(async (req) => {
               isInSqueeze4h,
               message: "4h squeeze + oversold StochRSI = MEAN_REVERSION context, blocking trend-continuation shorts"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -13182,7 +13140,7 @@ serve(async (req) => {
               isInSqueeze4h,
               message: "4h squeeze + overbought StochRSI = MEAN_REVERSION context, blocking trend-continuation longs"
             },
-            trendData,
+            mfs,
             false,
             earlyOrderFlowAnalysis
           );
@@ -13290,7 +13248,7 @@ serve(async (req) => {
                   result: veryHighAdxBypassAllowed
                 }
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13328,7 +13286,7 @@ serve(async (req) => {
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} overbought with bearish divergence`,
               { stochRsiK4h, hasBearishDivergence: true, gate: "BEARISH_DIVERGENCE_AT_EXTREME", direction: "long" },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13443,7 +13401,7 @@ serve(async (req) => {
                 reason: blockReason,
                 gate: "STOCHRSI_OVERBOUGHT_BLOCK"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13566,7 +13524,7 @@ serve(async (req) => {
                   result: veryHighAdxBypassAllowedShort
                 }
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13604,7 +13562,7 @@ serve(async (req) => {
               supabase, userId, symbol,
               `StochRSI extreme: K=${stochRsiK4h.toFixed(1)} oversold with bullish divergence`,
               { stochRsiK4h, hasBullishDivergence: true, gate: "BULLISH_DIVERGENCE_AT_EXTREME" },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13656,7 +13614,7 @@ serve(async (req) => {
                 reason: blockReason,
                 gate: "STOCHRSI_OVERSOLD_BLOCK"
               },
-              trendData,
+              mfs,
               false,
               earlyOrderFlowAnalysis
             );
@@ -13742,7 +13700,7 @@ serve(async (req) => {
               macdSlope: trendData?.momentum?.macdSlope,
               adx: adx.toFixed(1)
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -13823,7 +13781,7 @@ serve(async (req) => {
                 message: `No exceptions below ADX ${ADX_GATE.HARD_FLOOR}. Wait for market energy to build.`
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -14168,7 +14126,7 @@ serve(async (req) => {
                     : 'Conditions not met for transition expansion bypass',
                 }
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -14487,7 +14445,7 @@ serve(async (req) => {
                 trend1h: htfTrend1h
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false,
             earlyOrderFlowAnalysis
           );
@@ -14882,7 +14840,7 @@ serve(async (req) => {
                 trend,
                 confidence
               },
-              trendData,
+              mfs,
               riskParams.ai_analysis_enabled !== false,
               earlyOrderFlowAnalysis
             );
@@ -14994,7 +14952,7 @@ serve(async (req) => {
                   trend,
                   confidence
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false
               );
               continue;
@@ -15227,7 +15185,7 @@ serve(async (req) => {
                     consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
                   }
                 },
-                trendData,
+                mfs,
                 riskParams.ai_analysis_enabled !== false
               );
               continue;
@@ -15889,7 +15847,7 @@ serve(async (req) => {
                 exceptionApplied: false
               }
             },
-            trendData,
+            mfs,
             riskParams.ai_analysis_enabled !== false
           );
           continue;
@@ -15908,7 +15866,7 @@ serve(async (req) => {
 
         // ============= IMPROVEMENT #3: Pullback Entry Detection =============
         // UNIFIED: Delegates structural pullback detection to smartPullback (detectPullback)
-        const pullbackAnalysis = analyzePullbackEntry(trendData, trend, smartPullback);
+        const pullbackAnalysis = analyzePullbackEntry(mfs, trend, smartPullback);
 
         // ============= SCENARIO 6: ENHANCED RECOVERY MODE =============
         // Recovery mode = precision trading only, not punishment loop
@@ -16178,7 +16136,7 @@ serve(async (req) => {
         // Direction bonus: +3 for SHORT/SELL signals (historically 38% vs 31% win rate)
         const directionBonus = trend === "bearish" ? 3 : 0;
         // Volume score component
-        const volumeScore = getVolumeScore(trendData, trend);
+        const volumeScore = getVolumeScore(mfs, trend);
         
         // ============= ORDER FLOW ANALYSIS =============
         // Use the early Order Flow analysis calculated before rejection gates
@@ -18021,7 +17979,7 @@ serve(async (req) => {
               regime: currentRegimeType, 
               strategiesFiltered: candidates.map(c => c.strategy.name) 
             },
-            trendData, riskParams.ai_analysis_enabled !== false);
+            mfs, riskParams.ai_analysis_enabled !== false);
           continue;
         }
         
@@ -18464,7 +18422,7 @@ serve(async (req) => {
               isReversalEntry,
               primaryTrend: primaryTrendForRegime,
               adx: adx.toFixed(1),
-            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
             continue;
           }
           
