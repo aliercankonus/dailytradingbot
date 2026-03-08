@@ -1455,7 +1455,7 @@ serve(async (req) => {
       // Use ADX-aware activation and momentum-based trailing distance
       // FIXED: Calculate momentum with ACTUAL ADX values from trend data (not hardcoded 20)
       // MFS MIGRATION: Use MFS for ADX and slope (momentum calculation context)
-      const trendDataForMomentum = trendDataMap.get(position.symbol);
+      // MFS-NATIVE: ADX and slope for momentum calculation come from mfsForPosition
       const adxForMomentum = mfsForPosition?.adx ?? 20;
       const momentumAdxSlope = mfsForPosition?.adxSlope ?? 0;
       const adxRisingForMomentum = mfsForPosition?.adxRising ?? false;
