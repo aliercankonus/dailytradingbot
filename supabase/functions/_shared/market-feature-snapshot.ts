@@ -98,6 +98,13 @@ export interface MarketFeatureSnapshot {
     "4h": StochRsiFeatures;
   };
   
+  stochRsiAggregated: StochRsiAggregated;
+  
+  barsAtExtreme: {
+    "1h": BarsAtExtremeFeatures;
+    "4h": BarsAtExtremeFeatures;
+  };
+  
   // === Timeframe Trends ===
   timeframes: {
     "15m": TimeframeFeatures;
