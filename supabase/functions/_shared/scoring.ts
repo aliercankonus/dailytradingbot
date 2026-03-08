@@ -54,27 +54,26 @@ export interface BreakoutModeResult {
   skipDivergenceGate: boolean;
 }
 
-export const detectBreakoutMode = (trendData: any): BreakoutModeResult => {
+export const detectBreakoutMode = (mfs: MarketFeatureSnapshot): BreakoutModeResult => {
   const reasons: string[] = [];
   let confidence = 0;
   
-  if (!trendData) {
-    return { isActive: false, confidence: 0, reasons: ["No trend data"], stochRsiPenaltyMultiplier: 1.0, skipDivergenceGate: false };
+  if (!mfs) {
+    return { isActive: false, confidence: 0, reasons: ["No MFS data"], stochRsiPenaltyMultiplier: 1.0, skipDivergenceGate: false };
   }
   
-  const bollinger = trendData?.bollingerBands || {};
-  const squeeze4h = bollinger['4h']?.squeeze || false;
-  const squeezePercent4h = bollinger['4h']?.squeezePercent || 0;
-  const squeeze1h = bollinger['1h']?.squeeze || false;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const squeeze4h = mfs.bollinger["4h"].squeeze;
+  const squeezePercent4h = mfs.bollinger["4h"].squeezeIntensity || 0;
+  const squeeze1h = mfs.bollinger["1h"].squeeze;
   
-  const momentum = trendData?.momentum || {};
-  const momentumState = momentum.state || "none";
-  const macdExpanding = momentum.macdExpanding || false;
-  const volumeConfirms = momentum.volumeConfirms || false;
-  const volumeRatio = trendData?.volatility?.volumeRatio || 1.0;
+  const momentumState = mfs.momentumState || "none";
+  const macdExpanding = mfs.macdExpanding;
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeRatio = mfs.volume["1h"].volumeRatio || 1.0;
   
-  const adx = trendData?.volatility?.adx || 0;
-  const adxRising = trendData?.volatility?.adxRising || false;
+  const adx = mfs.adx;
+  const adxRising = mfs.adxRising;
   
   // CORE BREAKOUT CONDITIONS:
   // 1. Squeeze is active (either 4h or 1h)
@@ -1212,7 +1211,8 @@ export const calculateUnifiedReversalScore = (
   trendData: any, 
   signalType: string,
   symbol: string = "unknown",
-  options: ReversalScoreOptions = {}
+  options: ReversalScoreOptions = {},
+  mfs?: MarketFeatureSnapshot
 ): UnifiedReversalResult => {
   const reasons: string[] = [];
   let totalScore = 0;
@@ -1232,7 +1232,93 @@ export const calculateUnifiedReversalScore = (
   const adxPhaseInfo = getAdxPhaseInfo(adx);
   
   // PHASE 1: Detect breakout mode for StochRSI penalty reduction
-  const breakoutMode = detectBreakoutMode(trendData);
+  // MFS MIGRATION: detectBreakoutMode now requires MFS. Build minimal shim if not provided.
+  let breakoutMfs: MarketFeatureSnapshot;
+  if (mfs) {
+    breakoutMfs = mfs;
+  } else {
+    // Compatibility shim: construct minimal MFS from trendData for detectBreakoutMode
+    const bollinger = trendData?.bollingerBands || {};
+    const momentum = trendData?.momentum || {};
+    breakoutMfs = {
+      symbol: symbol,
+      currentPrice: 0,
+      timestamp: '',
+      primaryTrend: 'neutral',
+      confidence: 0,
+      isAligned: false,
+      trendConsistency: 0,
+      adx: adx,
+      adxSlope: trendData?.volatility?.adxSlope ?? 0,
+      adxRising: trendData?.volatility?.adxRising ?? false,
+      stochRsi: {
+        "15m": { k: 50, d: 50 },
+        "30m": { k: 50, d: 50 },
+        "1h": { k: 50, d: 50 },
+        "4h": { k: trendData?.stochasticRsi?.['4h']?.k ?? 50, d: trendData?.stochasticRsi?.['4h']?.d ?? 50 },
+      },
+      bollinger: {
+        "15m": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: false, squeezeIntensity: 0, pricePosition: "middle" },
+        "30m": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: false, squeezeIntensity: 0, pricePosition: "middle" },
+        "1h": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: bollinger['1h']?.squeeze || false, squeezeIntensity: bollinger['1h']?.squeezePercent || 0, pricePosition: "middle" },
+        "4h": { upper: 0, middle: 0, lower: 0, bandwidth: 0, percentB: 50, squeeze: bollinger['4h']?.squeeze || false, squeezeIntensity: bollinger['4h']?.squeezePercent || 0, pricePosition: "middle" },
+        squeezeActive: bollinger['4h']?.squeeze || bollinger['1h']?.squeeze || false,
+        squeezeBreakoutPotential: false,
+      },
+      volume: {
+        "15m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "30m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "1h": { volumeRatio: trendData?.volatility?.volumeRatio || 1.0, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "4h": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        confirmsDirection: false,
+        hasRangeExpansion1h: false,
+      },
+      momentumState: momentum.state || "none",
+      momentumConfirms: momentum.confirms || false,
+      macdExpanding: momentum.macdExpanding || false,
+      macdStrong: false,
+      macdHistogram: 0,
+      macdDirectionAligned: false,
+      volumeConfirms: momentum.volumeConfirms || false,
+      adxRisingMomentum: false,
+      fakeBreakoutRisk: false,
+      genuineMomentum: false,
+      consecutiveBars1h: 0,
+      consecutiveBars15m: 0,
+      consecutiveBars30m: 0,
+      atr: 0,
+      atrPercent: 0,
+      relativeATR: 1,
+      historicalATRAvg: 0,
+      isCompressed: false,
+      volatilityNormal: true,
+      isRanging: false,
+      timeframes: {
+        "15m": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
+        "30m": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
+        "1h": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
+        "4h": { trend: "neutral", confidence: 0, rsi: 50, emaSignal: "neutral", macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral" },
+      },
+      distanceFromHighPercent: 0, distanceFromLowPercent: 0,
+      atrNormalizedFromHigh: 0, atrNormalizedFromLow: 0,
+      high24h: 0, low24h: 0,
+      priceChange4h: 0, priceChange24h: 0,
+      inPullback: false, pullbackPercent: 0, pullbackConditionsMet: false,
+      microTrend: { hasMicroTrend: false, direction: "neutral", confidence: 0, alignment: 0, reason: "" },
+      stealthTrend: { detected: false, direction: "neutral", driftPercent: 0, driftDuration: 0, adxBypassAllowed: false, htfBypassAllowed: false, stealthScore: 0, positionMultiplier: 1, stopMultiplier: 1, reason: "" },
+      neutralPersistence: { isCurrentlyNeutral: false, durationMinutes: 0, confidenceBonus: 0, reason: "" },
+      marketStructureValid: false, marketStructureConfidence: 0,
+      trueAlignment: { score: 0, tf4hConfidence: 0, tf1hConfidence: 0, adxContribution: 0, totalWeightedConfidence: 0, neutralCapped: false, breakdown: {}, weightedComponents: {} },
+      diPlus: 25, diMinus: 25, diSeparation: 0,
+      priceActionMomentum: { hasStrongMove: false, direction: "neutral", movePercent: 0, isStrongMove: false, canOverrideNeutralAlignment: false },
+      regime: trendData?.regime?.regime || 'RANGING',
+      directionStableBars: 0,
+      momentumDirection: "neutral",
+      prevMacdHistogram: 0,
+      squeezeJustReleased: false,
+    } as MarketFeatureSnapshot;
+  }
+  const breakoutMode = detectBreakoutMode(breakoutMfs);
   
   const momentum = trendData?.momentum || {};
   const stochRSI = trendData?.stochasticRsi || {};
@@ -4981,7 +5067,7 @@ export const deriveTradeDirection = (
 // ============= CALCULATE QUALITY SCORE =============
 // Unified quality score calculation
 export const calculateQualityScore = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   effectiveTrend: string,
   symbol: string
 ): { 
@@ -4995,29 +5081,58 @@ export const calculateQualityScore = (
     confidencePenalty: number 
   } 
 } => {
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? undefined;
-  const confidence = trendData?.confidence || 50;
-  const consistency = trendData?.trueAlignment?.score || 50;
-  const momentum = trendData?.momentum || {};
-  const aligned = trendData?.isAligned ?? false;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  const confidence = mfs.confidence || 50;
+  const consistency = mfs.trueAlignment?.score || 50;
+  const aligned = mfs.isAligned;
   
-  const volumeConfirms = momentum.volumeConfirms || false;
-  const volumeSpike = momentum.volumeSpike || false;
-  const volumeRatio = trendData?.volatility?.volumeRatio || momentum.volumeBoost || 1.0;
-  const hasRangeExpansion = (trendData?.volatility?.relativeATR || 1) > 1.0;
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeSpike = mfs.volume["1h"].volumeSpike;
+  const volumeRatio = mfs.volume["1h"].volumeRatio || 1.0;
+  const hasRangeExpansion = mfs.relativeATR > 1.0;
   
   const adxScore = getAdxScore(adx, adxSlope);
-  const adxRising = trendData?.volatility?.adxRising ?? false;
+  const adxRising = mfs.adxRising;
   
   // Extract StochRSI data for the decline bonus calculation
-  const stochRsi1h = trendData?.stochasticRsi?.['1h'];
-  const stochRsiData = stochRsi1h ? { k: stochRsi1h.k ?? 50, d: stochRsi1h.d ?? 50 } : undefined;
+  const stochRsiData = { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d };
+  
+  // Build momentum compat object for getMomentumScore (still uses legacy format)
+  const momentum = {
+    momentumScore: mfs.smartMomentum?.score ?? 0,
+    macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0,
+    state: mfs.momentumState,
+    confirms: mfs.momentumConfirms,
+    macdExpanding: mfs.macdExpanding,
+    volumeConfirms: mfs.volumeConfirms,
+    stochRsiK: mfs.stochRsi["4h"].k,
+  };
   
   // PHASE 1 FIX: Pass adxSlope to getMomentumScore for momentum floor calculation
   const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData, adxSlope);
-  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendData);
-  const technicalScore = getTechnicalScore(trendData, effectiveTrend, symbol);
+  // Build trendData shim for getAlignmentScore and getTechnicalScore (legacy functions)
+  const trendDataShim = {
+    confidence,
+    trueAlignment: mfs.trueAlignment,
+    isAligned: aligned,
+    timeframes: {
+      "4h": { trend: mfs.timeframes["4h"].trend, confidence: mfs.timeframes["4h"].confidence, indicators: { rsi: mfs.timeframes["4h"].rsi } },
+      "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
+      "30m": { trend: mfs.timeframes["30m"].trend, confidence: mfs.timeframes["30m"].confidence, indicators: { rsi: mfs.timeframes["30m"].rsi } },
+      "15m": { trend: mfs.timeframes["15m"].trend, confidence: mfs.timeframes["15m"].confidence, indicators: { rsi: mfs.timeframes["15m"].rsi } },
+    },
+    stochasticRsi: {
+      "4h": { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
+      "1h": { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
+    },
+    bollingerBand: { percentB: mfs.bollinger["4h"].percentB, squeeze: mfs.bollinger["4h"].squeeze },
+    volatility: { adx, adxSlope, adxRising },
+    momentum,
+  };
+  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendDataShim);
+  const technicalScore = getTechnicalScore(trendDataShim, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);
   const confidencePenalty = getConfidencePenalty(confidence, adx, momentum.confirms);
   

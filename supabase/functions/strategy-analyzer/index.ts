@@ -1279,7 +1279,7 @@ const detectReversalRisk = (mfs: MarketFeatureSnapshot, intendedDirection: strin
       "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
     },
   };
-  const unifiedResult = calculateUnifiedReversalScore(trendData, intendedDirection, "unknown");
+  const unifiedResult = calculateUnifiedReversalScore(trendData, intendedDirection, "unknown", {}, mfs);
   
   return {
     isHighRisk: unifiedResult.decision === "BLOCK",
@@ -10998,7 +10998,7 @@ serve(async (req) => {
         // Tier 1: BLOCK (score >= 60) - too risky, skip signal
         // Tier 2: REDUCE (score 40-60) - proceed with 50% position size
         // Tier 3: NORMAL (score < 40) - full position size
-        const unifiedReversal = calculateUnifiedReversalScore(trendData, trend, symbol);
+        const unifiedReversal = calculateUnifiedReversalScore(trendData, trend, symbol, {}, mfs);
         
         // Store multiplier for later use in position sizing
         let reversalPositionMultiplier = unifiedReversal.positionSizeMultiplier;
@@ -12402,7 +12402,7 @@ serve(async (req) => {
             const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
             
             // FIX #2 (Audit): Re-calculate reversal score with stricter StochRSI cap to prevent double punishment
-            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true });
+            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true }, mfs);
             reversalPositionMultiplier = bypassedReversalScore.positionSizeMultiplier;
             
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
@@ -12461,7 +12461,7 @@ serve(async (req) => {
             const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
             
             // FIX #2 (Audit): Re-calculate reversal score with stricter StochRSI cap to prevent double punishment
-            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true });
+            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true }, mfs);
             reversalPositionMultiplier = bypassedReversalScore.positionSizeMultiplier;
             
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing LONG at 4h overbought`);
@@ -17427,7 +17427,7 @@ serve(async (req) => {
         if (candidates.length === 0 && passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES) {
           // Check if convergence conditions are met
           const conf1h = mfs.timeframes['1h'].confidence;
-          const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown');
+          const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown', {}, mfs);
           
           // PHASE 3 FIX: Allow dominant direction with HTF alignment, not just strict consensus
           const longCount = passedConditionsButFiltered.filter(s => s.direction === 'long').length;
