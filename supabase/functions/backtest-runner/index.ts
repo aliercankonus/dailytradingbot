@@ -1040,9 +1040,9 @@ serve(async (req) => {
       barInterval: body.barInterval || '1h',
     };
 
-    const startDate = new Date(config.startDate);
-    const endDate = new Date(config.endDate);
-    const daysDiff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+    const parsedStart = new Date(config.startDate);
+    const parsedEnd = new Date(config.endDate);
+    const daysDiff = (parsedEnd.getTime() - parsedStart.getTime()) / (1000 * 60 * 60 * 24);
 
     if (daysDiff > 30) {
       return new Response(JSON.stringify({ error: 'Maximum backtest period is 30 days' }), {
