@@ -4687,7 +4687,6 @@ serve(async (req) => {
             earlyIgnitionHistData?.klines || [],
             volumeInfo
           );
-          );
           
           if (earlyIgnitionResult.isValid && earlyIgnitionResult.direction) {
             // CRITICAL: Early Ignition ONLY bypasses NO_CLEAR_DIRECTION
