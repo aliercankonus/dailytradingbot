@@ -760,9 +760,8 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'time_stop_24h' };
   }
 
-  // 9. Moderate exhaustion exit — OPTIMIZED: higher peak threshold, less aggressive ratio
-  // Only trigger when peak was meaningful AND drawdown from peak is severe
-  if (position.peakPnl > 0.60 && pnlPercent < position.peakPnl * 0.15) {
+  // 9. Moderate exhaustion exit — reverted to working threshold
+  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
