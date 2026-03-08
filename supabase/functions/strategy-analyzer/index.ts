@@ -13882,7 +13882,7 @@ serve(async (req) => {
           
           // Check Squeeze Expansion Exception first
           if (ADX_GATE.SQUEEZE_EXPANSION.ENABLED && isInTransitionalZone) {
-            const squeezeResult = isValidSqueezeBreakout(trendData, derivedDirection);
+            const squeezeResult = isValidSqueezeBreakout(mfs, derivedDirection);
             
             if (squeezeResult.isValid) {
               // Squeeze Expansion exception approved
