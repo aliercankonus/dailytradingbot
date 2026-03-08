@@ -6526,7 +6526,7 @@ serve(async (req) => {
         }
         
         // Classify market regime using smart module WITH behavioral exhaustion
-        const volume1hDataForRegime = trendData.volume?.["1h"] || {};
+        const volume1hDataForRegime = mfs.volume["1h"];
         const volumeRatioForRegime = volume1hDataForRegime.volumeRatio ?? 1.0;
         const smartRegime = classifySmartRegime(
           adx,
