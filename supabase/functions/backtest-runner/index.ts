@@ -1022,16 +1022,27 @@ serve(async (req) => {
     }
 
     const body = await req.json();
+    
+    // Support "days" shorthand: auto-calculate startDate/endDate
+    let startDate = body.startDate;
+    let endDate = body.endDate;
+    if (!startDate || !endDate) {
+      const days = body.days || 7;
+      const now = new Date();
+      endDate = now.toISOString();
+      startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+    }
+    
     const config: BacktestConfig = {
       symbols: body.symbols || ['BTCUSDT'],
-      startDate: body.startDate,
-      endDate: body.endDate,
+      startDate,
+      endDate,
       barInterval: body.barInterval || '1h',
     };
 
-    const startDate = new Date(config.startDate);
-    const endDate = new Date(config.endDate);
-    const daysDiff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+    const parsedStart = new Date(config.startDate);
+    const parsedEnd = new Date(config.endDate);
+    const daysDiff = (parsedEnd.getTime() - parsedStart.getTime()) / (1000 * 60 * 60 * 24);
 
     if (daysDiff > 30) {
       return new Response(JSON.stringify({ error: 'Maximum backtest period is 30 days' }), {
