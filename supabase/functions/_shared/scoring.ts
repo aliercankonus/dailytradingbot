@@ -3896,7 +3896,7 @@ export const deriveTradeDirection = (
       
       // ===== NEW: CHECK HTF ALIGNMENT BEFORE DERIVING DIRECTION =====
       // A bounce against a strong HTF trend is NOT momentum - it's a pullback
-      const htf4h = trendData.timeframes?.['4h'];
+      const htf4h = mfs.timeframes['4h'];
       const htfTrend4h = htf4h?.trend || "neutral";
       const htfConf4h = htf4h?.confidence ?? 50;
       const isHtfDirectional = htfTrend4h !== "neutral" && htfConf4h >= 60;
