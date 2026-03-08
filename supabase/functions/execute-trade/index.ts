@@ -1667,8 +1667,8 @@ serve(async (req) => {
       let strategyPositionNote = "";
       
       if (isMomentum) {
-        const adxValue = trendData?.volatility?.adx || 0;
-        const momentumConfirms = trendData?.momentum?.confirms === true;
+        const adxValue = mfs.adx;
+        const momentumConfirms = mfs.momentum?.confirms === true;
         
         if (adxValue >= ADX_THRESHOLDS.STRONG && momentumConfirms) {
           strategyPositionMultiplier = 1.25;
