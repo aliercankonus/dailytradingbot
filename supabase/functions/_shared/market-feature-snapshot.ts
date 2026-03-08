@@ -197,6 +197,10 @@ export interface MarketFeatureSnapshot {
   priceChange4h: number;
   priceChange24h: number;
   
+  // === VWAP ===
+  vwapValue: number;
+  vwapDistancePercent: number;
+  
   // === Pullback ===
   inPullback: boolean;
   pullbackPercent: number;
