@@ -455,6 +455,9 @@ function evaluateProductionGates(
     if (ADX_GATE.GRADUATED_TIERS.ENABLED && adxSlope > 0) {
       // Early transition probe
       adxPositionMultiplier = ADX_GATE.GRADUATED_TIERS.EARLY_TRANSITION.POSITION_MULTIPLIER;
+    } else if (adxSlope > -0.5 && adx >= 18) {
+      // RELAXED: Allow flat/slightly declining slope at ADX 18-20 with reduced size
+      adxPositionMultiplier = 0.30;
     } else {
       return fail('ADX_TOO_LOW');
     }
@@ -488,17 +491,21 @@ function evaluateProductionGates(
     direction = 'LONG';
   } else if (emaBearish && momentumResult.score < 0) {
     direction = 'SHORT';
-  } else if (momentumResult.score > 15 && adx > ADX_THRESHOLDS.STRONG) {
-    // Relaxed from >20 to >15
+  } else if (momentumResult.score > 10 && adx > ADX_THRESHOLDS.STRONG) {
+    // RELAXED: from >15 to >10 — allows moderate momentum with strong ADX
     direction = 'LONG';
-  } else if (momentumResult.score < -15 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score < -10 && adx > ADX_THRESHOLDS.STRONG) {
     direction = 'SHORT';
   } else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
-    // NEW: Strong structural trend can derive direction from DI
+    // Strong structural trend can derive direction from DI
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diPlus > diMinus + 5) direction = 'LONG';
     else if (diMinus > diPlus + 5) direction = 'SHORT';
+  } else if (adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0.2) {
+    // NEW: Rising ADX with moderate momentum can derive direction
+    if (momentumResult.score > 5) direction = 'LONG';
+    else if (momentumResult.score < -5) direction = 'SHORT';
   }
   
   if (!direction) {
@@ -559,18 +566,23 @@ function evaluateProductionGates(
     }
   }
 
-  // ===== GATE 8: Near-Extreme Protection (24h high/low proximity) =====
-  if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.8) {
+  // ===== GATE 8: Near-Extreme Protection (24h high/low proximity) — RELAXED =====
+  if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.5) {
     if (adx < ADX_THRESHOLDS.STRONG || adxSlope > 0) {
       return fail('NEAR_24H_LOW');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
+  } else if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.8) {
+    // Graduated: 0.5-0.8% range gets reduced position instead of block
+    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
   }
-  if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.8) {
+  if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.5) {
     if (adx < ADX_THRESHOLDS.STRONG || adxSlope > 0) {
       return fail('NEAR_24H_HIGH');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
+  } else if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.8) {
+    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
   }
 
   // ===== GATE 9: Overextension ATR Block =====
@@ -623,8 +635,15 @@ function evaluateProductionGates(
     const macdHist = mfs.macdHistogram;
     const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
                                  (direction === 'SHORT' && macdHist < 0 && mfs.macdExpanding);
+    // RELAXED: Also allow squeeze with MACD direction match (even without expansion) at strong ADX
+    const squeezeDirPartial = (direction === 'LONG' && macdHist > 0) ||
+                               (direction === 'SHORT' && macdHist < 0);
     if (squeezeDirConfirmed) {
       strategyName = 'SQUEEZE_BREAKOUT';
+    } else if (squeezeDirPartial && adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0) {
+      // Partial confirmation: MACD direction matches but not yet expanding
+      strategyName = 'SQUEEZE_BREAKOUT';
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
     } else {
       // No direction confirmation after squeeze — block entry
       return fail('SQUEEZE_NO_DIRECTION');
