@@ -11065,7 +11065,7 @@ serve(async (req) => {
                 consecutiveBars30m: momentum?.consecutiveBars30m ?? 0,
                 consecutiveBars15m: momentum?.consecutiveBars15m ?? 0
               },
-              stochRsi: trendData.stochasticRsi?.aggregated,
+              stochRsi: mfs.stochRsiAggregated,
               trend1h: htfTrend1h
             },
             mfs,
