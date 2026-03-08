@@ -3213,12 +3213,25 @@ serve(async (req) => {
           const htfDir = mfs.primaryTrend === "bullish" ? 1 : mfs.primaryTrend === "bearish" ? -1 : 0;
           const microTrendConfirms = htfDir !== 0 && Math.sign(ltfAlignment) === Math.sign(htfDir);
           
-          // Entry timing score: higher when 5m is accelerating toward HTF direction
-          let entryTimingScore = 50; // baseline
-          if (mom5m.isAccelerating && microTrendConfirms) entryTimingScore = 85;
-          else if (microTrendConfirms && Math.abs(mom5m.score) > 30) entryTimingScore = 75;
-          else if (microTrendConfirms) entryTimingScore = 65;
-          else if (!microTrendConfirms && Math.abs(mom5m.score) > 40) entryTimingScore = 25; // opposing
+          // Entry timing score: weighted composite
+          // Weights: microTrendConfirms (HTF alignment) = 35%, 5m acceleration = 25%, 
+          //          5m momentum magnitude = 25%, 1m/5m alignment = 15%
+          let entryTimingScore = 50; // baseline (neutral)
+          
+          // Factor 1: HTF alignment (35% weight → 0-35 points above/below baseline)
+          const htfAlignBonus = microTrendConfirms ? 20 : (htfDir !== 0 ? -15 : 0);
+          
+          // Factor 2: 5m acceleration (25% weight → 0-20 points)
+          const accelBonus = mom5m.isAccelerating ? (microTrendConfirms ? 20 : 5) : 0;
+          
+          // Factor 3: 5m momentum magnitude (25% weight → -15 to +15)
+          const momMagBonus = Math.abs(mom5m.score) > 40 ? (microTrendConfirms ? 15 : -15) 
+                            : Math.abs(mom5m.score) > 20 ? (microTrendConfirms ? 8 : -5) : 0;
+          
+          // Factor 4: 1m/5m alignment (15% weight → -10 to +10)
+          const alignBonus = ltfAlignment > 0.5 ? 10 : ltfAlignment < -0.5 ? -10 : ltfAlignment > 0 ? 5 : 0;
+          
+          entryTimingScore = Math.max(0, Math.min(100, 50 + htfAlignBonus + accelBonus + momMagBonus + alignBonus));
           
           // Is 1m reverting vs 5m? (short-term mean reversion signal)
           const isReverting1m = dir1mSign !== 0 && dir5mSign !== 0 && dir1mSign !== dir5mSign;
