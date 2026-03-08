@@ -4835,9 +4835,9 @@ serve(async (req) => {
               stochD1h: stochD1h.toFixed(1),
               orderFlowScore: earlyOrderFlowAnalysis?.score ?? 0,
               orderFlowSignal: earlyOrderFlowAnalysis?.signal ?? "neutral",
-              stealthDrift: trendData.stealthTrend?.driftPercent || 0,
-              trend30m: trendData.multiTimeframeTrends?.timeframe30m?.trend || timeframes?.['30m']?.trend || "neutral",
-              microDirection: trendData.microTrend?.direction || "neutral",
+              stealthDrift: stealthTrend.driftPercent || 0,
+              trend30m: mfs.timeframes['30m'].trend || "neutral",
+              microDirection: microTrend.direction || "neutral",
               momentum: {
                 confirms: momentum?.confirms ?? false,
                 state: momentum?.state ?? 'none',
