@@ -2877,3 +2877,271 @@ export function detectTrendContinuationPullback(
 
   return defaultResult;
 }
+
+// ============= LIQUIDITY TRAP DETECTOR =============
+// v1.0: Catches fake breakouts, stop hunts, bull/bear traps on LTF klines
+// 
+// MODEL:
+// 1. Wick Rejection (25pt): Long wick relative to body = price rejected at level
+// 2. Volume Spike + Reversal (25pt): High volume candle followed by opposite direction
+// 3. Price Rejection / Snap-back (25pt): Break beyond recent range then snap back inside
+// 4. Liquidity Sweep (25pt): Break recent high/low then immediate reversal within 2-3 bars
+//
+// Score: 0-100, applied as position multiplier
+// >60 → 0.6x, >75 → 0.4x, >85 → block entry
+
+export function detectLiquidityTrap(
+  klines: any[],
+  prices: number[],
+  direction: "long" | "short" | "neutral",
+  currentATR: number
+): LiquidityTrapResult {
+  const defaultResult: LiquidityTrapResult = {
+    detected: false, score: 0, trapType: "none", signals: [],
+    wickRejection: false, volumeSpikeReversal: false,
+    priceRejection: false, sweepDetected: false,
+    recommendation: "ignore", positionMultiplier: 1.0,
+    trapDirection: "none"
+  };
+
+  if (!klines || klines.length < 10 || prices.length < 10 || currentATR <= 0) return defaultResult;
+
+  let trapScore = 0;
+  const signals: string[] = [];
+  const len = klines.length;
+  
+  // Parse last 5 candles for pattern analysis
+  const recentCandles = klines.slice(-5).map(k => {
+    const o = parseFloat(k[1] ?? k.open ?? 0);
+    const h = parseFloat(k[2] ?? k.high ?? 0);
+    const l = parseFloat(k[3] ?? k.low ?? 0);
+    const c = parseFloat(k[4] ?? k.close ?? 0);
+    const v = parseFloat(k[5] ?? k.volume ?? 0);
+    return { o, h, l, c, v, body: Math.abs(c - o), range: h - l };
+  });
+  
+  const lastCandle = recentCandles[recentCandles.length - 1];
+  const prevCandle = recentCandles[recentCandles.length - 2];
+  
+  if (!lastCandle || !prevCandle || lastCandle.range <= 0) return defaultResult;
+  
+  // Calculate average volume from last 20 candles
+  const volumeLookback = Math.min(20, klines.length);
+  let avgVolume = 0;
+  for (let i = klines.length - volumeLookback; i < klines.length; i++) {
+    avgVolume += parseFloat(klines[i][5] ?? klines[i].volume ?? 0);
+  }
+  avgVolume /= volumeLookback;
+  
+  // Find recent swing high/low from last 15 candles
+  const lookbackCandles = klines.slice(-15);
+  let recentHigh = -Infinity;
+  let recentLow = Infinity;
+  for (const k of lookbackCandles.slice(0, -2)) { // Exclude last 2
+    const h = parseFloat(k[2] ?? k.high ?? 0);
+    const l = parseFloat(k[3] ?? k.low ?? 0);
+    if (h > recentHigh) recentHigh = h;
+    if (l < recentLow) recentLow = l;
+  }
+  
+  const currentPrice = prices[prices.length - 1];
+
+  // ===== SIGNAL 1: WICK REJECTION (0-25 points) =====
+  // Long upper wick on bullish context = bull trap signal
+  // Long lower wick on bearish context = bear trap signal
+  const upperWick = lastCandle.h - Math.max(lastCandle.o, lastCandle.c);
+  const lowerWick = Math.min(lastCandle.o, lastCandle.c) - lastCandle.l;
+  const bodyRatio = lastCandle.body / lastCandle.range;
+  
+  // Wick must be > 60% of total range AND body < 30% of range
+  const upperWickRatio = upperWick / lastCandle.range;
+  const lowerWickRatio = lowerWick / lastCandle.range;
+  
+  let wickRejection = false;
+  if (direction === "long" && upperWickRatio > 0.6 && bodyRatio < 0.3) {
+    // Long upper wick with tiny body = bullish rejection → bull trap
+    const wickPoints = Math.min(25, Math.round(upperWickRatio * 35));
+    trapScore += wickPoints;
+    wickRejection = true;
+    signals.push(`WICK_REJECTION_UPPER: ${(upperWickRatio * 100).toFixed(0)}% wick (+${wickPoints})`);
+  } else if (direction === "short" && lowerWickRatio > 0.6 && bodyRatio < 0.3) {
+    // Long lower wick with tiny body = bearish rejection → bear trap
+    const wickPoints = Math.min(25, Math.round(lowerWickRatio * 35));
+    trapScore += wickPoints;
+    wickRejection = true;
+    signals.push(`WICK_REJECTION_LOWER: ${(lowerWickRatio * 100).toFixed(0)}% wick (+${wickPoints})`);
+  }
+  // Also check prev candle for 2-bar wick rejection pattern
+  if (!wickRejection && prevCandle.range > 0) {
+    const prevUpperWickRatio = (prevCandle.h - Math.max(prevCandle.o, prevCandle.c)) / prevCandle.range;
+    const prevLowerWickRatio = (Math.min(prevCandle.o, prevCandle.c) - prevCandle.l) / prevCandle.range;
+    if (direction === "long" && prevUpperWickRatio > 0.55 && lastCandle.c < prevCandle.o) {
+      trapScore += 15;
+      wickRejection = true;
+      signals.push(`WICK_REJECTION_2BAR: prev wick ${(prevUpperWickRatio * 100).toFixed(0)}% + bearish follow (+15)`);
+    } else if (direction === "short" && prevLowerWickRatio > 0.55 && lastCandle.c > prevCandle.o) {
+      trapScore += 15;
+      wickRejection = true;
+      signals.push(`WICK_REJECTION_2BAR: prev wick ${(prevLowerWickRatio * 100).toFixed(0)}% + bullish follow (+15)`);
+    }
+  }
+
+  // ===== SIGNAL 2: VOLUME SPIKE + REVERSAL (0-25 points) =====
+  // High-volume candle that immediately reverses = institutional trap
+  const volumeSpikeReversal = (() => {
+    if (avgVolume <= 0) return false;
+    
+    // Check if any of last 3 candles had >2x average volume
+    for (let i = recentCandles.length - 3; i < recentCandles.length; i++) {
+      if (i < 0) continue;
+      const candle = recentCandles[i];
+      const volRatio = candle.v / avgVolume;
+      
+      if (volRatio < 1.8) continue;
+      
+      // Check if subsequent candle(s) reversed
+      const nextIdx = i + 1;
+      if (nextIdx >= recentCandles.length) continue;
+      
+      const spikeCandle = candle;
+      const nextCandle = recentCandles[nextIdx];
+      
+      const spikeBullish = spikeCandle.c > spikeCandle.o;
+      const nextBearish = nextCandle.c < nextCandle.o;
+      const spikeBearish = spikeCandle.c < spikeCandle.o;
+      const nextBullish = nextCandle.c > nextCandle.o;
+      
+      if ((spikeBullish && nextBearish && direction === "long") ||
+          (spikeBearish && nextBullish && direction === "short")) {
+        const volPoints = Math.min(25, Math.round(volRatio * 8));
+        trapScore += volPoints;
+        signals.push(`VOL_SPIKE_REVERSAL: ${volRatio.toFixed(1)}x avg vol + reversal (+${volPoints})`);
+        return true;
+      }
+    }
+    return false;
+  })();
+
+  // ===== SIGNAL 3: PRICE REJECTION / SNAP-BACK (0-25 points) =====
+  // Price broke beyond recent high/low then snapped back inside range
+  let priceRejection = false;
+  const breakThreshold = currentATR * 0.3; // Must break by at least 0.3 ATR to count
+  
+  if (direction === "long") {
+    // For longs: check if price broke above recent high then came back below
+    const brokeAbove = lastCandle.h > recentHigh + breakThreshold;
+    const closedBelow = lastCandle.c < recentHigh;
+    if (brokeAbove && closedBelow) {
+      const breakAmount = (lastCandle.h - recentHigh) / currentATR;
+      const rejectionPoints = Math.min(25, Math.round(breakAmount * 15 + 10));
+      trapScore += rejectionPoints;
+      priceRejection = true;
+      signals.push(`PRICE_REJECTION: broke high by ${breakAmount.toFixed(2)} ATR, closed below (+${rejectionPoints})`);
+    }
+  } else if (direction === "short") {
+    // For shorts: check if price broke below recent low then came back above
+    const brokeBelow = lastCandle.l < recentLow - breakThreshold;
+    const closedAbove = lastCandle.c > recentLow;
+    if (brokeBelow && closedAbove) {
+      const breakAmount = (recentLow - lastCandle.l) / currentATR;
+      const rejectionPoints = Math.min(25, Math.round(breakAmount * 15 + 10));
+      trapScore += rejectionPoints;
+      priceRejection = true;
+      signals.push(`PRICE_REJECTION: broke low by ${breakAmount.toFixed(2)} ATR, closed above (+${rejectionPoints})`);
+    }
+  }
+
+  // ===== SIGNAL 4: LIQUIDITY SWEEP (0-25 points) =====
+  // Classic stop hunt: break recent extreme by small amount, then reverse within 2-3 bars
+  let sweepDetected = false;
+  if (recentCandles.length >= 3) {
+    const c3 = recentCandles[recentCandles.length - 3];
+    const c2 = recentCandles[recentCandles.length - 2];
+    const c1 = recentCandles[recentCandles.length - 1];
+    
+    if (direction === "long") {
+      // Sweep pattern for longs: one candle breaks above high, next 1-2 sell off hard
+      const swept = c3.h > recentHigh || c2.h > recentHigh;
+      const reversed = c1.c < c2.o && c1.c < c3.c;
+      if (swept && reversed) {
+        const sweepDistance = (Math.max(c3.h, c2.h) - recentHigh) / currentATR;
+        const reverseDistance = Math.abs(c1.o - c1.c) / currentATR;
+        if (sweepDistance > 0.1 && sweepDistance < 1.5 && reverseDistance > 0.3) {
+          const sweepPoints = Math.min(25, Math.round((sweepDistance + reverseDistance) * 12));
+          trapScore += sweepPoints;
+          sweepDetected = true;
+          signals.push(`LIQUIDITY_SWEEP: swept ${sweepDistance.toFixed(2)} ATR above high, reversed ${reverseDistance.toFixed(2)} ATR (+${sweepPoints})`);
+        }
+      }
+    } else if (direction === "short") {
+      // Sweep pattern for shorts: one candle breaks below low, next 1-2 rally
+      const swept = c3.l < recentLow || c2.l < recentLow;
+      const reversed = c1.c > c2.o && c1.c > c3.c;
+      if (swept && reversed) {
+        const sweepDistance = (recentLow - Math.min(c3.l, c2.l)) / currentATR;
+        const reverseDistance = Math.abs(c1.c - c1.o) / currentATR;
+        if (sweepDistance > 0.1 && sweepDistance < 1.5 && reverseDistance > 0.3) {
+          const sweepPoints = Math.min(25, Math.round((sweepDistance + reverseDistance) * 12));
+          trapScore += sweepPoints;
+          sweepDetected = true;
+          signals.push(`LIQUIDITY_SWEEP: swept ${sweepDistance.toFixed(2)} ATR below low, reversed ${reverseDistance.toFixed(2)} ATR (+${sweepPoints})`);
+        }
+      }
+    }
+  }
+
+  // ===== DETERMINE TRAP TYPE AND RECOMMENDATION =====
+  trapScore = Math.min(100, trapScore);
+  const signalCount = [wickRejection, volumeSpikeReversal, priceRejection, sweepDetected].filter(Boolean).length;
+  
+  let trapType: LiquidityTrapResult["trapType"] = "none";
+  let recommendation: LiquidityTrapResult["recommendation"] = "ignore";
+  let positionMultiplier = 1.0;
+  let trapDirection: LiquidityTrapResult["trapDirection"] = "none";
+
+  if (signalCount >= 2 || trapScore >= 40) {
+    defaultResult.detected = true;
+    
+    // Classify trap type
+    if (sweepDetected) {
+      trapType = "stop_hunt";
+    } else if (priceRejection) {
+      trapType = "fake_breakout";
+    } else if (direction === "long") {
+      trapType = "bull_trap";
+    } else {
+      trapType = "bear_trap";
+    }
+    
+    trapDirection = direction === "long" ? "bullish_trap" : direction === "short" ? "bearish_trap" : "none";
+    
+    // Position multiplier based on score
+    if (trapScore >= 85) {
+      positionMultiplier = 0.0; // Full block
+      recommendation = "block_entry";
+    } else if (trapScore >= 75) {
+      positionMultiplier = 0.4;
+      recommendation = "reduce_size";
+    } else if (trapScore >= 60) {
+      positionMultiplier = 0.6;
+      recommendation = "reduce_size";
+    } else {
+      positionMultiplier = 0.8;
+      recommendation = "reduce_size";
+    }
+  }
+
+  return {
+    detected: signalCount >= 2 || trapScore >= 40,
+    score: trapScore,
+    trapType,
+    signals,
+    wickRejection,
+    volumeSpikeReversal,
+    priceRejection,
+    sweepDetected,
+    recommendation,
+    positionMultiplier,
+    trapDirection
+  };
+}
