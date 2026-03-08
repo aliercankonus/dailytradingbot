@@ -9,10 +9,6 @@ import {
   getAdxWeight,
   calculateUnifiedReversalScore,
   detectMarketRegime,
-  extractADX,
-  extractADXSlope,
-  extractStochRsiK,
-  extractAtrPercent,
   type UnifiedReversalResult,
   type MarketRegime
 } from "../_shared/scoring.ts";
@@ -788,8 +784,9 @@ serve(async (req) => {
     // ============================================================
     // VOLUME SCORE VALIDATION (aligned with strategy-analyzer)
     // Volume score from calculate-trend provides additional confirmation
+    // NOTE: volumeScore is a top-level trendData field not in MFS (aggregate score, not per-timeframe)
     // ============================================================
-    const volumeScore = trendData?.volumeScore ?? 0; // Top-level field, not in MFS
+    const volumeScore = trendData?.volumeScore ?? 0;
     const volumeConfirms = mfs.momentum?.volumeConfirms ?? false;
     
     // Warn on low volume but don't block unless extremely low
@@ -907,7 +904,8 @@ serve(async (req) => {
       }
     }
     
-    const breakoutPotential = trendData?.bollingerBands?.breakoutPotential || false;
+    // MFS MIGRATED: breakoutPotential read from snapshot instead of raw trendData
+    const breakoutPotential = mfs.bollinger.squeezeBreakoutPotential || false;
     if (breakoutPotential) {
       logger.info(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
       bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.BREAKOUT_POTENTIAL_BOOST;
@@ -1712,7 +1710,8 @@ serve(async (req) => {
         strategyPositionMultiplier = 0.6;
         strategyPositionNote = `Grid/range strategy = -40% size (more frequent trades)`;
       } else if (strategyType === 'NEUTRAL_BREAKOUT') {
-        const breakoutConfirmed = trendData?.momentum?.confirms === true;
+        // MFS MIGRATED: momentum confirms read from snapshot
+        const breakoutConfirmed = mfs.momentum?.confirms === true;
         
         if (breakoutConfirmed) {
           strategyPositionMultiplier = 1.1;
