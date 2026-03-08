@@ -520,21 +520,26 @@ function evaluateProductionGates(
     return fail('COUNTER_TREND');
   }
 
-  // ===== GATE 5.5: StochRSI Directional Protection (production-accurate) =====
-  // K > 85 blocks SHORT entries, K < 15 blocks LONG entries
-  // Independent of Gate 3 (deep extreme), this catches directional mismatches
-  if (direction === 'SHORT' && stochK > 85) {
-    // Shorting into overbought only allowed if ADX >= 35 (strong downtrend confirmed)
+  // ===== GATE 5.5: StochRSI Directional Protection — SYNCED with constants (K>80/K<20) =====
+  if (direction === 'SHORT' && stochK > 80) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
-  if (direction === 'LONG' && stochK < 15) {
+  if (direction === 'LONG' && stochK < 20) {
     if (adx < ADX_THRESHOLDS.VERY_STRONG) {
       return fail('STOCHRSI_DIRECTIONAL_BLOCK');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
+  }
+
+  // ===== GATE 5.6: Overbought LONG / Oversold SHORT Block (K>80 / K<20) =====
+  if (direction === 'LONG' && stochK > 80 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+    return fail('OVERBOUGHT_LONG_BLOCK');
+  }
+  if (direction === 'SHORT' && stochK < 20 && adx < ADX_THRESHOLDS.VERY_STRONG) {
+    return fail('OVERSOLD_SHORT_BLOCK');
   }
 
   // ===== GATE 6: Momentum Direction Alignment (production-accurate: ±15 threshold) =====
