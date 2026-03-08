@@ -226,7 +226,35 @@ export function calculateMomentumScore(
   defaultResult.overextensionATR = overextensionATR;
 
   // Determine states
-  const isAccelerating = totalScore > MSC.ACCELERATING_THRESHOLD && defaultResult.components.macdSlope > 0;
+  // v3.0: EMA(momentum, 3) slope model for isAccelerating
+  // Instead of single-bar macdSlope > 0, use 3-bar smoothed totalScore slope
+  // This eliminates false acceleration triggers from single low-liquidity candle spikes
+  // Model: compute momentum-like scores for last 3 bars, apply EMA(3) smoothing, check slope
+  let isAccelerating = false;
+  if (totalScore > MSC.ACCELERATING_THRESHOLD && macdResult.histogramArray.length >= 6) {
+    // Compute per-bar momentum proxy from MACD histogram + EMA spread for last 3 bars
+    const hist = macdResult.histogramArray;
+    const priceNorm = prices[prices.length - 1] || 1;
+    
+    // 3-bar momentum snapshots (normalized histogram as momentum proxy)
+    const m1 = ((hist[hist.length - 3] - hist[hist.length - 4]) / priceNorm) * 10000;
+    const m2 = ((hist[hist.length - 2] - hist[hist.length - 3]) / priceNorm) * 10000;
+    const m3 = ((hist[hist.length - 1] - hist[hist.length - 2]) / priceNorm) * 10000;
+    
+    // EMA(3) smoothing: weights [1, 2, 4] / 7 (standard EMA kernel for 3 values)
+    const emaSmoothed = (m1 * 1 + m2 * 2 + m3 * 4) / 7;
+    
+    // Acceleration = smoothed slope is positive (momentum increasing)
+    // AND current histogram is expanding in the right direction
+    const histCurrent = hist[hist.length - 1];
+    const histExpanding = Math.abs(histCurrent) > Math.abs(hist[hist.length - 2]);
+    
+    isAccelerating = emaSmoothed > 0.5 && (histExpanding || emaSmoothed > 2.0);
+    
+    if (isAccelerating) {
+      reasons.push(`🚀 EMA(3) momentum slope: ${emaSmoothed.toFixed(2)} (smoothed acceleration confirmed)`);
+    }
+  }
   const isWeakening = 
     (totalScore > 0 && defaultResult.components.macdSlope < 0 && !adxRising) ||
     (totalScore < 0 && defaultResult.components.macdSlope > 0 && !adxRising);
