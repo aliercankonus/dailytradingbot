@@ -18,7 +18,11 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error' | 'circuit_breaker_triggered' | 'break_even_activated' | 'partial_loss_taken' | 'partial_take_profit';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error' | 'circuit_breaker_triggered' | 'break_even_activated' | 'partial_loss_taken' | 'partial_take_profit' | 'micro_exhaustion_exit';
+  // Micro exhaustion fields
+  exhaustionScore?: number;
+  exhaustionSignals?: string[];
+  exhaustionAction?: string; // 'exit_full' | 'exit_partial' | 'tighten_stop'
   userId?: string;
   tradeId?: string;
   symbol?: string;
