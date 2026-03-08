@@ -1291,23 +1291,17 @@ interface PullbackAnalysis {
   hasBothConditions: boolean; // RSI + Bollinger combined
 }
 
-const analyzePullbackEntry = (trendData: any, trend: string, smartPullback: PullbackResult): PullbackAnalysis => {
-  const indicators1h = trendData?.timeframes?.['1h']?.indicators || {};
-  const indicators30m = trendData?.timeframes?.['30m']?.indicators || {};
-  // CENTRALIZED: Use shared extractors for StochRSI K values
-  const k4h = extractStochRsiK(trendData, '4h');
-  const k30m = extractStochRsiK(trendData, '30m');
-  const stochRsi = trendData.stochasticRsi?.aggregated || {};
-  const bollingerBands = trendData.bollingerBands || {};
-  const bb1h = bollingerBands["1h"] || {};
-  const bb30m = bollingerBands["30m"] || {};
-  const rsi1h = indicators1h.rsi ?? 50;
-  const rsi30m = indicators30m.rsi ?? 50;
-  const adx = extractADX(trendData);
-  const momentum = trendData?.momentum || {};
+const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPullback: PullbackResult): PullbackAnalysis => {
+  // MFS MIGRATION: All indicators read from snapshot
+  const k4h = mfs.stochRsi["4h"].k;
+  const k30m = mfs.stochRsi["30m"].k;
+  const bb1h = mfs.bollinger["1h"];
+  const bb30m = mfs.bollinger["30m"];
+  const rsi1h = mfs.timeframes["1h"].rsi;
+  const rsi30m = mfs.timeframes["30m"].rsi;
+  const adx = mfs.adx;
   const percentB1h = bb1h.percentB || 50;
   const percentB30m = bb30m.percentB || 50;
-  const timeframes = trendData?.timeframes || {};
   
   // Use 1h RSI as primary, 30m for confirmation
   const rsi = rsi1h;
