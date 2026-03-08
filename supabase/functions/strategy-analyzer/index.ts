@@ -1203,16 +1203,12 @@ const calculateQualityScore = (factors: QualityFactors): { score: number; breakd
 };
 
 // ============= VOLUME SCORE WRAPPER =============
-// Wraps shared getVolumeScore with trendData extraction for local usage
-const getVolumeScore = (trendData: any, trend: string): number => {
-  const momentum = trendData?.momentum || {};
-  const volatility = trendData?.volatility || {};
-  
-  const volumeConfirms = momentum.volumeConfirms ?? false;
-  const volumeSpike = volatility.volumeSpike ?? false;
-  const volumeRatio = volatility.volumeRatio ?? 1.0;
-  const relativeATR = volatility.relativeATR ?? 1.0;
-  const hasRangeExpansion = relativeATR > 1.0;
+// MFS MIGRATION: Reads volume data from MarketFeatureSnapshot
+const getVolumeScore = (mfs: MarketFeatureSnapshot, trend: string): number => {
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeSpike = mfs.volume["1h"].volumeSpike;
+  const volumeRatio = mfs.volume["1h"].volumeRatio;
+  const hasRangeExpansion = mfs.volume.hasRangeExpansion1h;
   
   return sharedGetVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, trend);
 };
