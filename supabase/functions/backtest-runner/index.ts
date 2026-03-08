@@ -841,7 +841,7 @@ async function runBacktest(
         // Calculate indicators for exit checks
         const atr = wCloses.length > 14 ? calculateATR(wHighs, wLows, wCloses, 14) : currentPrice * 0.015;
         const atrPercent = (atr / currentPrice) * 100;
-        const adxResult = wCloses.length > 28 ? calculateADXWithDirection(wHighs, wLows, wCloses, 14) : { adx: 15, slope: 0, adxSlope: 0, adxRising: false, plusDI: 0, minusDI: 0, diGap: 0, prevDiGap: 0, adxArray: [], prevAdx: 15, adxPeaked: false, adxSlopeSmoothed: 0 };
+        const adxResult = wKlines.length > 30 ? calculateADXWithDirection(wKlines, 14) : { adx: 15, slope: 0, adxSlope: 0, adxRising: false, plusDI: 0, minusDI: 0, diGap: 0, prevDiGap: 0, adxArray: [], prevAdx: 15, adxPeaked: false, adxSlopeSmoothed: 0 };
 
         // Check exits on open positions
         for (let p = openPositions.length - 1; p >= 0; p--) {
