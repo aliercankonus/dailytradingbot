@@ -1457,19 +1457,19 @@ export const calculateUnifiedReversalScore = (
   }
   
   // 6. VOLUME CONFIRMATION (reduces score if confirming)
-  const volumeConfirms = momentum.volumeConfirms ?? false;
-  const volumeBoost = momentum.volumeBoost ?? 1.0;
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeRatio1h = mfs.volume['1h'].volumeRatio;
   
-  if (volumeConfirms && volumeBoost > 1.3) {
+  if (volumeConfirms && volumeRatio1h > 1.3) {
     breakdown.volumeScore = REVERSAL_CROSS_SCORES.VOLUME_CONFIRMS;
     reasons.push(`Volume confirms - risk reduced`);
-  } else if (!volumeConfirms && volatility.volumeRatio < 0.5) {
+  } else if (!volumeConfirms && volumeRatio1h < 0.5) {
     breakdown.volumeScore = REVERSAL_CROSS_SCORES.LOW_VOLUME;
     reasons.push("Low volume - reduced conviction");
   }
   
   // PHASE 2: Calculate separated risk scores BEFORE final decision
-  const separatedRisk = calculateSeparatedRisk(breakdown, trendData, signalType);
+  const separatedRisk = calculateSeparatedRisk(breakdown, signalType);
   
   // PHASE 4: Apply overall StochRSI contribution cap
   // Sum all StochRSI-related components and cap at MAX_STOCHRSI_PENALTY (20)
