@@ -6317,7 +6317,7 @@ serve(async (req) => {
                 htfTrend4h,
                 adx: adx.toFixed(1),
                 threshold: MOVE_EXHAUSTED_REVERSAL_GATE.BLOCK_SHORT_IF_PRICE_ROSE_PERCENT,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             } else {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⚠️ MOVE_EXHAUSTED_REVERSAL bypassed: ADX=${adx.toFixed(1)}, 4h=${htfTrend4h}`);
@@ -6338,7 +6338,7 @@ serve(async (req) => {
               priceChange4h: priceChange4h.toFixed(2),
               stochRsiK4h: stochRsiK4h.toFixed(1),
               reason: "oversold_during_rally",
-            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
             continue;
           }
         }
@@ -6397,7 +6397,7 @@ serve(async (req) => {
                 priceChange4h: priceChange4h.toFixed(2),
                 stochCrossingUp,
                 macdFlippingPositive,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6425,7 +6425,7 @@ serve(async (req) => {
                 priceChange4h: priceChange4h.toFixed(2),
                 stochCrossingDown,
                 macdFlippingNegative,
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6905,7 +6905,7 @@ serve(async (req) => {
                   blockShortIfSlopeAbove: MOMENTUM_SLOPE_GATE.BLOCK_SHORT_IF_SLOPE_ABOVE,
                   blockLongIfSlopeBelow: MOMENTUM_SLOPE_GATE.BLOCK_LONG_IF_SLOPE_BELOW,
                 }
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6951,7 +6951,7 @@ serve(async (req) => {
                 adxSlope: adxSlope.toFixed(2),
                 adx: adx.toFixed(1),
                 architecture: "Priority 2 gate - no ADX exception",
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -6977,7 +6977,7 @@ serve(async (req) => {
                 adxSlope: adxSlope.toFixed(2),
                 adx: adx.toFixed(1),
                 architecture: "Priority 2 gate - no ADX exception",
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -7026,7 +7026,7 @@ serve(async (req) => {
                   collapseToExhaustionMinAdx,
                 },
                 analysis: `ADX slope < ${directionSpecificThreshold} AND ADX < ${collapseToExhaustionMinAdx} — no energy reservoir, hard block justified`
-              }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+              }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
               continue;
             }
           }
@@ -7092,7 +7092,7 @@ serve(async (req) => {
                   tf30mTrend,
                   ltfAligned: false,
                   wouldPassWith: `Slope >= ${contReq.BLOCK_DECLINING_NO_LTF_SLOPE_THRESHOLD} OR 1h/30m aligned with ${derivedDirection}`,
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               } else {
                 // No LTF but decline is moderate — apply penalty, don't block
@@ -9957,7 +9957,7 @@ serve(async (req) => {
                   bypassEligible,
                   weakDirectionProbeApplied,
                   wouldPassWith: `ADX >= ${hardBlock.MAX_ADX} OR momentum_state=confirmed/building OR |momentum_score| >= ${hardBlock.MAX_ABS_MOMENTUM_SCORE}`,
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               }
             }
@@ -10043,7 +10043,7 @@ serve(async (req) => {
                    adx: adx.toFixed(1),
                    adxSlope: adxSlope.toFixed(2),
                    wouldPassWith: 'momentum_confirms=true OR quality_score >= 80 OR (ADX_rising + ADX >= 18)',
-                 }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                 }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                  continue;
                }
              }
@@ -10092,7 +10092,7 @@ serve(async (req) => {
                   currentPrice: currentPrice.toFixed(2),
                   atr: currentATR.toFixed(4),
                   wouldPassWith: `ATR% >= ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}%`,
-                }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+                }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
                 continue;
               } else {
                 logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 📊 LOW_ATR: ATR=${atrPercent24h.toFixed(2)}% < ${atrFilter.ABSOLUTE_FLOOR_ATR_PERCENT}% but allowing Mean Reversion`);
@@ -18422,7 +18422,7 @@ serve(async (req) => {
               isReversalEntry,
               primaryTrend: primaryTrendForRegime,
               adx: adx.toFixed(1),
-            }, trendData, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
+            }, mfs, riskParams.ai_analysis_enabled !== false, earlyOrderFlowAnalysis);
             continue;
           }
           
