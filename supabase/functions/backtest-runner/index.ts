@@ -965,8 +965,8 @@ async function runBacktest(
           pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
           exitReason: 'backtest_end', entryScore: pos.entryScore,
           stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
-          qualityScore: pos.qualityScore, momentumScore: 0,
-          adx: 0, stochK: 0, strategyName: pos.strategyName,
+          qualityScore: pos.qualityScore, momentumScore: pos.entryMomentumScore,
+          adx: pos.entryAdx, stochK: pos.entryStochK, strategyName: pos.strategyName,
         });
         const positionSize = equity * 0.015;
         equity += positionSize * (pnl.netPnlPercent / 100);
