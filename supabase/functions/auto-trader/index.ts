@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 import { createLogger } from "../_shared/logging.ts";
+import { getAndResetFetchStats } from "../_shared/binance.ts";
 import { detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 
 const corsHeaders = {
@@ -281,7 +282,8 @@ serve(async (req) => {
     } catch (metricsErr) {
       logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
     }
-    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms`);
+    const fetchStats = getAndResetFetchStats();
+    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms | 🔶 Binance: OK=${fetchStats.fetchOkCount} CACHE_HIT=${fetchStats.cacheHits} CACHE_MISS=${fetchStats.cacheMisses} TIMEOUT=${fetchStats.timeoutCount}`);
 
     return new Response(
       JSON.stringify({
