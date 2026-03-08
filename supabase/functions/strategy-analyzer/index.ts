@@ -17414,7 +17414,7 @@ serve(async (req) => {
         if (candidates.length === 0 && passedConditionsButFiltered.length >= CONVERGENCE_MIN_STRATEGIES) {
           // Check if convergence conditions are met
           const conf1h = mfs.timeframes['1h'].confidence;
-          const reversalResult = calculateUnifiedReversalScore(trendData, tradeDirection === 'bullish' ? 'long' : 'short', 'unknown', {}, mfs);
+          const reversalResult = calculateUnifiedReversalScore(mfs, tradeDirection === 'bullish' ? 'long' : 'short');
           
           // PHASE 3 FIX: Allow dominant direction with HTF alignment, not just strict consensus
           const longCount = passedConditionsButFiltered.filter(s => s.direction === 'long').length;
