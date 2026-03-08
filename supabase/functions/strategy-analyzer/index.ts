@@ -3198,9 +3198,12 @@ serve(async (req) => {
         // ============= LIQUIDITY TRAP DETECTION (LTF) =============
         // Uses 5m/1m klines to detect fake breakouts, stop hunts, bull/bear traps
         const ltfDataForTrap = ltfDataMap.get(symbol);
-        const trapKlines = ltfDataForTrap?.klines5m ?? mfs.klines15m;
-        const trapPrices = ltfDataForTrap?.prices5m ?? parseKlinePrices(mfs.klines15m);
-        const trapAtr = ltfDataForTrap ? calculateATR(ltfDataForTrap.klines5m, 14) : mfs.atr;
+        // CRITICAL: Use RAW klines (including live candle) for trap detection
+        // Trap patterns (wick rejection, sweep, volume spike) are TACTICAL — they need the forming candle
+        // This eliminates the 1-candle (5min) detection delay
+        const trapKlines = ltfDataForTrap?.rawKlines5m?.length ? ltfDataForTrap.rawKlines5m : (ltfDataForTrap?.klines5m ?? mfs.klines15m);
+        const trapPrices = ltfDataForTrap?.rawPrices5m?.length ? ltfDataForTrap.rawPrices5m : (ltfDataForTrap?.prices5m ?? parseKlinePrices(mfs.klines15m));
+        const trapAtr = ltfDataForTrap ? calculateATR(ltfDataForTrap.klines5m, 14) : mfs.atr; // ATR still uses closed candles for stability
         
         // Direction is determined from smart momentum (early direction context)
         const trapDirection = earlySmartMomentum.direction === "bullish" ? "long" as const
