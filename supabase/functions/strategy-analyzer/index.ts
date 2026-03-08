@@ -544,50 +544,52 @@ const logRejectionWithAI = async (
   orderFlow?: OrderFlowAnalysis | null
 ) => {
   // Extract all indicator data from MarketFeatureSnapshot (single source of truth)
-  const stochRsiData = mfs ? {
+  // DEFENSIVE: Use optional chaining on all nested MFS accesses to prevent TypeError
+  // when mfs is truthy but sub-objects are unexpectedly undefined
+  const stochRsiData = mfs?.stochRsi ? {
     // FLAT FIELDS for UI compatibility (Issue #1 & #2 fix)
-    stochRsiK: mfs.stochRsi["4h"].k,      // Primary 4h K (legacy field)
-    stochRsiD: mfs.stochRsi["4h"].d,      // Primary 4h D (NEW - Issue #2)
-    stochRsiK4h: mfs.stochRsi["4h"].k,    // Explicit 4h K
-    stochRsiD4h: mfs.stochRsi["4h"].d,    // Explicit 4h D (NEW - Issue #2)
-    stochRsiK1h: mfs.stochRsi["1h"].k,    // 1h K (NEW - Issue #1)
-    stochRsiD1h: mfs.stochRsi["1h"].d,    // 1h D (NEW - Issue #1)
-    stochRsiK30m: mfs.stochRsi["30m"].k,  // 30m K
-    stochRsiD30m: mfs.stochRsi["30m"].d,  // 30m D
-    stochRsiK15m: mfs.stochRsi["15m"].k,  // 15m K
-    stochRsiD15m: mfs.stochRsi["15m"].d,  // 15m D
+    stochRsiK: mfs.stochRsi["4h"]?.k ?? 50,      // Primary 4h K (legacy field)
+    stochRsiD: mfs.stochRsi["4h"]?.d ?? 50,      // Primary 4h D (NEW - Issue #2)
+    stochRsiK4h: mfs.stochRsi["4h"]?.k ?? 50,    // Explicit 4h K
+    stochRsiD4h: mfs.stochRsi["4h"]?.d ?? 50,    // Explicit 4h D (NEW - Issue #2)
+    stochRsiK1h: mfs.stochRsi["1h"]?.k ?? 50,    // 1h K (NEW - Issue #1)
+    stochRsiD1h: mfs.stochRsi["1h"]?.d ?? 50,    // 1h D (NEW - Issue #1)
+    stochRsiK30m: mfs.stochRsi["30m"]?.k ?? 50,  // 30m K
+    stochRsiD30m: mfs.stochRsi["30m"]?.d ?? 50,  // 30m D
+    stochRsiK15m: mfs.stochRsi["15m"]?.k ?? 50,  // 15m K
+    stochRsiD15m: mfs.stochRsi["15m"]?.d ?? 50,  // 15m D
     // NESTED OBJECTS for structured access
-    stochRsi4h: { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
-    stochRsi1h: { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
-    stochRsi30m: { k: mfs.stochRsi["30m"].k, d: mfs.stochRsi["30m"].d },
-    stochRsi15m: { k: mfs.stochRsi["15m"].k, d: mfs.stochRsi["15m"].d }
+    stochRsi4h: { k: mfs.stochRsi["4h"]?.k ?? 50, d: mfs.stochRsi["4h"]?.d ?? 50 },
+    stochRsi1h: { k: mfs.stochRsi["1h"]?.k ?? 50, d: mfs.stochRsi["1h"]?.d ?? 50 },
+    stochRsi30m: { k: mfs.stochRsi["30m"]?.k ?? 50, d: mfs.stochRsi["30m"]?.d ?? 50 },
+    stochRsi15m: { k: mfs.stochRsi["15m"]?.k ?? 50, d: mfs.stochRsi["15m"]?.d ?? 50 }
   } : {};
   
   // Extract Bollinger Band %B and squeeze values from MFS
-  const bollingerData = mfs ? {
+  const bollingerData = mfs?.bollinger ? {
     bollinger4h: {
-      percentB: mfs.bollinger["4h"].percentB,
-      squeeze: mfs.bollinger["4h"].squeeze,
-      squeezeIntensity: mfs.bollinger["4h"].squeezeIntensity,
-      pricePosition: mfs.bollinger["4h"].pricePosition,
+      percentB: mfs.bollinger["4h"]?.percentB ?? 50,
+      squeeze: mfs.bollinger["4h"]?.squeeze ?? false,
+      squeezeIntensity: mfs.bollinger["4h"]?.squeezeIntensity ?? 0,
+      pricePosition: mfs.bollinger["4h"]?.pricePosition ?? "middle",
     },
     bollinger1h: {
-      percentB: mfs.bollinger["1h"].percentB,
-      squeeze: mfs.bollinger["1h"].squeeze,
-      squeezeIntensity: mfs.bollinger["1h"].squeezeIntensity,
-      pricePosition: mfs.bollinger["1h"].pricePosition,
+      percentB: mfs.bollinger["1h"]?.percentB ?? 50,
+      squeeze: mfs.bollinger["1h"]?.squeeze ?? false,
+      squeezeIntensity: mfs.bollinger["1h"]?.squeezeIntensity ?? 0,
+      pricePosition: mfs.bollinger["1h"]?.pricePosition ?? "middle",
     },
     bollinger30m: {
-      percentB: mfs.bollinger["30m"].percentB,
-      squeeze: mfs.bollinger["30m"].squeeze,
-      squeezeIntensity: mfs.bollinger["30m"].squeezeIntensity,
-      pricePosition: mfs.bollinger["30m"].pricePosition,
+      percentB: mfs.bollinger["30m"]?.percentB ?? 50,
+      squeeze: mfs.bollinger["30m"]?.squeeze ?? false,
+      squeezeIntensity: mfs.bollinger["30m"]?.squeezeIntensity ?? 0,
+      pricePosition: mfs.bollinger["30m"]?.pricePosition ?? "middle",
     },
     bollinger15m: {
-      percentB: mfs.bollinger["15m"].percentB,
-      squeeze: mfs.bollinger["15m"].squeeze,
-      squeezeIntensity: mfs.bollinger["15m"].squeezeIntensity,
-      pricePosition: mfs.bollinger["15m"].pricePosition,
+      percentB: mfs.bollinger["15m"]?.percentB ?? 50,
+      squeeze: mfs.bollinger["15m"]?.squeeze ?? false,
+      squeezeIntensity: mfs.bollinger["15m"]?.squeezeIntensity ?? 0,
+      pricePosition: mfs.bollinger["15m"]?.pricePosition ?? "middle",
     }
   } : {};
   
@@ -615,15 +617,15 @@ const logRejectionWithAI = async (
   const regimeData = {};
   
   // Extract volume data from MFS
-  const volumeData = mfs ? {
-    volumeRatio: mfs.volume["1h"].volumeRatio ?? 
-                 mfs.volume["30m"].volumeRatio ?? 
-                 mfs.volume["4h"].volumeRatio ?? 
-                 mfs.volume["15m"].volumeRatio ?? 
+  const volumeData = mfs?.volume ? {
+    volumeRatio: mfs.volume["1h"]?.volumeRatio ?? 
+                 mfs.volume["30m"]?.volumeRatio ?? 
+                 mfs.volume["4h"]?.volumeRatio ?? 
+                 mfs.volume["15m"]?.volumeRatio ?? 
                  null,
-    volumeTrend: mfs.volume["1h"].volumeTrend ?? null,
-    volumeSpike: mfs.volume["1h"].volumeSpike ?? null,
-    volumeAboveMA: mfs.volume["1h"].volumeRatio > 1.0 ? true : false,
+    volumeTrend: mfs.volume["1h"]?.volumeTrend ?? null,
+    volumeSpike: mfs.volume["1h"]?.volumeSpike ?? null,
+    volumeAboveMA: (mfs.volume["1h"]?.volumeRatio ?? 0) > 1.0 ? true : false,
   } : {};
   
   // Merge all extracted data into filters_status
