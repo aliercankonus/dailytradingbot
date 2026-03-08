@@ -566,18 +566,23 @@ function evaluateProductionGates(
     }
   }
 
-  // ===== GATE 8: Near-Extreme Protection (24h high/low proximity) =====
-  if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.8) {
+  // ===== GATE 8: Near-Extreme Protection (24h high/low proximity) — RELAXED =====
+  if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.5) {
     if (adx < ADX_THRESHOLDS.STRONG || adxSlope > 0) {
       return fail('NEAR_24H_LOW');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
+  } else if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.8) {
+    // Graduated: 0.5-0.8% range gets reduced position instead of block
+    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
   }
-  if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.8) {
+  if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.5) {
     if (adx < ADX_THRESHOLDS.STRONG || adxSlope > 0) {
       return fail('NEAR_24H_HIGH');
     }
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
+  } else if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.8) {
+    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
   }
 
   // ===== GATE 9: Overextension ATR Block =====
