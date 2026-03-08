@@ -11110,16 +11110,18 @@ serve(async (req) => {
         const stochFilterConf1h = mfs.timeframes['1h'].confidence || 50;
         
         // Get momentum and divergence info
-        const hasBearishDivergence = trendData.momentum?.hasDivergence && trend === "bullish";
-        const hasBullishDivergence = trendData.momentum?.hasDivergence && trend === "bearish";
-        const macdHistogram = trendData.momentum?.macdHistogram ?? 0;
-        const macdExpanding = trendData.momentum?.macdExpanding ?? false;
+        const hasBearishDivergence = momentum.hasDivergence && trend === "bullish";
+        const hasBullishDivergence = momentum.hasDivergence && trend === "bearish";
+        const macdHistogram = momentum.macdHistogram ?? 0;
+        const macdExpanding = momentum.macdExpanding ?? false;
         
         // Get Bollinger Band info for breakout detection (use 4h as primary, 1h as fallback)
-        const bollingerPosition = trendData.bollingerBands?.['4h']?.pricePosition ?? 
-                                  trendData.bollingerBands?.['1h']?.pricePosition ?? "middle";
-        const percentB = trendData.bollingerBands?.['4h']?.percentB ?? 
-                         trendData.bollingerBands?.['1h']?.percentB ?? 50;
+        const bollingerPosition = mfs.bollinger['4h'].pricePosition !== "middle" 
+          ? mfs.bollinger['4h'].pricePosition 
+          : mfs.bollinger['1h'].pricePosition;
+        const percentB = mfs.bollinger['4h'].percentB !== 50 
+          ? mfs.bollinger['4h'].percentB 
+          : mfs.bollinger['1h'].percentB;
         
         // Determine if StochRSI is rising or falling (K vs D comparison)
         const stochRsiRising = stochRsiK4h > stochRsiD4h;
