@@ -5781,12 +5781,7 @@ export const checkImpulseContinuation = (
 // Used by: strategy-analyzer, execute-trade, monitor-positions
 // Types defined in: trend-types.ts
 
-import type { 
-  PartialTrendData, 
-  ADXExtractionResult, 
-  ADXSlopeResult, 
-  StochRsiExtractionResult 
-} from "./trend-types.ts";
+
 
 // ============= LEGACY EXTRACTORS REMOVED =============
 // All extractADX, extractStochRsiK, extractStochRsiD, extractADXSlope,
