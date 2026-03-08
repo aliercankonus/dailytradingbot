@@ -287,7 +287,7 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onclose = (event) => {
+      binanceTickerSocket.onclose = (event) => {
         console.log(`[MarketData-Edge] Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
         
         // Don't reconnect if client has disconnected
