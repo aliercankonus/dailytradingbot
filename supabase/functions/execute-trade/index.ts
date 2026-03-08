@@ -1557,20 +1557,24 @@ serve(async (req) => {
             symbol: signal.symbol,
             signalType: signal.signal_type,
             userId: user.id,
-            trendData: {
-              trend: currentTrend,
+            mfs: {
+              primaryTrend: mfs.primaryTrend,
               confidence: signal.confidence_score || 0,
-              trendConsistency: trendConsistency,
               adx: mfs.adx,
-              rsi: mfs.timeframes['1h'].indicators?.rsi ?? 50,
-              macdHistogram: mfs.timeframes['1h'].indicators?.macdHistogram ?? 0,
-              stochRSI: { k: mfs.stochRsi['1h'].k, d: mfs.stochRsi['1h'].d, signal: mfs.stochRsi['1h'].signal },
-              bollingerBands: {
+              adxSlope: mfs.adxSlope,
+              rsi1h: mfs.timeframes['1h'].indicators?.rsi ?? 50,
+              macdHistogram1h: mfs.timeframes['1h'].indicators?.macdHistogram ?? 0,
+              stochRsi1h: { k: mfs.stochRsi['1h'].k, d: mfs.stochRsi['1h'].d, signal: mfs.stochRsi['1h'].signal },
+              bollingerBands1h: {
                 percentB: bb1h.percentB || 50,
                 squeeze: bb1h.squeeze || false
               },
-              momentum: mfs.momentum || { confirms: false, divergence: false },
-              volumeConfirms: mfs.momentum?.volumeConfirms || false
+              momentumState: mfs.momentum?.state || 'none',
+              momentumConfirms: mfs.momentum?.confirms || false,
+              momentumDivergence: mfs.momentum?.hasDivergence || false,
+              volumeConfirms: mfs.momentum?.volumeConfirms || false,
+              atrPercent: mfs.atrPercent,
+              regime: mfs.regime,
             },
             strategyName: signal.strategy_name || 'Unknown',
             entryPrice: currentPrice,

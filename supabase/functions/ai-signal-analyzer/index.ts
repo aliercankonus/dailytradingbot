@@ -12,21 +12,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// MFS-native request interface — no legacy trendData wrapper
 interface SignalAnalysisRequest {
   symbol: string;
   userId?: string;
   signalType: "long" | "short";
-  trendData: {
-    trend: string;
+  // MFS fields directly
+  mfs: {
+    primaryTrend: string;
     confidence: number;
-    trendConsistency: number;
     adx: number;
-    rsi: number;
-    macdHistogram: number;
-    stochRSI: { k: number; d: number; signal: string };
-    bollingerBands: { percentB: number; squeeze: boolean };
-    momentum: { confirms: boolean; divergence: boolean };
+    adxSlope: number;
+    rsi1h: number;
+    macdHistogram1h: number;
+    stochRsi1h: { k: number; d: number; signal: string };
+    bollingerBands1h: { percentB: number; squeeze: boolean };
+    momentumState: string;
+    momentumConfirms: boolean;
+    momentumDivergence: boolean;
     volumeConfirms: boolean;
+    atrPercent: number;
+    regime?: string;
   };
   strategyName: string;
   entryPrice: number;
@@ -59,7 +65,7 @@ serve(async (req) => {
     }
 
     const request: SignalAnalysisRequest = await req.json();
-    const { symbol, signalType, trendData, strategyName, entryPrice, stopLoss, takeProfit } = request;
+    const { symbol, signalType, mfs, strategyName, entryPrice, stopLoss, takeProfit } = request;
 
     console.log(`🤖 AI Signal Analysis for ${symbol} ${signalType.toUpperCase()} via ${strategyName}`);
 
@@ -72,16 +78,16 @@ Be conservative - protect capital is priority #1.`;
     const analysisPrompt = `Analyze this ${signalType.toUpperCase()} signal for ${symbol}:
 
 **Technical Indicators:**
-- Trend: ${trendData.trend} (${trendData.confidence}% confidence)
-- Trend Consistency: ${trendData.trendConsistency}%
-- ADX (Trend Strength): ${trendData.adx}
-- RSI: ${trendData.rsi}
-- MACD Histogram: ${trendData.macdHistogram > 0 ? '+' : ''}${trendData.macdHistogram.toFixed(4)}
-- StochRSI: K=${trendData.stochRSI.k}, D=${trendData.stochRSI.d}, Signal=${trendData.stochRSI.signal}
-- Bollinger %B: ${trendData.bollingerBands.percentB}% ${trendData.bollingerBands.squeeze ? '(SQUEEZE)' : ''}
-- Momentum Confirmed: ${trendData.momentum.confirms}
-- Momentum Divergence: ${trendData.momentum.divergence}
-- Volume Confirms: ${trendData.volumeConfirms}
+- Primary Trend: ${mfs.primaryTrend} (${mfs.confidence}% confidence)
+- ADX (Trend Strength): ${mfs.adx} (slope: ${mfs.adxSlope > 0 ? '+' : ''}${mfs.adxSlope.toFixed(2)})
+- RSI (1h): ${mfs.rsi1h}
+- MACD Histogram (1h): ${mfs.macdHistogram1h > 0 ? '+' : ''}${mfs.macdHistogram1h.toFixed(4)}
+- StochRSI (1h): K=${mfs.stochRsi1h.k}, D=${mfs.stochRsi1h.d}, Signal=${mfs.stochRsi1h.signal}
+- Bollinger %B (1h): ${mfs.bollingerBands1h.percentB}% ${mfs.bollingerBands1h.squeeze ? '(SQUEEZE)' : ''}
+- Momentum State: ${mfs.momentumState} | Confirmed: ${mfs.momentumConfirms} | Divergence: ${mfs.momentumDivergence}
+- Volume Confirms: ${mfs.volumeConfirms}
+- ATR%: ${mfs.atrPercent.toFixed(2)}%
+${mfs.regime ? `- Market Regime: ${mfs.regime}` : ''}
 
 **Trade Setup:**
 - Strategy: ${strategyName}
@@ -154,21 +160,21 @@ Evaluate the signal quality and provide your analysis.`;
       if (response.status === 429) {
         console.warn("AI rate limit - using fallback analysis");
         return new Response(
-          JSON.stringify(getFallbackAnalysis(trendData, signalType)),
+          JSON.stringify(getFallbackAnalysis(mfs, signalType)),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       if (response.status === 402) {
         console.warn("AI credits exhausted - using fallback analysis");
         return new Response(
-          JSON.stringify(getFallbackAnalysis(trendData, signalType)),
+          JSON.stringify(getFallbackAnalysis(mfs, signalType)),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       const errorText = await response.text();
       console.error("AI gateway error:", response.status, errorText);
       return new Response(
-        JSON.stringify(getFallbackAnalysis(trendData, signalType)),
+        JSON.stringify(getFallbackAnalysis(mfs, signalType)),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -179,7 +185,7 @@ Evaluate the signal quality and provide your analysis.`;
     if (!toolCall?.function?.arguments) {
       console.warn("AI response missing tool call - using fallback");
       return new Response(
-        JSON.stringify(getFallbackAnalysis(trendData, signalType)),
+        JSON.stringify(getFallbackAnalysis(mfs, signalType)),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -210,7 +216,7 @@ Evaluate the signal quality and provide your analysis.`;
           position_size_multiplier: analysis.positionSizeMultiplier,
           risk_level: analysis.riskLevel,
           key_factors: analysis.keyFactors,
-          trend_data: trendData,
+          trend_data: mfs, // Store MFS snapshot for audit
           entry_price: entryPrice,
           stop_loss: stopLoss,
           take_profit: takeProfit
@@ -244,25 +250,32 @@ Evaluate the signal quality and provide your analysis.`;
   }
 });
 
-// Fallback analysis when AI is unavailable
-function getFallbackAnalysis(trendData: SignalAnalysisRequest['trendData'], signalType: string): { success: boolean; analysis: AIAnalysisResult; fallback: boolean } {
+// Fallback analysis when AI is unavailable — uses MFS fields directly
+function getFallbackAnalysis(mfs: SignalAnalysisRequest['mfs'], signalType: string): { success: boolean; analysis: AIAnalysisResult; fallback: boolean } {
   const keyFactors: string[] = [];
   let confidenceAdj = 0;
   let sizeMultiplier = 1.0;
   let riskLevel: "low" | "medium" | "high" = "medium";
 
-  // ADX analysis - Uses centralized ADX_THRESHOLDS
-  if (trendData.adx >= ADX_THRESHOLDS.VERY_STRONG) {
+  // ADX analysis
+  if (mfs.adx >= ADX_THRESHOLDS.VERY_STRONG) {
     keyFactors.push(`Strong trend (ADX ≥${ADX_THRESHOLDS.VERY_STRONG})`);
     confidenceAdj += 5;
-  } else if (trendData.adx < ADX_THRESHOLDS.MINIMUM) {
+  } else if (mfs.adx < ADX_THRESHOLDS.MINIMUM) {
     keyFactors.push(`Weak trend (ADX <${ADX_THRESHOLDS.MINIMUM})`);
     confidenceAdj -= 5;
     sizeMultiplier *= 0.8;
   }
 
+  // ADX slope context
+  if (mfs.adxSlope < -1.5) {
+    keyFactors.push(`ADX declining fast (slope ${mfs.adxSlope.toFixed(1)})`);
+    confidenceAdj -= 3;
+    sizeMultiplier *= 0.9;
+  }
+
   // Momentum confirmation
-  if (trendData.momentum.confirms) {
+  if (mfs.momentumConfirms) {
     keyFactors.push("Momentum confirmed");
     confidenceAdj += 5;
   } else {
@@ -272,7 +285,7 @@ function getFallbackAnalysis(trendData: SignalAnalysisRequest['trendData'], sign
   }
 
   // Divergence warning
-  if (trendData.momentum.divergence) {
+  if (mfs.momentumDivergence) {
     keyFactors.push("⚠️ Divergence detected");
     confidenceAdj -= 10;
     sizeMultiplier *= 0.7;
@@ -281,34 +294,34 @@ function getFallbackAnalysis(trendData: SignalAnalysisRequest['trendData'], sign
 
   // StochRSI extremes
   const isLong = signalType === "long";
-  if (isLong && trendData.stochRSI.signal === "overbought") {
+  if (isLong && mfs.stochRsi1h.signal === "overbought") {
     keyFactors.push("StochRSI overbought (risky for LONG)");
     confidenceAdj -= 5;
     riskLevel = "high";
-  } else if (!isLong && trendData.stochRSI.signal === "oversold") {
+  } else if (!isLong && mfs.stochRsi1h.signal === "oversold") {
     keyFactors.push("StochRSI oversold (risky for SHORT)");
     confidenceAdj -= 5;
     riskLevel = "high";
   }
 
   // Volume confirmation
-  if (trendData.volumeConfirms) {
+  if (mfs.volumeConfirms) {
     keyFactors.push("Volume confirms trend");
     confidenceAdj += 3;
   }
 
   // Bollinger squeeze
-  if (trendData.bollingerBands.squeeze) {
+  if (mfs.bollingerBands1h.squeeze) {
     keyFactors.push("Bollinger squeeze (breakout potential)");
     sizeMultiplier *= 1.1;
   }
 
   // Determine recommendation
   let recommendation: AIAnalysisResult['recommendation'] = "normal_entry";
-  if (confidenceAdj >= 10 && !trendData.momentum.divergence) {
+  if (confidenceAdj >= 10 && !mfs.momentumDivergence) {
     recommendation = "strong_entry";
     riskLevel = "low";
-  } else if (confidenceAdj <= -10 || trendData.momentum.divergence) {
+  } else if (confidenceAdj <= -10 || mfs.momentumDivergence) {
     recommendation = "caution";
   }
 
@@ -319,7 +332,7 @@ function getFallbackAnalysis(trendData: SignalAnalysisRequest['trendData'], sign
       recommendation,
       confidenceAdjustment: Math.max(-20, Math.min(20, confidenceAdj)),
       positionSizeMultiplier: Math.max(0.5, Math.min(1.5, sizeMultiplier)),
-      reasoning: "Fallback analysis based on technical indicators due to AI service unavailability.",
+      reasoning: "Fallback analysis based on MFS technical indicators due to AI service unavailability.",
       keyFactors: keyFactors.slice(0, 5),
       riskLevel
     }
