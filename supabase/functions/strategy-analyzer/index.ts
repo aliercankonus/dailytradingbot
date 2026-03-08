@@ -2301,7 +2301,7 @@ serve(async (req) => {
     };
 
     // Fetch 5m klines for LTF micro-momentum analysis (DB-cached by kline-collector)
-    const fetchLtfKlines = async (symbol: string): Promise<{ klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[] }> => {
+    const fetchLtfKlines = async (symbol: string): Promise<{ klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[]; rawKlines5m: any[]; rawPrices5m: number[] }> => {
       try {
         const [klines5m, klines1m] = await Promise.all([
           getKlines(symbol, "5m", 100),
@@ -2314,6 +2314,9 @@ serve(async (req) => {
           prices5m: closed5m.map((k: any) => parseFloat(k[4])),
           klines1m: closed1m,
           prices1m: closed1m.map((k: any) => parseFloat(k[4])),
+          // RAW klines INCLUDING live candle — for tactical trap detection (wick rejection, sweep)
+          rawKlines5m: klines5m,
+          rawPrices5m: klines5m.map((k: any) => parseFloat(k[4])),
         };
       } catch (error) {
         logger.forSymbol(symbol).debug(`Failed to fetch LTF klines: ${error}`);
