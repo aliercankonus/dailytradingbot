@@ -436,6 +436,7 @@ export function buildMarketFeatureSnapshot(
     adx,
     adxSlope: adxSlopeResult.slope,
     adxRising: adxSlopeResult.isRising,
+    adxArray: trendData?.volatility?.adxArray ?? [],
     adx15m: trendData?.volatility?.adx15m,
     adx30m: trendData?.volatility?.adx30m,
     adx4h: trendData?.volatility?.adx4h,
