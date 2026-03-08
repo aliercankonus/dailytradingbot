@@ -2295,6 +2295,27 @@ serve(async (req) => {
       }
     };
 
+    // Fetch 5m klines for LTF micro-momentum analysis (DB-cached by kline-collector)
+    const fetchLtfKlines = async (symbol: string): Promise<{ klines5m: any[]; prices5m: number[]; klines1m: any[]; prices1m: number[] }> => {
+      try {
+        const [klines5m, klines1m] = await Promise.all([
+          getKlines(symbol, "5m", 100),
+          getKlines(symbol, "1m", 60),
+        ]);
+        const closed5m = klines5m.length > 1 ? klines5m.slice(0, -1) : klines5m;
+        const closed1m = klines1m.length > 1 ? klines1m.slice(0, -1) : klines1m;
+        return {
+          klines5m: closed5m,
+          prices5m: closed5m.map((k: any) => parseFloat(k[4])),
+          klines1m: closed1m,
+          prices1m: closed1m.map((k: any) => parseFloat(k[4])),
+        };
+      } catch (error) {
+        logger.forSymbol(symbol).debug(`Failed to fetch LTF klines: ${error}`);
+        return { klines5m: [], prices5m: [], klines1m: [], prices1m: [] };
+      }
+    };
+
     // Fetch market data in parallel using shared Binance utilities - use filtered activeSymbols
     const symbolsList = activeSymbols.map((s) => s.symbol);
     const [marketDataResults, historicalResults] = await Promise.all([

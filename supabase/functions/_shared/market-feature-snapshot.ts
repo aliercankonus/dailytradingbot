@@ -763,6 +763,8 @@ export function buildMarketFeatureSnapshot(
     // Raw klines
     klines15m: trendData?.klines15m ?? [],
     klines30m: trendData?.klines30m ?? [],
+    klines5m: trendData?.klines5m ?? [],
+    klines1m: trendData?.klines1m ?? [],
     
     // Top-level volume ratio
     volumeRatio: trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0,
