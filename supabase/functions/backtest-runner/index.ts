@@ -227,6 +227,67 @@ function buildBacktestMFS(
   if (stochResult.k >= 80) barsOverbought = 1;
   if (stochResult.k <= 20) barsOversold = 1;
 
+  // ===== FIX #1: Rich momentum state mapping (production-accurate) =====
+  const derivedMomentumState = (() => {
+    const score = momentumResult.score;
+    const absScore = Math.abs(score);
+    const phase = momentumResult.phase;
+    const dir = momentumResult.direction;
+    if (dir !== "neutral" && absScore >= 15 && (phase === "strong_bullish" || phase === "strong_bearish" || phase === "bullish" || phase === "bearish")) return "confirmed";
+    if (dir !== "neutral" && absScore >= 8 && momentumResult.isAccelerating) return "building";
+    if (dir !== "neutral" && absScore >= 5) return "building";
+    if (absScore > 0 && absScore < 8) return "mixed";
+    if (phase === "transition_up" || phase === "transition_down") return "mixed";
+    return "none";
+  })();
+
+  // ===== FIX #2: Lower momentumConfirms threshold =====
+  const derivedMomentumConfirms = Math.abs(momentumResult.score) >= 8 && momentumResult.direction !== "neutral";
+
+  // ===== FIX #3: Simulated multi-TF from sub-sampling =====
+  const closes4hProxy = closes.filter((_, idx) => idx % 4 === 0);
+  let trend4h = primaryTrend;
+  let confidence4h = confidence;
+  if (closes4hProxy.length > 50) {
+    const ema9_4h = calculateEMA(closes4hProxy, 9);
+    const ema21_4h = calculateEMA(closes4hProxy, 21);
+    const ema50_4h = calculateEMA(closes4hProxy, 50);
+    const bullish4h = ema9_4h > ema21_4h && ema21_4h > ema50_4h;
+    const bearish4h = ema9_4h < ema21_4h && ema21_4h < ema50_4h;
+    trend4h = bullish4h ? 'bullish' : bearish4h ? 'bearish' : 'neutral';
+    const spread4h = Math.abs((ema9_4h - ema21_4h) / ema21_4h) * 100;
+    confidence4h = Math.min(80, 40 + spread4h * 8);
+  }
+  const closes30mProxy = closes.filter((_, idx) => idx % 2 === 0);
+  let trend30m = primaryTrend;
+  if (closes30mProxy.length > 50) {
+    const ema9_30m = calculateEMA(closes30mProxy, 9);
+    const ema21_30m = calculateEMA(closes30mProxy, 21);
+    trend30m = ema9_30m > ema21_30m ? 'bullish' : ema9_30m < ema21_30m ? 'bearish' : 'neutral';
+  }
+
+  // ===== FIX #4: Proper trueAlignment scoring =====
+  const alignedTFs = [trend4h, primaryTrend, trend30m];
+  const bullishCount = alignedTFs.filter(t => t === 'bullish').length;
+  const bearishCount = alignedTFs.filter(t => t === 'bearish').length;
+  const maxAligned = Math.max(bullishCount, bearishCount);
+  const trueAlignmentScore = maxAligned === 3 ? 85 : maxAligned === 2 ? 60 : adxResult.adx >= 25 ? 45 : 25;
+  const adxContribution = adxResult.adx >= 35 ? 20 : adxResult.adx >= 25 ? 15 : adxResult.adx >= 20 ? 10 : 5;
+  const totalWeightedConf = (confidence4h * 0.4 + confidence * 0.35 + (trend30m !== 'neutral' ? 60 : 30) * 0.25);
+  const trendConsistency = maxAligned === 3 ? 80 : maxAligned === 2 ? 60 : 35;
+
+  const tf4h: TimeframeFeatures = {
+    trend: trend4h, confidence: confidence4h, rsi,
+    emaSignal: trend4h === 'bullish' ? 'bullish' : trend4h === 'bearish' ? 'bearish' : 'neutral',
+    macd: macdResult.macd, macdSignal: macdResult.signal,
+    macdHistogram: macdHist, macdTrend: macdExpanding ? "expanding" : "contracting",
+  };
+  const tf30m: TimeframeFeatures = {
+    trend: trend30m, confidence: trend30m !== 'neutral' ? 55 : 30, rsi,
+    emaSignal: trend30m === 'bullish' ? 'bullish' : trend30m === 'bearish' ? 'bearish' : 'neutral',
+    macd: 0, macdSignal: 0, macdHistogram: 0, macdTrend: "neutral",
+  };
+
   const mfs: MarketFeatureSnapshot = {
     symbol, currentPrice,
     timestamp: new Date().toISOString(),
