@@ -1416,7 +1416,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // ACCEPTABLE: StochRSI bullish cross = reversal from pullback
-    if (stochRsi.bullishCrossCount >= 1) {
+    if (mfs.stochRsiAggregated.bullishCrossCount >= 1) {
       const baseScore = 12 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bullish pullback: StochRSI bullish cross" + mtfSuffix);
       return {
@@ -1470,7 +1470,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // AVOID: Overbought in weak trend
-    if (rsi > RSI_THRESHOLDS.OVERBOUGHT || stochRsi.overboughtCount >= 2) {
+    if (rsi > RSI_THRESHOLDS.OVERBOUGHT || mfs.stochRsiAggregated.overboughtCount >= 2) {
       return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 0, reason: "Avoid: Overbought in weak trend" };
     }
   }
@@ -1516,7 +1516,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // ACCEPTABLE: StochRSI bearish cross
-    if (stochRsi.bearishCrossCount >= 1) {
+    if (mfs.stochRsiAggregated.bearishCrossCount >= 1) {
       const baseScore = 12 + mtfBonus;
       const weighted = applyStochRsiWeight(baseScore, "Bearish rally: StochRSI bearish cross" + mtfSuffix);
       return { isPullback: true, hasBothConditions: false, pullbackDepth: 25, entryTimingScore: weighted.score, reason: weighted.reason };
@@ -1558,7 +1558,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // AVOID: Oversold in weak downtrend
-    if (rsi < RSI_THRESHOLDS.OVERSOLD || stochRsi.oversoldCount >= 2) {
+    if (rsi < RSI_THRESHOLDS.OVERSOLD || mfs.stochRsiAggregated.oversoldCount >= 2) {
       return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 0, reason: "Avoid: Oversold in weak downtrend" };
     }
   }
