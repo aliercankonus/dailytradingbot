@@ -51,8 +51,6 @@ export interface MarketContext {
   adxSlope: number;
   primaryTrend: string;
   momentumScore: number;
-  /** @deprecated kept for backward compat — callers should migrate to direct fields */
-  trendData?: any;
 }
 
 export interface UserExitSettings {

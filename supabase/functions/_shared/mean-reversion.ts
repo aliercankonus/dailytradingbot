@@ -858,9 +858,7 @@ function checkOverboughtExhaustion(mfs: MarketFeatureSnapshot): ExhaustionCheck 
  * Runs BEFORE blocking gates to prevent gate collision
  * Returns signal with direction-aware gate bypasses
  * 
- * MFS MIGRATION: Now accepts MarketFeatureSnapshot directly.
- * The trendData parameter is fully removed — all reads come from mfs.
- * 
+ * @param mfs - MarketFeatureSnapshot for the symbol
  * @param options.skipRegimeGating - When true, bypasses isMeanReversionAllowed() check.
  */
 export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipRegimeGating?: boolean }): ExhaustionSignal {
