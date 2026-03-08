@@ -12389,7 +12389,7 @@ serve(async (req) => {
             const bypassType = stealthHTFBypassPath ? 'STEALTH_TREND' : isParabolicMode ? 'PARABOLIC' : highADXBypassPath ? 'HIGH_ADX' : hasRelaxedAlignment ? 'RELAXED_ALIGN' : alternativeBypassPath ? 'RISING_SLOPE' : 'BASIC';
             
             // FIX #2 (Audit): Re-calculate reversal score with stricter StochRSI cap to prevent double punishment
-            const bypassedReversalScore = calculateUnifiedReversalScore(trendData, trend, symbol, { stochRSITier2Bypassed: true }, mfs);
+            const bypassedReversalScore = calculateUnifiedReversalScore(mfs, trend, symbol, { stochRSITier2Bypassed: true });
             reversalPositionMultiplier = bypassedReversalScore.positionSizeMultiplier;
             
             logger.forSymbol(symbol).info(`${LOG_CATEGORIES.SUCCESS} ${stealthHTFBypassPath ? '🕵️' : ''} HTF BYPASS [${bypassType}]: Allowing SHORT at 4h oversold`);
