@@ -780,8 +780,8 @@ async function runBacktest(
               pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
               exitReason: exitResult.exitReason, entryScore: pos.entryScore,
               stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
-              qualityScore: pos.qualityScore, momentumScore: 0,
-              adx: adxResult.adx, stochK: 0, strategyName: pos.strategyName,
+              qualityScore: pos.qualityScore, momentumScore: momResult.score,
+              adx: adxResult.adx, stochK: wCloses.length > 14 ? calculateStochasticRSI(wCloses, 14, 14, 3, 3).k : 0, strategyName: pos.strategyName,
             });
 
             const positionSize = equity * 0.015 * 1.0; // 1.5% base
