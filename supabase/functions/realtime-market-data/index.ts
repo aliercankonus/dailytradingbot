@@ -85,16 +85,129 @@ serve(async (req) => {
 
   const { socket, response } = Deno.upgradeWebSocket(req);
   
-  let binanceSocket: WebSocket | null = null;
+  let binanceTickerSocket: WebSocket | null = null;
+  let binanceKlineSocket: WebSocket | null = null;
   let reconnectAttempts = 0;
   let reconnectTimeout: number | null = null;
   let heartbeatInterval: number | null = null;
+  let klineDbFlushInterval: number | null = null;
 
   // Parse symbols from query params or use defaults
   const symbolsParam = reqUrl.searchParams.get('symbols');
   const symbols: string[] = symbolsParam ? JSON.parse(symbolsParam) : ['BTCUSDT', 'ETHUSDT'];
   
   console.log('[MarketData-Edge] Subscribing to symbols:', symbols);
+
+  // ===== KLINE MEMORY STORE =====
+  // Collect kline candles in memory and periodically flush to DB
+  const klineCandleStore: Map<string, Map<string, any[]>> = new Map();
+  const KLINE_INTERVALS = ['1h']; // Start with 1h, extend later
+  const KLINE_FLUSH_INTERVAL = 60000; // Flush to DB every 60s
+  const MAX_CANDLES = 200;
+
+  function processKlineMessage(data: any) {
+    if (!data.data || !data.data.k) return;
+    const k = data.data.k;
+    const symbol = k.s;
+    const interval = k.i;
+    const isClosed = k.x;
+
+    if (!klineCandleStore.has(symbol)) {
+      klineCandleStore.set(symbol, new Map());
+    }
+    const symbolStore = klineCandleStore.get(symbol)!;
+    if (!symbolStore.has(interval)) {
+      symbolStore.set(interval, []);
+    }
+    const candles = symbolStore.get(interval)!;
+
+    // Build candle in Binance REST format for compatibility
+    const candle = [
+      k.t, String(k.o), String(k.h), String(k.l), String(k.c),
+      String(k.v), k.T, String(k.q), k.n, String(k.V), String(k.Q), "0"
+    ];
+
+    if (isClosed) {
+      candles.push(candle);
+      if (candles.length > MAX_CANDLES) candles.shift();
+    } else {
+      // Update the last open candle
+      if (candles.length > 0) {
+        const last = candles[candles.length - 1];
+        if (last[0] === k.t) {
+          candles[candles.length - 1] = candle;
+        }
+      }
+    }
+  }
+
+  async function flushKlinesToDb() {
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL");
+      const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (!supabaseUrl || !supabaseKey) return;
+
+      const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.84.0");
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      let flushed = 0;
+      for (const [symbol, intervals] of klineCandleStore) {
+        for (const [interval, candles] of intervals) {
+          if (candles.length < 5) continue; // Don't write sparse data
+          
+          await supabase.from('kline_cache').upsert({
+            symbol,
+            interval,
+            candles,
+            candle_count: candles.length,
+            source: 'websocket',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'symbol,interval' });
+          flushed++;
+        }
+      }
+      if (flushed > 0) {
+        console.log(`[MarketData-Edge] 📦 Flushed ${flushed} kline caches to DB via WebSocket`);
+      }
+    } catch (e) {
+      console.error('[MarketData-Edge] Kline DB flush error:', e);
+    }
+  }
+
+  // ===== KLINE WEBSOCKET =====
+  const connectKlineStream = () => {
+    try {
+      const klineStreams = symbols
+        .flatMap(s => KLINE_INTERVALS.map(i => `${s.toLowerCase()}@kline_${i}`))
+        .join('/');
+      const klineUrl = `wss://stream.binance.com/stream?streams=${klineStreams}`;
+      
+      console.log('[MarketData-Edge] Connecting kline stream:', klineUrl);
+      binanceKlineSocket = new WebSocket(klineUrl);
+      
+      binanceKlineSocket.onopen = () => {
+        console.log('[MarketData-Edge] Kline WebSocket connected');
+      };
+      
+      binanceKlineSocket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          processKlineMessage(data);
+        } catch {}
+      };
+      
+      binanceKlineSocket.onerror = () => {};
+      binanceKlineSocket.onclose = () => {
+        console.log('[MarketData-Edge] Kline WebSocket closed');
+        // Reconnect if client is still connected
+        if (socket.readyState === WebSocket.OPEN) {
+          setTimeout(connectKlineStream, 5000);
+        }
+      };
+    } catch (e) {
+      console.error('[MarketData-Edge] Kline stream error:', e);
+    }
+  };
 
   const connectToBinance = () => {
     try {
@@ -103,9 +216,9 @@ serve(async (req) => {
       
       console.log('[MarketData-Edge] Connecting to Binance:', binanceUrl);
       
-      binanceSocket = new WebSocket(binanceUrl);
+      binanceTickerSocket = new WebSocket(binanceUrl);
       
-      binanceSocket.onopen = () => {
+      binanceTickerSocket.onopen = () => {
         console.log('[MarketData-Edge] Connected to Binance WebSocket');
         reconnectAttempts = 0;
         
@@ -119,7 +232,7 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onmessage = (event) => {
+      binanceTickerSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           
@@ -160,7 +273,7 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onerror = (error: Event | ErrorEvent) => {
+      binanceTickerSocket.onerror = (error: Event | ErrorEvent) => {
         const errorDetail = error instanceof ErrorEvent 
           ? `message=${error.message || 'unknown'} type=${error.type}` 
           : `type=${error.type}`;
@@ -174,7 +287,7 @@ serve(async (req) => {
         }
       };
 
-      binanceSocket.onclose = (event) => {
+      binanceTickerSocket.onclose = (event) => {
         console.log(`[MarketData-Edge] Binance WebSocket closed (code: ${event.code}, reason: ${event.reason || 'none'})`);
         
         // Don't reconnect if client has disconnected
@@ -219,6 +332,7 @@ serve(async (req) => {
     console.log('[MarketData-Edge] Client WebSocket opened');
     activeConnections++;
     connectToBinance();
+    connectKlineStream(); // Start kline WS → DB cache
     
     // Start heartbeat to keep connection alive
     heartbeatInterval = setInterval(() => {
@@ -226,6 +340,9 @@ serve(async (req) => {
         socket.send(JSON.stringify({ type: 'heartbeat' }));
       }
     }, HEARTBEAT_INTERVAL);
+    
+    // Periodically flush kline data to DB
+    klineDbFlushInterval = setInterval(flushKlinesToDb, KLINE_FLUSH_INTERVAL);
   };
 
   socket.onmessage = (event) => {
@@ -246,9 +363,12 @@ serve(async (req) => {
       ? `message=${error.message || 'unknown'} type=${error.type}` 
       : `type=${error.type}`;
     console.error(`[MarketData-Edge] Client WebSocket error: ${errorDetail}`);
-    // Close Binance connection on client error
-    if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
-      binanceSocket.close();
+    // Close Binance connections on client error
+    if (binanceTickerSocket && binanceTickerSocket.readyState === WebSocket.OPEN) {
+      binanceTickerSocket.close();
+    }
+    if (binanceKlineSocket && binanceKlineSocket.readyState === WebSocket.OPEN) {
+      binanceKlineSocket.close();
     }
   };
 
@@ -256,18 +376,33 @@ serve(async (req) => {
     console.log('[MarketData-Edge] Client WebSocket closed - cleaning up resources');
     activeConnections = Math.max(0, activeConnections - 1);
     
-    // Clean up Binance connection
-    if (binanceSocket) {
-      if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
-        binanceSocket.close();
+    // Final flush of kline data before cleanup
+    flushKlinesToDb().catch(() => {});
+    
+    // Clean up Binance ticker connection
+    if (binanceTickerSocket) {
+      if (binanceTickerSocket.readyState === WebSocket.OPEN || binanceTickerSocket.readyState === WebSocket.CONNECTING) {
+        binanceTickerSocket.close();
       }
-      binanceSocket = null;
+      binanceTickerSocket = null;
+    }
+    
+    // Clean up Binance kline connection
+    if (binanceKlineSocket) {
+      if (binanceKlineSocket.readyState === WebSocket.OPEN || binanceKlineSocket.readyState === WebSocket.CONNECTING) {
+        binanceKlineSocket.close();
+      }
+      binanceKlineSocket = null;
     }
     
     // Clear intervals and timeouts
     if (heartbeatInterval !== null) {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
+    }
+    if (klineDbFlushInterval !== null) {
+      clearInterval(klineDbFlushInterval);
+      klineDbFlushInterval = null;
     }
     if (reconnectTimeout !== null) {
       clearTimeout(reconnectTimeout);

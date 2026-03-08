@@ -366,8 +366,60 @@ export async function getOrderBookSpread(symbol: string): Promise<{ bid: number;
 }
 
 /**
- * Fetch klines (candlestick data) from Binance
- * Features: 5s timeout, in-memory cache, bounded concurrency, exponential backoff retry
+ * Try to read klines from the DB-backed kline_cache table.
+ * Returns null if stale or unavailable — caller falls back to REST.
+ */
+async function fetchKlinesFromDbCache(
+  symbol: string,
+  interval: string,
+  limit: number
+): Promise<any[] | null> {
+  try {
+    const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.84.0");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !supabaseKey) return null;
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const { data, error } = await supabase
+      .from('kline_cache')
+      .select('candles, candle_count, updated_at, source')
+      .eq('symbol', symbol)
+      .eq('interval', interval)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    // Check freshness: use same TTL logic as in-memory cache
+    const ttl = getKlineCacheTTL(interval);
+    const age = Date.now() - new Date(data.updated_at).getTime();
+    if (age > ttl) {
+      logger.debug(`DB_CACHE_STALE ${symbol} ${interval} age=${Math.round(age / 1000)}s > ttl=${Math.round(ttl / 1000)}s`);
+      return null;
+    }
+
+    const candles = data.candles as any[];
+    if (!Array.isArray(candles) || candles.length === 0) return null;
+
+    // Trim to requested limit
+    const result = candles.length > limit ? candles.slice(-limit) : candles;
+    cacheHits++;
+    logger.info(`📦 DB_CACHE_HIT ${symbol} ${interval} (age=${Math.round(age / 1000)}s, source=${data.source}, ${result.length} candles)`);
+    return result;
+  } catch (err) {
+    logger.debug(`DB cache read failed for ${symbol}/${interval}: ${err}`);
+    return null;
+  }
+}
+
+/**
+ * Fetch klines (candlestick data) — DB cache → in-memory cache → Binance REST.
+ * 
+ * Priority:
+ * 1. DB kline_cache (populated by kline-collector cron or WS stream)
+ * 2. In-memory cache (same edge function invocation)
+ * 3. Binance REST with timeout, concurrency limit, and retry
+ * 
  * @alias getKlines - Preferred name for consistency
  */
 export async function fetchKlines(
@@ -376,7 +428,7 @@ export async function fetchKlines(
   limit: number = 100,
   retries: number = 2
 ): Promise<any[]> {
-  // Check cache first
+  // 1) Check in-memory cache first (fastest, same invocation only)
   const cacheKey = `${symbol}_${interval}_${limit}`;
   const cached = klineCache.get(cacheKey);
   const ttl = getKlineCacheTTL(interval);
@@ -386,8 +438,18 @@ export async function fetchKlines(
     logger.debug(`CACHE_HIT ${symbol} ${interval} (age=${Math.round((Date.now() - cached.ts) / 1000)}s, ttl=${Math.round(ttl / 1000)}s)`);
     return cached.data;
   }
+
+  // 2) Check DB-backed cache (populated by kline-collector cron or WS)
+  const dbCached = await fetchKlinesFromDbCache(symbol, interval, limit);
+  if (dbCached) {
+    // Also warm the in-memory cache for subsequent calls in same invocation
+    klineCache.set(cacheKey, { data: dbCached, ts: Date.now() });
+    return dbCached;
+  }
+
   cacheMisses++;
 
+  // 3) Fall back to Binance REST
   let lastError: Error | null = null;
   
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -410,7 +472,7 @@ export async function fetchKlines(
       const result = Array.isArray(klines) ? klines : [];
       const elapsed = Math.round(performance.now() - start);
       
-      // Store in cache
+      // Store in in-memory cache
       klineCache.set(cacheKey, { data: result, ts: Date.now() });
       fetchOkCount++;
       logger.debug(`FETCH_OK ${symbol} ${interval} ${elapsed}ms (${result.length} candles)`);
