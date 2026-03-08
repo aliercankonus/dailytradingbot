@@ -5654,8 +5654,8 @@ serve(async (req) => {
 
         // ============= PHASE 4 (9 FINDINGS): ENHANCED MARKET REGIME DETECTION =============
         // Finding 2 & 5: Use quantified regime score with graduated penalties
-        const regimeEnhanced = detectMarketRegimeEnhanced(trendData);
-        const regime = detectMarketRegime(trendData);  // Keep legacy for compatibility
+        const regimeEnhanced = detectMarketRegimeEnhanced(mfs);
+        const regime = detectMarketRegime(mfs);  // Keep legacy for compatibility
         
         if (!regimeEnhanced.tradeable) {
           rejectedByRegime++;
