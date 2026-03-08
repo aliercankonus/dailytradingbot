@@ -8690,7 +8690,7 @@ serve(async (req) => {
                 // Context for debugging
                 swingHigh24h: priceDistance?.high24h,
                 swingLow24h: priceDistance?.low24h,
-                currentPrice: trendData.currentPrice,
+                currentPrice: mfs.currentPrice,
               },
               mfs,
               riskParams.ai_analysis_enabled !== false,
