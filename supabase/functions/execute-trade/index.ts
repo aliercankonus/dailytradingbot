@@ -975,17 +975,16 @@ serve(async (req) => {
 
         // FILTER 7: Avoid extremely low volume periods (< 20% of average)
         // RELAXATION: Allow 10% of average if ADX is rising AND 30m+1h agree (trend forming)
-        const adx = trendData?.volatility?.adx || 0;
-        const adxRising = trendData?.momentum?.adxRising === true || 
-          (trendData?.volatility?.adxSlope && trendData.volatility.adxSlope > 0);
-        const trend30m = trendData?.timeframes?.['30m']?.trend || "neutral";
-        const trend1h = trendData?.timeframes?.['1h']?.trend || "neutral";
-        const conf30m = trendData?.timeframes?.['30m']?.confidence || 0;
-        const conf1h = trendData?.timeframes?.['1h']?.confidence || 0;
+        const adx = mfs.adx;
+        const adxRising = mfs.adxSlope.isRising;
+        const trend30m = mfs.timeframes['30m'].trend || "neutral";
+        const trend1h = mfs.timeframes['1h'].trend || "neutral";
+        const conf30m = mfs.timeframes['30m'].confidence || 0;
+        const conf1h = mfs.timeframes['1h'].confidence || 0;
         
         // Check for trend formation conditions
         // FIX: Require 4h trend alignment for volume relaxation to prevent counter-trend entries
-        const trend4h = trendData?.timeframes?.['4h']?.trend || "neutral";
+        const trend4h = mfs.timeframes['4h'].trend || "neutral";
         const signalDirection = signal.signal_type === 'long' ? 'bullish' : 'bearish';
         
         // FIX: Volume relaxation only applies when 4h trend matches signal direction (or is neutral)
