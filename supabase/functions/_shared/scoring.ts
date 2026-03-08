@@ -3884,7 +3884,7 @@ export const deriveTradeDirection = (
   // If price has moved strongly (2%+) in a clear direction, use that direction
   // even when all timeframes show neutral. This catches continuation moves.
   // PHASE 1 FIX: But ONLY if it aligns with HTF trend OR HTF is neutral
-  const priceActionMomentum = trendData.priceActionMomentum;
+  const priceActionMomentum = mfs.priceActionMomentum;
   if (priceActionMomentum?.canOverrideNeutralAlignment && priceActionMomentum?.hasStrongMove) {
     const priceDirection = priceActionMomentum.direction;
     const movePercent = Math.abs(priceActionMomentum.movePercent || 0);
