@@ -17,7 +17,7 @@ import {
   SheetContent,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings, User, Bell } from "lucide-react";
+import { LogOut, Menu, LayoutDashboard, BarChart3, Coins, HeartPulse, Settings, User, Bell, FlaskConical } from "lucide-react";
 import { useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "react-router-dom";
