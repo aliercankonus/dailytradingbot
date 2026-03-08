@@ -677,23 +677,20 @@ function checkOversoldExhaustion(mfs: MarketFeatureSnapshot): ExhaustionCheck {
 
 // ============= OVERBOUGHT EXHAUSTION CHECK (FOR SHORTS) =============
 
-function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
-  const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                 trendData?.stochasticRsi?.['4h']?.k ?? 
-                 trendData?.stochasticRsi?.aggregated?.k ?? 50;
-  const percentB = trendData?.bollingerBands?.['4h']?.percentB ?? 50;
-  const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
-  const htf4h = trendData?.timeframes?.['4h']?.trend ?? trendData?.htfTrend4h ?? 'neutral';
-  const hasDivergence = trendData?.momentum?.hasDivergence ?? false;
-  const momentumDirection = trendData?.momentum?.direction ?? 'neutral';
-  const momentumScore = trendData?.momentum?.score ?? 0;
+function checkOverboughtExhaustion(mfs: MarketFeatureSnapshot): ExhaustionCheck {
+  const stochK = mfs.stochRsi['4h'].k;
+  const percentB = mfs.bollinger['4h'].percentB;
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  const htf4h = mfs.timeframes['4h'].trend;
+  const hasDivergence = mfs.hasDivergence;
+  const momentumDirection = mfs.momentumDirection;
+  const momentumScore = mfs.momentumScore;
   
   // VWAP distance check for extreme exhaustion validation
-  const vwapDistance = trendData?.vwap?.distancePercent ?? 0;
-  const atr = trendData?.volatility?.atr ?? trendData?.atr ?? 0;
-  const currentPrice = trendData?.price ?? trendData?.currentPrice ?? 0;
-  const vwap = trendData?.vwap?.value ?? currentPrice;
+  const atr = mfs.atr;
+  const currentPrice = mfs.currentPrice;
+  const vwap = mfs.vwapValue || currentPrice;
   const atrDistanceFromVwap = atr > 0 && currentPrice > 0 
     ? Math.abs(currentPrice - vwap) / atr 
     : 0;
@@ -710,9 +707,6 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   let tag: string | null = null;
   
   // ===== EXTREME EXHAUSTION DETECTION (K >= 90) =====
-  // When K is at statistical extremes, ADX becomes informational, not blocking
-  // Momentum floor prevents entries when momentum strongly opposes direction
-  // Momentum delta check (Rec #1) confirms buying pressure is easing
   const isDeepExhaustion = stochK >= extremeConfig.SHORT_K_EXTREME;
   const adxNotAccelerating = adxSlope <= extremeConfig.MAX_ADX_SLOPE;
   const sufficientDistance = atrDistanceFromVwap >= extremeConfig.MIN_ATR_DISTANCE_FROM_VWAP;
@@ -721,13 +715,12 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   const extremeMomentumFloor = extremeConfig.MIN_MOMENTUM_SCORE ?? 20;
   const momentumNotOpposing = momentumScore < extremeMomentumFloor;
   
-  // Momentum delta check (Recommendation #1): Confirm buying pressure is easing
-  // For SHORTS: momentum should be declining (delta negative)
-  const prevMomentumScore = trendData?.momentum?.prevScore ?? momentumScore;
+  // Momentum delta check: For SHORTS, momentum should be declining (delta negative)
+  const prevMomentumScore = mfs.prevMomentumScore;
   const momentumDelta = momentumScore - prevMomentumScore;
   const requireDelta = extremeConfig.REQUIRE_MOMENTUM_IMPROVING ?? true;
   const minDelta = extremeConfig.MIN_MOMENTUM_DELTA ?? 15;
-  const momentumImproving = !requireDelta || momentumDelta <= -minDelta; // For SHORT: delta must be negative
+  const momentumImproving = !requireDelta || momentumDelta <= -minDelta;
   
   // Track override reason for diagnostics
   let overrideReason: 'EXTREME_ADX_OVERRIDE' | 'EXTREME_REGIME_OVERRIDE' | 'MODERATE_ADX_SLOPE_OVERRIDE' | null = null;
@@ -737,7 +730,6 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
     exhaustionTier = 'EXTREME';
     triggers.push(`EXTREME EXHAUSTION: K=${stochK.toFixed(1)} >= ${extremeConfig.SHORT_K_EXTREME}, ADX slope=${adxSlope.toFixed(2)} <= ${extremeConfig.MAX_ADX_SLOPE}, VWAP distance=${atrDistanceFromVwap.toFixed(1)} ATRs, momentum=${momentumScore.toFixed(0)} < ${extremeMomentumFloor}, Δmomentum=${momentumDelta.toFixed(0)} <= -${minDelta}`);
   } else if (isDeepExhaustion) {
-    // Log rejection with specific reason
     const reasons: string[] = [];
     if (!momentumNotOpposing) reasons.push(`momentum=${momentumScore.toFixed(0)} >= ${extremeMomentumFloor} (opposing)`);
     if (!momentumImproving) reasons.push(`Δmomentum=${momentumDelta.toFixed(0)} > -${minDelta} (not declining)`);
@@ -747,14 +739,11 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
   }
   
   // ===== MODERATE EXHAUSTION DETECTION (K 85-90) =====
-  // Probabilistic probe - requires momentum confirmation (bearish for shorts)
   if (!isExtremeExhaustion && moderateConfig.ENABLED) {
     const inModerateKRange = stochK >= moderateConfig.SHORT_K_MIN && stochK < moderateConfig.SHORT_K_MAX;
-    // For SHORTS: momentum must be negative (bearish)
     const hasMomentumConfirmation = momentumScore <= -moderateConfig.MIN_MOMENTUM_SCORE;
     const momentumAligned = !moderateConfig.REQUIRE_ALIGNED_MOMENTUM || momentumDirection === 'bearish';
     
-    // ADX check: either ADX <= 35 OR ADX slope <= 0 (trend exhausting)
     const adxInRange = adx <= moderateConfig.MAX_ADX;
     const adxSlopeOverride = moderateConfig.ALLOW_ADX_SLOPE_OVERRIDE && adxSlope <= moderateConfig.MAX_ADX_SLOPE_FOR_OVERRIDE;
     const adxConditionMet = adxInRange || adxSlopeOverride;
@@ -770,7 +759,6 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
       );
       score += 25;
     } else if (inModerateKRange) {
-      // Log why moderate tier wasn't triggered (diagnostic)
       const reasons: string[] = [];
       if (!hasMomentumConfirmation) reasons.push(`momentum ${momentumScore.toFixed(0)} > -${moderateConfig.MIN_MOMENTUM_SCORE}`);
       if (!momentumAligned) reasons.push(`direction ${momentumDirection} != bearish`);
@@ -796,27 +784,23 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
     triggers.push(`ADX=${adx.toFixed(1)} <= ${config.MAX_ADX}`);
     score += 15;
   } else if (isExtremeExhaustion) {
-    // EXTREME EXHAUSTION OVERRIDE: ADX becomes informational, not blocking
     adxWasOverridden = true;
     overrideReason = 'EXTREME_ADX_OVERRIDE';
     triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} → OVERRIDDEN by extreme exhaustion (K=${stochK.toFixed(1)}, ADX slope=${adxSlope.toFixed(2)}) [${overrideReason}]`);
     score += 5;
   } else if (isModerateExhaustion) {
-    // MODERATE EXHAUSTION: ADX already validated via slope override
     overrideReason = 'MODERATE_ADX_SLOPE_OVERRIDE';
     triggers.push(`ADX=${adx.toFixed(1)} validated for moderate exhaustion [${overrideReason}]`);
     score += 5;
   } else {
-    // Normal case: high ADX without extreme exhaustion = even stronger penalty for shorts
     score -= 50;
     triggers.push(`ADX=${adx.toFixed(1)} > ${config.MAX_ADX} (STRONG PENALTY - not in exhaustion tier)`);
   }
   
   // HTF veto for shorts - HARD BLOCK if 4h is bullish
-  // Note: This remains a hard block even during exhaustion tiers
   if (config.REQUIRE_HTF_NOT_BULLISH && htf4h === 'bullish') {
     triggers.push('4h bullish - SHORT blocked');
-    score -= 100; // Hard block
+    score -= 100;
   }
   
   // Require divergence for shorts (relaxed for moderate tier)
