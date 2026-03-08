@@ -1265,21 +1265,8 @@ interface ReversalRiskResult {
 }
 
 const detectReversalRisk = (mfs: MarketFeatureSnapshot, intendedDirection: string): ReversalRiskResult => {
-  // MFS MIGRATION: Build trendData compatibility shim for calculateUnifiedReversalScore
-  // calculateUnifiedReversalScore still uses trendData internally (separate migration)
-  const trendData = {
-    volatility: { adx: mfs.adx, adxSlope: mfs.adxSlope },
-    momentum: { momentumScore: mfs.smartMomentum?.score ?? 0, macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0, stochRsiK: mfs.stochRsi["4h"].k },
-    smartMomentum: mfs.smartMomentum,
-    stochasticRsi: { "4h": { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d }, "1h": { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d } },
-    bollingerBand: { squeeze: mfs.bollinger["4h"].squeeze, percentB: mfs.bollinger["4h"].percentB },
-    regime: { regime: mfs.regime },
-    timeframes: {
-      "4h": { trend: mfs.timeframes["4h"].trend, confidence: mfs.timeframes["4h"].confidence, indicators: { rsi: mfs.timeframes["4h"].rsi } },
-      "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
-    },
-  };
-  const unifiedResult = calculateUnifiedReversalScore(trendData, intendedDirection, "unknown", {}, mfs);
+  // MFS MIGRATION COMPLETE: calculateUnifiedReversalScore now uses MFS directly
+  const unifiedResult = calculateUnifiedReversalScore(mfs, intendedDirection);
   
   return {
     isHighRisk: unifiedResult.decision === "BLOCK",
