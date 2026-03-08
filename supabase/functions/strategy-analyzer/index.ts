@@ -9773,6 +9773,24 @@ serve(async (req) => {
                     );
                     // Track NEAR_24H_LOW expanded fallback event for bounce study
                     await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED_FALLBACK', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                    // Shadow tracking for NEAR_24H_LOW_HARD (expanded fallback)
+                    if (shadowModeEnabled) {
+                      try {
+                        const _dedupSkipNL3 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
+                        if (!_dedupSkipNL3) {
+                          const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                          await supabase.from('shadow_mode_signals').insert({
+                            user_id: userId, symbol, signal_type: derivedDirection,
+                            strategy_name: `Shadow: NEAR_24H_LOW_HARD (expanded fallback)`,
+                            gate_blocked_by: 'NEAR_24H_LOW_HARD',
+                            old_gate_result: 'BLOCKED', new_gate_result: 'WOULD_PASS',
+                            gate_details: { gate: 'NEAR_24H_LOW_HARD', subGate: 'EXPANDED_MOMENTUM_BLOCK', distanceFromLow: distanceFromLow.toFixed(3), adx: adx.toFixed(1), momentum: smartMomentum.score.toFixed(1) },
+                            confidence_score: confidence, entry_price: trendData?.currentPrice,
+                            stop_loss: _shadowSLTP.stopLoss, take_profit: _shadowSLTP.takeProfit, trend: trend || null,
+                          });
+                        }
+                      } catch (e) { /* non-critical */ }
+                    }
                     continue;
                   }
                 }
