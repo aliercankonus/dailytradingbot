@@ -282,7 +282,8 @@ serve(async (req) => {
     } catch (metricsErr) {
       logger.warn(`⏱️ Metrics persist failed: ${metricsErr}`);
     }
-    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms`);
+    const fetchStats = getAndResetFetchStats();
+    logger.info(`⏱️ Total auto-trader cycle: ${totalDurationMs}ms | 🔶 Binance: OK=${fetchStats.fetchOkCount} CACHE_HIT=${fetchStats.cacheHits} CACHE_MISS=${fetchStats.cacheMisses} TIMEOUT=${fetchStats.timeoutCount}`);
 
     return new Response(
       JSON.stringify({
