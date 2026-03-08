@@ -253,6 +253,10 @@ export interface MarketFeatureSnapshot {
       score: number;
       recommendation: string;
       signals: string[];
+      positionMultiplier: number;
+      momentumDeceleration: boolean;
+      accelerationFlip: boolean;
+      priceDivergence: boolean;
     };
     components?: {
       macdSlope: number;
