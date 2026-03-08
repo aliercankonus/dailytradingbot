@@ -23,6 +23,7 @@ import {
   MEAN_REVERSION_REGIME_REQUIREMENTS,
   COUNTER_TREND_ADMISSION
 } from "./constants.ts";
+import type { MarketFeatureSnapshot } from "./market-feature-snapshot.ts";
 
 // ============= TYPE DEFINITIONS =============
 
