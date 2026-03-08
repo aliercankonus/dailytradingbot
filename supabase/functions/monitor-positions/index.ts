@@ -19,7 +19,7 @@ import {
   getConfidencePenalty, 
   getAdxWeight,
   calculateUnifiedReversalScore,
-  // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
+  // Keep extractors for trendData passed to shared modules (exit-strategies expects raw trendData)
   extractADX,
   extractADXSlope,
   extractStochRsiK,
@@ -27,6 +27,7 @@ import {
   extractAtrPercent,
   type UnifiedReversalResult
 } from "../_shared/scoring.ts";
+import { buildMarketFeatureSnapshot, type MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 
 // ============================================================
 // TRUE ALIGNMENT v2.0 EXTRACTION HELPER
