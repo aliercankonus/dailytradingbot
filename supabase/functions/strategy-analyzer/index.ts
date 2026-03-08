@@ -8707,7 +8707,7 @@ serve(async (req) => {
         let ltfConfirmationApplied = false;
         
         if (LTF_CONFIRMATION_GATE.ENABLED) {
-          const priceDistance = trendData.priceDistanceFromSwing;
+          const priceDistance = priceDistanceFromSwing;
           const tf30mDir = mfs.timeframes['30m'].trend || mfs.timeframes['30m'].emaSignal || "neutral";
           const tf1hDir = mfs.timeframes['1h'].trend || mfs.timeframes['1h'].emaSignal || "neutral";
           const tf4hDir = mfs.timeframes['4h'].trend || mfs.timeframes['4h'].emaSignal || "neutral";
