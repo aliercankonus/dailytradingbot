@@ -2423,6 +2423,8 @@ serve(async (req) => {
     const symbolOrderFlowMap = new Map<string, { orderFlow: OrderFlowAnalysis; closes: number[]; direction: "long" | "short"; directionSource: string }>();
     // Collect LTF micro momentum data for batch snapshot update (LTF dashboard)
     const symbolLtfMicroMap = new Map<string, { score5m: number; direction5m: string; score1m: number; direction1m: string; ltfAlignment: number; entryTimingScore: number; microTrendConfirms: boolean; recentCandlePattern: string; isAccelerating5m: boolean; isReverting1m: boolean }>();
+    // Collect micro exhaustion data for batch snapshot update (Exhaustion dashboard)
+    const symbolMicroExhaustionMap = new Map<string, { score: number; detected: boolean; recommendation: string; positionMultiplier: number; momentumDecay: boolean; accelerationFlip: boolean; priceDivergence: boolean; signals: string[] }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
