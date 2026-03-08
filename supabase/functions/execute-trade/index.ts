@@ -710,7 +710,7 @@ serve(async (req) => {
       // Block SHORT at extreme low (K <= 5) - oversold exhaustion
       if (stochRsiK4h <= DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD && signalDirection === 'short') {
         logger.gate(`❌ TIER 0 BACKUP GATE: StochRSI K=${stochRsiK4h.toFixed(1)} <= ${DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD} blocks SHORT entry`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, trendData, {
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'TIER 0 (DEEP): StochRSI HARD GATE', signal, mfs, {
           stochRsiK4h,
           threshold: DEEP_STOCHRSI_HARD_GATE.DEEP_OVERSOLD_K_THRESHOLD,
           direction: signalDirection,
