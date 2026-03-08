@@ -3230,8 +3230,9 @@ serve(async (req) => {
           const momMagBonus = Math.abs(mom5m.score) > 40 ? (microTrendConfirms ? 15 : -15) 
                             : Math.abs(mom5m.score) > 20 ? (microTrendConfirms ? 8 : -5) : 0;
           
-          // Factor 4: 1m/5m alignment (15% weight → -10 to +10)
-          const alignBonus = ltfAlignment > 0.5 ? 10 : ltfAlignment < -0.5 ? -10 : ltfAlignment > 0 ? 5 : 0;
+          // Factor 4: 1m/5m alignment (15% weight → -6 to +6)
+          // Reduced from ±10 to ±6: alignment is already checked by boost guard, preventing double counting
+          const alignBonus = ltfAlignment > 0.5 ? 6 : ltfAlignment < -0.5 ? -6 : ltfAlignment > 0 ? 3 : 0;
           
           entryTimingScore = Math.max(0, Math.min(100, 50 + htfAlignBonus + accelBonus + momMagBonus + alignBonus));
           
