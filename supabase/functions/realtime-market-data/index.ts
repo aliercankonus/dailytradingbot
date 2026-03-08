@@ -363,9 +363,12 @@ serve(async (req) => {
       ? `message=${error.message || 'unknown'} type=${error.type}` 
       : `type=${error.type}`;
     console.error(`[MarketData-Edge] Client WebSocket error: ${errorDetail}`);
-    // Close Binance connection on client error
-    if (binanceSocket && binanceSocket.readyState === WebSocket.OPEN) {
-      binanceSocket.close();
+    // Close Binance connections on client error
+    if (binanceTickerSocket && binanceTickerSocket.readyState === WebSocket.OPEN) {
+      binanceTickerSocket.close();
+    }
+    if (binanceKlineSocket && binanceKlineSocket.readyState === WebSocket.OPEN) {
+      binanceKlineSocket.close();
     }
   };
 
