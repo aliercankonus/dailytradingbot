@@ -576,8 +576,7 @@ serve(async (req) => {
     // This preserves discipline while avoiding over-filtering valid setups
     // ============================================================
     const signalDirection = signal.signal_type === 'long' ? 'BUY' : 'SELL';
-    const trendConfidence = trendData?.timeframes?.['4h']?.confidence || 
-                            trendData?.higherTimeframeFilter?.confidence4h || 50;
+    const trendConfidence = mfs.timeframes['4h'].confidence || 50;
     
     // Track if this is a counter-trend entry for position sizing
     let isCounterTrendEntry = false;
