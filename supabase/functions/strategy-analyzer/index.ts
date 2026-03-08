@@ -5399,6 +5399,7 @@ serve(async (req) => {
               symbol,
               rejection_reason: AGE_DECAY.HARD_BLOCK_REASON,
               filters_status: {
+                gate: 'REGIME_AGE_EXHAUSTED',
                 regimeAge,
                 regime: fourStateRegime.regime,
                 adxSlopeSmoothed: currentAdxSlopeSmoothed,
