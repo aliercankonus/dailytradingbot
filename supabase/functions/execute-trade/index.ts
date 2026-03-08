@@ -13,7 +13,7 @@ import {
   type MarketRegime
 } from "../_shared/scoring.ts";
 import { buildMarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
-import type { TrendDataResponse, PartialTrendData } from "../_shared/trend-types.ts";
+import type { MarketFeatureSnapshot } from "../_shared/market-feature-snapshot.ts";
 import { createLogger, logError } from "../_shared/logging.ts";
 import { 
   getSymbolFilters, 
