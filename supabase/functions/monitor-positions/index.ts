@@ -2054,7 +2054,60 @@ serve(async (req) => {
           minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier;
           positionLogger.trade(`MOMENTUM_CONTINUATION TRAILING: Wider distance ×${MOMENTUM_CONTINUATION_EXIT.TRAILING_DISTANCE_MULTIPLIER} = ${baseTrailingDistance.toFixed(2)} (decay is primary exit)`);
         } else {
-          baseTrailingDistance = Math.max(atrAbsolute * userSettings.distanceMultiplier, currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100));
+          // ============= VOLATILITY ADAPTIVE TRAILING =============
+          // Standard ATR-based distance as baseline
+          const standardAtrDistance = atrAbsolute * userSettings.distanceMultiplier;
+          const minFloor = currentPrice * (TRAILING_STOP_INLINE.MIN_TRAILING_DISTANCE_PERCENT / 100);
+          
+          if (VOLATILITY_ADAPTIVE_TRAILING.ENABLED) {
+            // Step 1: Determine volatility regime from ATR ratio
+            const atrRatio = atrPercent / 100; // Already have atrPercent
+            let volRegime: 'LOW' | 'NORMAL' | 'HIGH';
+            let volMultiplier: number;
+            
+            if (atrRatio < VOLATILITY_ADAPTIVE_TRAILING.REGIME_THRESHOLDS.LOW_MAX) {
+              volRegime = 'LOW';
+              volMultiplier = VOLATILITY_ADAPTIVE_TRAILING.REGIME_MULTIPLIERS.LOW;
+            } else if (atrRatio < VOLATILITY_ADAPTIVE_TRAILING.REGIME_THRESHOLDS.NORMAL_MAX) {
+              volRegime = 'NORMAL';
+              volMultiplier = VOLATILITY_ADAPTIVE_TRAILING.REGIME_MULTIPLIERS.NORMAL;
+            } else {
+              volRegime = 'HIGH';
+              volMultiplier = VOLATILITY_ADAPTIVE_TRAILING.REGIME_MULTIPLIERS.HIGH;
+            }
+            
+            // Step 2: Calculate ATR-normalized adaptive distance
+            let adaptiveDistance = atrAbsolute * volMultiplier;
+            
+            // Step 3: ADX trend strength override
+            if (VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.ENABLED) {
+              const posAdx = mfsForPosition?.adx ?? 20;
+              if (posAdx >= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.STRONG_MIN_ADX) {
+                adaptiveDistance *= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.STRONG_MULTIPLIER;
+              } else if (posAdx >= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.MODERATE_MIN_ADX) {
+                adaptiveDistance *= VOLATILITY_ADAPTIVE_TRAILING.ADX_TREND_OVERRIDE.MODERATE_MULTIPLIER;
+              }
+            }
+            
+            // Step 4: Apply floor and cap
+            const distanceFloor = currentPrice * (VOLATILITY_ADAPTIVE_TRAILING.MIN_DISTANCE_FLOOR_PERCENT / 100);
+            const distanceCap = currentPrice * (VOLATILITY_ADAPTIVE_TRAILING.MAX_DISTANCE_CAP_PERCENT / 100);
+            adaptiveDistance = Math.max(adaptiveDistance, distanceFloor);
+            adaptiveDistance = Math.min(adaptiveDistance, distanceCap);
+            
+            // Step 5: Final distance = max(peak_tier_distance, ATR_adaptive_distance, min_floor)
+            // peak_tier_distance is handled later by PEAK_ADAPTIVE_TRAILING (tightening)
+            // Here we use max(standard, adaptive) as the base
+            baseTrailingDistance = Math.max(standardAtrDistance, adaptiveDistance, minFloor);
+            
+            if (VOLATILITY_ADAPTIVE_TRAILING.LOG_REGIME_DECISIONS) {
+              const posAdx = mfsForPosition?.adx ?? 20;
+              positionLogger.trade(`🌊 VOL_ADAPTIVE_TRAIL: regime=${volRegime} ATR%=${(atrRatio*100).toFixed(3)}% | volMult=${volMultiplier} ADX=${posAdx.toFixed(1)} | standard=${standardAtrDistance.toFixed(2)} adaptive=${adaptiveDistance.toFixed(2)} → final=${baseTrailingDistance.toFixed(2)}`);
+            }
+          } else {
+            baseTrailingDistance = Math.max(standardAtrDistance, minFloor);
+          }
+          
           minTrailingDistance = baseTrailingDistance * htfAlignmentMultiplier; // Apply HTF multiplier
           
           // ============= FIX #2: FAST PEAK VELOCITY TRAIL TIGHTENING =============
