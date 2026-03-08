@@ -66,6 +66,11 @@ LTF Micro Momentum widget (`LtfMicroMomentumWidget.tsx`) reads `ltfMicroMomentum
 
 ## Changelog
 
+### v1.2 (2026-03-08)
+- Reduced alignBonus from ±10 to ±6: prevents double counting with boost guard (alignment checked twice)
+- DB persist optimization: jsonb_set RPC (single UPDATE) replaces read+write pattern (2 ops → 1 op per symbol)
+- Created `jsonb_set_snapshot_field` database function with fallback
+
 ### v1.1 (2026-03-08)
 - Graduated boost tiers: 70-80 → 1.10x, 80+ → 1.20x (was flat 70+ → 1.20x)
 - Weighted composite scoring: HTF align (35%), accel (25%), magnitude (25%), LTF align (15%)
