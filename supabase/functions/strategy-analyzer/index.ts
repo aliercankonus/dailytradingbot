@@ -10568,7 +10568,7 @@ serve(async (req) => {
         }
         
         // Log smart momentum analysis
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} SMART MOMENTUM: score=${smartMomentum.score} dir=${smartMomentum.direction} accel=${smartMomentum.isAccelerating} weak=${smartMomentum.isWeakening} exhaust=${smartMomentum.isExhausted}`);
+        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} SMART MOMENTUM: score=${smartMomentum.score} dir=${smartMomentum.direction} accel=${smartMomentum.isAccelerating} weak=${smartMomentum.isWeakening} exhaust=${smartMomentum.isExhausted} microExh=${smartMomentum.microExhaustion.detected}(${smartMomentum.microExhaustion.score}/${smartMomentum.microExhaustion.recommendation})`);
         if (smartMomentum.reasons.length > 0) {
           logger.forSymbol(symbol).debug(`   Components: ${smartMomentum.reasons.slice(0, 3).join(' | ')}`);
         }
