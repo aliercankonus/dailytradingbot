@@ -19435,23 +19435,35 @@ serve(async (req) => {
     }
 
     // ============= BATCH UPDATE LTF MICRO DATA IN TREND SNAPSHOTS =============
+    // Uses RPC-free jsonb_set via raw update to avoid read+write per symbol
     if (symbolLtfMicroMap.size > 0) {
       const ltfMicroUpdatePromises = Array.from(symbolLtfMicroMap.entries()).map(([sym, data]) => {
-        return supabase
-          .from("trend_snapshots")
-          .select("snapshot_data")
-          .eq("user_id", userId)
-          .eq("symbol", sym)
-          .single()
-          .then(({ data: existing }) => {
-            const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
-            const mergedData = { ...existingData, ltfMicroMomentum: data };
+        return supabase.rpc('jsonb_set_snapshot_field' as any, {
+          p_user_id: userId,
+          p_symbol: sym,
+          p_field: 'ltfMicroMomentum',
+          p_value: data,
+        }).then((result: any) => {
+          if (result.error) {
+            // Fallback to read+write if RPC doesn't exist
             return supabase
               .from("trend_snapshots")
-              .update({ snapshot_data: mergedData })
+              .select("snapshot_data")
               .eq("user_id", userId)
-              .eq("symbol", sym);
-          });
+              .eq("symbol", sym)
+              .single()
+              .then(({ data: existing }) => {
+                const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+                const mergedData = { ...existingData, ltfMicroMomentum: data };
+                return supabase
+                  .from("trend_snapshots")
+                  .update({ snapshot_data: mergedData })
+                  .eq("user_id", userId)
+                  .eq("symbol", sym);
+              });
+          }
+          return result;
+        });
       });
       const ltfResults = await Promise.all(ltfMicroUpdatePromises);
       const ltfErrors = ltfResults.filter(r => r?.error);
