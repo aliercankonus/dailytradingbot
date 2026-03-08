@@ -9112,7 +9112,7 @@ serve(async (req) => {
                   useRelaxedThresholds = true;
                   relaxationReason = 'BB Squeeze active';
                 } else if (relaxConfig.BOLLINGER_BREAKDOWN_TRIGGER) {
-                  const percentB = parseFloat(trendData.volatility?.percentB ?? '50');
+                  const percentB = mfs.bollinger["1h"].percentB ?? 50;
                   if (derivedDirection === 'short' && percentB <= relaxConfig.BOLLINGER_BREAKDOWN_SHORT_MAX_B) {
                     useRelaxedThresholds = true;
                     relaxationReason = `%B ${percentB.toFixed(1)} <= ${relaxConfig.BOLLINGER_BREAKDOWN_SHORT_MAX_B} (SHORT breakdown)`;
