@@ -1206,7 +1206,7 @@ serve(async (req) => {
                 : '';
               
               logger.error(`❌ VWAP OVEREXTENSION: Price $${currentPrice.toFixed(2)} above upper VWAP band $${vwapUpperBand.toFixed(2)} (ADX=${adxValue.toFixed(1)} < ${ADX_EXCEPTION_THRESHOLD}, adxRising=${adxRising}, macdHistogram=${macdHistogram.toFixed(4)})${graduatedFailReason}`);
-              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, trendData, { 
+              await logExecutionRejection(supabase, user.id, signal.symbol, 'VWAP Overextension (LONG)', signal, mfs, { 
                 currentPrice, 
                 vwapMid: currentVWAP,
                 vwapMidDeviationPct: vwapDeviation,
