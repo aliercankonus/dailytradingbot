@@ -11096,7 +11096,7 @@ serve(async (req) => {
         const stochRsiK1h = mfs.stochRsi["1h"].k;
         const stochRsiD1h = mfs.stochRsi["1h"].d;
         // Keep raw object reference for signal property access (bullish_cross, bearish_cross)
-        const stochRsi1h = trendData.stochasticRsi?.["1h"];
+        const stochRsi1h = trendData.stochasticRsi?.["1h"]; // Keep raw for bullish_cross/bearish_cross signal properties NOT in MFS
         // CRITICAL FIX: Using shared thresholds for consistency across all edge functions
         // Smart exception still allows legitimate continuation in strong trends
         const STOCHRSI_OVERSOLD_THRESHOLD = STOCHRSI_THRESHOLDS.OVERSOLD;  // 20 - bounce risk for shorts
