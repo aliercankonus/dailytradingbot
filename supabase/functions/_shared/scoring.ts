@@ -5067,7 +5067,7 @@ export const deriveTradeDirection = (
 // ============= CALCULATE QUALITY SCORE =============
 // Unified quality score calculation
 export const calculateQualityScore = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   effectiveTrend: string,
   symbol: string
 ): { 
@@ -5081,29 +5081,58 @@ export const calculateQualityScore = (
     confidencePenalty: number 
   } 
 } => {
-  const adx = trendData?.volatility?.adx || trendData?.momentum?.adx || 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? undefined;
-  const confidence = trendData?.confidence || 50;
-  const consistency = trendData?.trueAlignment?.score || 50;
-  const momentum = trendData?.momentum || {};
-  const aligned = trendData?.isAligned ?? false;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  const confidence = mfs.confidence || 50;
+  const consistency = mfs.trueAlignment?.score || 50;
+  const aligned = mfs.isAligned;
   
-  const volumeConfirms = momentum.volumeConfirms || false;
-  const volumeSpike = momentum.volumeSpike || false;
-  const volumeRatio = trendData?.volatility?.volumeRatio || momentum.volumeBoost || 1.0;
-  const hasRangeExpansion = (trendData?.volatility?.relativeATR || 1) > 1.0;
+  const volumeConfirms = mfs.volumeConfirms;
+  const volumeSpike = mfs.volume["1h"].volumeSpike;
+  const volumeRatio = mfs.volume["1h"].volumeRatio || 1.0;
+  const hasRangeExpansion = mfs.relativeATR > 1.0;
   
   const adxScore = getAdxScore(adx, adxSlope);
-  const adxRising = trendData?.volatility?.adxRising ?? false;
+  const adxRising = mfs.adxRising;
   
   // Extract StochRSI data for the decline bonus calculation
-  const stochRsi1h = trendData?.stochasticRsi?.['1h'];
-  const stochRsiData = stochRsi1h ? { k: stochRsi1h.k ?? 50, d: stochRsi1h.d ?? 50 } : undefined;
+  const stochRsiData = { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d };
+  
+  // Build momentum compat object for getMomentumScore (still uses legacy format)
+  const momentum = {
+    momentumScore: mfs.smartMomentum?.score ?? 0,
+    macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0,
+    state: mfs.momentumState,
+    confirms: mfs.momentumConfirms,
+    macdExpanding: mfs.macdExpanding,
+    volumeConfirms: mfs.volumeConfirms,
+    stochRsiK: mfs.stochRsi["4h"].k,
+  };
   
   // PHASE 1 FIX: Pass adxSlope to getMomentumScore for momentum floor calculation
   const momentumScore = getMomentumScore(momentum, adx, adxRising, stochRsiData, adxSlope);
-  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendData);
-  const technicalScore = getTechnicalScore(trendData, effectiveTrend, symbol);
+  // Build trendData shim for getAlignmentScore and getTechnicalScore (legacy functions)
+  const trendDataShim = {
+    confidence,
+    trueAlignment: mfs.trueAlignment,
+    isAligned: aligned,
+    timeframes: {
+      "4h": { trend: mfs.timeframes["4h"].trend, confidence: mfs.timeframes["4h"].confidence, indicators: { rsi: mfs.timeframes["4h"].rsi } },
+      "1h": { trend: mfs.timeframes["1h"].trend, confidence: mfs.timeframes["1h"].confidence, indicators: { rsi: mfs.timeframes["1h"].rsi } },
+      "30m": { trend: mfs.timeframes["30m"].trend, confidence: mfs.timeframes["30m"].confidence, indicators: { rsi: mfs.timeframes["30m"].rsi } },
+      "15m": { trend: mfs.timeframes["15m"].trend, confidence: mfs.timeframes["15m"].confidence, indicators: { rsi: mfs.timeframes["15m"].rsi } },
+    },
+    stochasticRsi: {
+      "4h": { k: mfs.stochRsi["4h"].k, d: mfs.stochRsi["4h"].d },
+      "1h": { k: mfs.stochRsi["1h"].k, d: mfs.stochRsi["1h"].d },
+    },
+    bollingerBand: { percentB: mfs.bollinger["4h"].percentB, squeeze: mfs.bollinger["4h"].squeeze },
+    volatility: { adx, adxSlope, adxRising },
+    momentum,
+  };
+  const alignmentScore = getAlignmentScore(confidence, consistency, aligned, trendDataShim);
+  const technicalScore = getTechnicalScore(trendDataShim, effectiveTrend, symbol);
   const volumeScoreVal = getVolumeScore(volumeConfirms, volumeSpike, volumeRatio, hasRangeExpansion, effectiveTrend);
   const confidencePenalty = getConfidencePenalty(confidence, adx, momentum.confirms);
   
