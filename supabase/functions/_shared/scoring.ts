@@ -1810,7 +1810,7 @@ export interface SqueezeBreakoutResult {
 }
 
 export const isValidSqueezeBreakout = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   intendedDirection: "long" | "short" | null
 ): SqueezeBreakoutResult => {
   const reasons: string[] = [];
@@ -1827,32 +1827,25 @@ export const isValidSqueezeBreakout = (
     hasDivergence: false,
   };
   
-  if (!trendData || !intendedDirection) {
-    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No trend data or direction"], checkDetails };
+  if (!mfs || !intendedDirection) {
+    return { isValid: false, confidence: 0, direction: null, positionSizeMultiplier: 1.0, reasons: ["No MFS data or direction"], checkDetails };
   }
   
-  const adx = trendData?.volatility?.adx || 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? 0;
-  const bollinger = trendData?.bollingerBands || {};
-  const momentum = trendData?.momentum || {};
-  const stochRsi = trendData?.stochasticRsi || {};
-  const timeframes = trendData?.timeframes || {};
+  // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  const adxSlope = mfs.adxSlope;
   
   // v1.1: Update check details
   checkDetails.adxSlope = adxSlope;
-  checkDetails.momentumState = momentum.state || 'none';
-  checkDetails.hasDivergence = momentum.hasDivergence ?? false;
+  checkDetails.momentumState = mfs.momentumState as string || 'none';
+  checkDetails.hasDivergence = mfs.hasDivergence;
   
   // Get 4H data for HTF confirmation
-  const bb4h = bollinger['4h'] || bollinger;
-  const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
-  const percentB4h = bb4h.percentB ?? 50;
-  const bandwidth4h = bb4h.bandwidth || 0;
+  const squeeze4h = mfs.bollinger['4h'].squeeze;
+  const percentB4h = mfs.bollinger['4h'].percentB;
   
   // Get 1H data
-  const bb1h = bollinger['1h'] || {};
-  const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
-  const percentB1h = bb1h.percentB ?? 50;
+  const squeeze1h = mfs.bollinger['1h'].squeeze;
+  const percentB1h = mfs.bollinger['1h'].percentB;
   
   // Condition 1: HTF squeeze active (4h preferred, 1h acceptable) - BB compressed
   const hasHTFSqueeze = squeeze4h || squeeze1h;
