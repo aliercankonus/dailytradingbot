@@ -67,6 +67,13 @@ LTF Micro Momentum widget (`LtfMicroMomentumWidget.tsx`) reads `ltfMicroMomentum
 
 ## Changelog
 
+### v1.3 (2026-03-08)
+- **LTF Conflict Gate**: `ltfAlignment < 0` → ×0.75 soft penalty (catches 1m/5m opposing micro-reversals)
+- **Cap ordering fix**: LTF_MICRO_TIMING moved BEFORE position cap (was after — boost could exceed 5% max)
+- **jsonb_set `create_if_missing`**: Added `true` flag to prevent first-run errors on empty snapshot_data
+- **Dashboard sort**: Changed from `abs(score-50)` to `abs(multiplier-1)` for trade-impact ranking
+- **Enhanced logging**: Full component breakdown in LTF_MICRO_TIMING log (5m/1m scores, direction, acceleration)
+
 ### v1.2 (2026-03-08)
 - Reduced alignBonus from ±10 to ±6: prevents double counting with boost guard (alignment checked twice)
 - DB persist optimization: jsonb_set RPC (single UPDATE) replaces read+write pattern (2 ops → 1 op per symbol)
