@@ -22,6 +22,7 @@ const Notifications = lazy(() => import("./pages/Notifications"));
 const Symbols = lazy(() => import("./pages/Symbols"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Health = lazy(() => import("./pages/Health"));
+const Backtest = lazy(() => import("./pages/Backtest"));
 
 const queryClient = new QueryClient();
 
