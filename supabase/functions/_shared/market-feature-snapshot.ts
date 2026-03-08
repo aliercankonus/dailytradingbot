@@ -306,11 +306,38 @@ export function buildMarketFeatureSnapshot(
   const adxSlopeResult = extractADXSlope(trendData);
   
   // === StochRSI (all timeframes) ===
+  const extractStochTF = (tf: '15m' | '30m' | '1h' | '4h'): StochRsiFeatures => ({
+    k: extractStochRsiK(trendData, tf),
+    d: extractStochRsiD(trendData, tf),
+    signal: trendData?.stochasticRsi?.[tf]?.signal ?? "neutral",
+  });
   const stochRsi = {
-    "15m": { k: extractStochRsiK(trendData, '15m'), d: extractStochRsiD(trendData, '15m') },
-    "30m": { k: extractStochRsiK(trendData, '30m'), d: extractStochRsiD(trendData, '30m') },
-    "1h": { k: extractStochRsiK(trendData, '1h'), d: extractStochRsiD(trendData, '1h') },
-    "4h": { k: extractStochRsiK(trendData, '4h'), d: extractStochRsiD(trendData, '4h') },
+    "15m": extractStochTF('15m'),
+    "30m": extractStochTF('30m'),
+    "1h": extractStochTF('1h'),
+    "4h": extractStochTF('4h'),
+  };
+  
+  // === StochRSI Aggregated ===
+  const stochAgg = trendData?.stochasticRsi?.aggregated || {};
+  const stochRsiAggregated: StochRsiAggregated = {
+    bearishCrossCount: stochAgg.bearishCrossCount ?? 0,
+    bullishCrossCount: stochAgg.bullishCrossCount ?? 0,
+    overboughtCount: stochAgg.overboughtCount ?? 0,
+    oversoldCount: stochAgg.oversoldCount ?? 0,
+  };
+  
+  // === Bars at Extreme ===
+  const barsAtExtremeRaw = trendData?.stochasticRsi?.barsAtExtreme || {};
+  const barsAtExtreme = {
+    "1h": {
+      barsOverbought: barsAtExtremeRaw['1h']?.barsOverbought ?? 0,
+      barsOversold: barsAtExtremeRaw['1h']?.barsOversold ?? 0,
+    },
+    "4h": {
+      barsOverbought: barsAtExtremeRaw['4h']?.barsOverbought ?? 0,
+      barsOversold: barsAtExtremeRaw['4h']?.barsOversold ?? 0,
+    },
   };
   
   // === Timeframe features ===
