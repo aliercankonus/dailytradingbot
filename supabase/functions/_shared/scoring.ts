@@ -2180,10 +2180,9 @@ export const detectEarlyIgnitionEntry = (
   checkDetails.adxSlopeRising = adxSlope >= P.MIN_ADX_SLOPE_RISING;
   
   // ===== CONDITION 1: BB Squeeze (compression detected) =====
-  const bb4h = bollinger['4h'] || {};
-  const bb1h = bollinger['1h'] || {};
-  const squeeze4h = bb4h.squeeze || bb4h.squeezeActive || false;
-  const squeeze1h = bb1h.squeeze || bb1h.squeezeActive || false;
+  // MFS MIGRATION: Read Bollinger data from MFS
+  const squeeze4h = mfs.bollinger['4h'].squeeze;
+  const squeeze1h = mfs.bollinger['1h'].squeeze;
   const hadRecentSqueeze = squeeze4h || squeeze1h;
   
   checkDetails.hadRecentSqueeze = hadRecentSqueeze;
@@ -2195,20 +2194,18 @@ export const detectEarlyIgnitionEntry = (
   reasons.push(`BB squeeze detected on ${checkDetails.squeezeTimeframe}`);
   
   // ===== CONDITION 2: BB Width Expanding (breakout starting) =====
-  const currentWidth = bb1h.bandwidth || bb4h.bandwidth || 0;
-  const widthHistory = volatility.bandwidthHistory || [];
+  // MFS MIGRATION: Read bandwidth from MFS Bollinger features
+  const currentWidth = mfs.bollinger['1h'].bandwidth || mfs.bollinger['4h'].bandwidth || 0;
+  // NOTE: bandwidthHistory is not available in MFS — use fallback heuristic
   let widthExpanding = false;
   let widthExpansionPercent = 0;
   
-  if (widthHistory.length >= 3) {
-    const avgPriorWidth = widthHistory.slice(0, 3).reduce((a: number, b: number) => a + b, 0) / 3;
-    if (avgPriorWidth > 0 && currentWidth > avgPriorWidth) {
-      widthExpansionPercent = ((currentWidth - avgPriorWidth) / avgPriorWidth) * 100;
-      widthExpanding = widthExpansionPercent >= 10;
-    }
-  } else if (bb1h.widthExpanding || volatility.widthExpanding) {
-    widthExpanding = true;
-    widthExpansionPercent = 15;
+  // Without bandwidth history, use squeeze intensity as a proxy for expansion
+  const squeezeIntensity4h = mfs.bollinger['4h'].squeezeIntensity || 0;
+  if (squeezeIntensity4h > 0 && currentWidth > 0) {
+    // If squeeze was intense but bandwidth is now measurable, expansion is likely
+    widthExpanding = squeezeIntensity4h >= 30;
+    widthExpansionPercent = squeezeIntensity4h > 0 ? Math.min(50, squeezeIntensity4h * 0.5) : 0;
   }
   
   checkDetails.widthExpanding = widthExpanding;
