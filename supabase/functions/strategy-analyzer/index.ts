@@ -216,6 +216,8 @@ import {
   checkMomentumDirectionAlignment,
   // NEW: Trend Continuation Pullback (EMA-based re-entry in decelerating trends)
   detectTrendContinuationPullback,
+  // NEW: Liquidity Trap Detector (fake breakout, stop hunt, bull/bear trap)
+  detectLiquidityTrap,
   type MomentumScoreResult,
   type PullbackResult,
   type EntryQualityResult,
@@ -225,7 +227,8 @@ import {
   type ADXExhaustionResult,
   type BollingerPriceActionResult,
   type MomentumFlipResult,
-  type TrendContinuationPullbackResult
+  type TrendContinuationPullbackResult,
+  type LiquidityTrapResult
 } from "../_shared/smart-momentum.ts";
 import { calculateRSIArray, calculateATR, calculateADXWithDirection, type ADXResult } from "../_shared/indicators.ts";
 import { 
@@ -2425,6 +2428,8 @@ serve(async (req) => {
     const symbolLtfMicroMap = new Map<string, { score5m: number; direction5m: string; score1m: number; direction1m: string; ltfAlignment: number; entryTimingScore: number; microTrendConfirms: boolean; recentCandlePattern: string; isAccelerating5m: boolean; isReverting1m: boolean }>();
     // Collect micro exhaustion data for batch snapshot update (Exhaustion dashboard)
     const symbolMicroExhaustionMap = new Map<string, { score: number; detected: boolean; recommendation: string; positionMultiplier: number; momentumDecay: boolean; accelerationFlip: boolean; priceDivergence: boolean; signals: string[] }>();
+    // Collect liquidity trap data for batch snapshot update (Trap dashboard)
+    const symbolLiquidityTrapMap = new Map<string, { score: number; detected: boolean; trapType: string; recommendation: string; positionMultiplier: number; signals: string[]; wickRejection: boolean; volumeSpikeReversal: boolean; priceRejection: boolean; sweepDetected: boolean; trapDirection: string }>();
     for (const { symbol } of activeSymbols) {
       symbolRegimeMap.set(symbol, 'EARLY_BLOCK');
     }
@@ -3186,6 +3191,55 @@ serve(async (req) => {
           priceDivergence: _exh.priceDivergence,
           signals: _exh.signals,
         });
+
+        // ============= LIQUIDITY TRAP DETECTION (LTF) =============
+        // Uses 5m/1m klines to detect fake breakouts, stop hunts, bull/bear traps
+        const ltfDataForTrap = ltfDataMap.get(symbol);
+        const trapKlines = ltfDataForTrap?.klines5m ?? mfs.klines15m;
+        const trapPrices = ltfDataForTrap?.prices5m ?? parseKlinePrices(mfs.klines15m);
+        const trapAtr = ltfDataForTrap ? calculateATR(ltfDataForTrap.klines5m, 14) : mfs.atr;
+        
+        // Direction is determined from smart momentum (early direction context)
+        const trapDirection = earlySmartMomentum.direction === "bullish" ? "long" as const
+          : earlySmartMomentum.direction === "bearish" ? "short" as const : "neutral" as const;
+        
+        const liquidityTrap = detectLiquidityTrap(trapKlines, trapPrices, trapDirection, trapAtr);
+        
+        // Store in MFS for downstream use
+        (mfs as any).liquidityTrap = {
+          detected: liquidityTrap.detected,
+          score: liquidityTrap.score,
+          trapType: liquidityTrap.trapType,
+          signals: liquidityTrap.signals,
+          wickRejection: liquidityTrap.wickRejection,
+          volumeSpikeReversal: liquidityTrap.volumeSpikeReversal,
+          priceRejection: liquidityTrap.priceRejection,
+          sweepDetected: liquidityTrap.sweepDetected,
+          recommendation: liquidityTrap.recommendation,
+          positionMultiplier: liquidityTrap.positionMultiplier,
+          trapDirection: liquidityTrap.trapDirection,
+        };
+        
+        // Collect for batch snapshot update
+        symbolLiquidityTrapMap.set(symbol, {
+          score: liquidityTrap.score,
+          detected: liquidityTrap.detected,
+          trapType: liquidityTrap.trapType,
+          recommendation: liquidityTrap.recommendation,
+          positionMultiplier: liquidityTrap.positionMultiplier,
+          signals: liquidityTrap.signals,
+          wickRejection: liquidityTrap.wickRejection,
+          volumeSpikeReversal: liquidityTrap.volumeSpikeReversal,
+          priceRejection: liquidityTrap.priceRejection,
+          sweepDetected: liquidityTrap.sweepDetected,
+          trapDirection: liquidityTrap.trapDirection,
+        });
+        
+        if (liquidityTrap.detected) {
+          logger.forSymbol(symbol).warn(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score}, type=${liquidityTrap.trapType}, signals=[${liquidityTrap.signals.join(', ')}], mult=×${liquidityTrap.positionMultiplier}`);
+        } else {
+          logger.forSymbol(symbol).debug(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
+        }
 
         // ============= LTF MICRO-MOMENTUM (5m/1m) =============
         // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
@@ -18898,7 +18952,22 @@ serve(async (req) => {
           }
         }
 
-        // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion)
+        // ============= LIQUIDITY TRAP POSITION SIZING =============
+        // v1.0: Reduce/block position size when liquidity trap is detected on LTF
+        // >60 score → 0.6x, >75 → 0.4x, >85 → block (0.0x clamped to min 0.2)
+        const trapEntry = mfs?.liquidityTrap;
+        if (trapEntry && trapEntry.detected && trapEntry.positionMultiplier < 1.0) {
+          const prevSize = unifiedPositionSize;
+          unifiedPositionSize *= trapEntry.positionMultiplier;
+          
+          if (trapEntry.recommendation === "block_entry") {
+            logger.forSymbol(symbol).warn(`🪤 LIQUIDITY_TRAP_BLOCK: score=${trapEntry.score}, type=${trapEntry.trapType}, signals=[${trapEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${trapEntry.positionMultiplier})`);
+          } else {
+            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} 🪤 LIQUIDITY_TRAP_SIZING: score=${trapEntry.score}, type=${trapEntry.trapType}, signals=[${trapEntry.signals?.join(', ')}] → position ${prevSize.toFixed(2)}% → ${unifiedPositionSize.toFixed(2)}% (×${trapEntry.positionMultiplier})`);
+          }
+        }
+
+        // Cap position size AFTER all gates applied (including LTF micro timing + exhaustion + trap)
         unifiedPositionSize = Math.max(0.2, Math.min(5.0, unifiedPositionSize));
 
         // Map "neutral" to "ranging" for database enum compatibility
@@ -19510,6 +19579,44 @@ serve(async (req) => {
         logger.warn(`⚠️ Failed to cache micro exhaustion for ${exhErrors.length}/${symbolMicroExhaustionMap.size} symbols`);
       } else {
         logger.info(`🔥 Cached micro exhaustion in trend_snapshots for ${symbolMicroExhaustionMap.size} symbols`);
+      }
+    }
+
+    // ============= BATCH UPDATE LIQUIDITY TRAP DATA IN TREND SNAPSHOTS =============
+    if (symbolLiquidityTrapMap.size > 0) {
+      const trapUpdatePromises = Array.from(symbolLiquidityTrapMap.entries()).map(([sym, data]) => {
+        return supabase.rpc('jsonb_set_snapshot_field' as any, {
+          p_user_id: userId,
+          p_symbol: sym,
+          p_field: 'liquidityTrap',
+          p_value: data,
+        }).then((result: any) => {
+          if (result.error) {
+            return supabase
+              .from("trend_snapshots")
+              .select("snapshot_data")
+              .eq("user_id", userId)
+              .eq("symbol", sym)
+              .single()
+              .then(({ data: existing }) => {
+                const existingData = (existing?.snapshot_data as Record<string, unknown>) || {};
+                const mergedData = { ...existingData, liquidityTrap: data };
+                return supabase
+                  .from("trend_snapshots")
+                  .update({ snapshot_data: mergedData })
+                  .eq("user_id", userId)
+                  .eq("symbol", sym);
+              });
+          }
+          return result;
+        });
+      });
+      const trapResults = await Promise.all(trapUpdatePromises);
+      const trapErrors = trapResults.filter(r => r?.error);
+      if (trapErrors.length > 0) {
+        logger.warn(`⚠️ Failed to cache liquidity trap for ${trapErrors.length}/${symbolLiquidityTrapMap.size} symbols`);
+      } else {
+        logger.info(`🪤 Cached liquidity trap in trend_snapshots for ${symbolLiquidityTrapMap.size} symbols`);
       }
     }
 
