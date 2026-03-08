@@ -979,7 +979,95 @@ serve(async (req) => {
             emergencyReason = "liquidity_trap_block";
             positionLogger.warn(`🪤 LIQUIDITY_TRAP_BLOCK: score=${trapScore} ≥85, type=${trapType}, signals=[${trapSignals}] — FULL EXIT triggered`);
           } else if (trapScore >= 75) {
-            // AGGRESSIVE: Tighten stop by ATR×0.75
+            // AGGRESSIVE: Partial close 40% + tighten stop by ATR×0.75
+            // Guards: min position size, one partial per position (cooldown via partial_loss_level)
+            const currentPartialLevel = position.partial_loss_level || 0;
+            const minPartialSize = 5; // Minimum $5 notional to avoid spam closes
+            const positionNotional = position.quantity * currentPrice;
+            
+            // Partial close (only if not already partially closed and position large enough)
+            if (currentPartialLevel === 0 && positionNotional > minPartialSize) {
+              const closePercent = 0.40; // 40% partial close
+              const closeQuantity = position.quantity * closePercent;
+              const remainingQuantity = position.quantity - closeQuantity;
+              
+              const partialPnL = position.side === "BUY"
+                ? (currentPrice - position.entry_price) * closeQuantity
+                : (position.entry_price - currentPrice) * closeQuantity;
+              const partialPnlPercent = position.side === "BUY"
+                ? ((currentPrice - position.entry_price) / position.entry_price) * 100
+                : ((position.entry_price - currentPrice) / position.entry_price) * 100;
+              
+              // Reduce position quantity + mark partial taken (cooldown = 1 per position)
+              const { data: updatedTrapPartialPos, error: trapPartialError } = await supabase
+                .from("positions")
+                .update({
+                  quantity: remainingQuantity,
+                  partial_loss_level: Math.max(currentPartialLevel, 1), // Mark partial taken
+                })
+                .eq("id", position.id)
+                .eq("status", "active")
+                .select()
+                .maybeSingle();
+              
+              if (trapPartialError) {
+                positionLogger.error(`Error executing trap partial close for ${position.id}: ${trapPartialError}`);
+              } else if (updatedTrapPartialPos) {
+                // Fee-aware P&L for the closed portion
+                const trapPartialFeeAwarePnL = calculateFeeAwarePnL(
+                  position.side,
+                  position.entry_price,
+                  currentPrice,
+                  closeQuantity,
+                  position.trading_fee_percent
+                );
+                
+                // Create closed position record for history
+                const { error: trapPartialRecordError } = await supabase
+                  .from("positions")
+                  .insert({
+                    user_id: position.user_id,
+                    symbol: position.symbol,
+                    side: position.side,
+                    quantity: closeQuantity,
+                    entry_price: position.entry_price,
+                    exit_price: currentPrice,
+                    stop_loss: position.stop_loss,
+                    take_profit: position.take_profit,
+                    status: "closed",
+                    close_reason: "liquidity_trap_partial",
+                    realized_pnl: trapPartialFeeAwarePnL.netPnl,
+                    realized_pnl_percent: trapPartialFeeAwarePnL.netPnlPercent,
+                    trading_fee_amount: trapPartialFeeAwarePnL.totalFee,
+                    trading_fee_percent: trapPartialFeeAwarePnL.feeRatePercent,
+                    opened_at: position.opened_at,
+                    closed_at: new Date().toISOString(),
+                    strategy_name: position.strategy_name,
+                    trend: position.trend,
+                    confidence_score: position.confidence_score,
+                    trend_consistency: position.trend_consistency,
+                    entry_snapshot: position.entry_snapshot,
+                    entry_atr: position.entry_atr,
+                    entry_atr_percent: position.entry_atr_percent,
+                    peak_pnl_percent: position.peak_pnl_percent,
+                    entry_exception_type: position.entry_exception_type,
+                    reversal_decision: position.reversal_decision,
+                    reversal_score: position.reversal_score,
+                    signal_id: position.signal_id,
+                  });
+                
+                if (trapPartialRecordError) {
+                  positionLogger.error(`Error creating trap partial close record: ${trapPartialRecordError}`);
+                }
+                
+                position.quantity = remainingQuantity;
+                positionLogger.warn(`🪤 LIQUIDITY_TRAP_PARTIAL: score=${trapScore}, type=${trapType}, closed=40%, remaining=60%, qty=${closeQuantity.toFixed(4)} → ${remainingQuantity.toFixed(4)}, P&L=$${partialPnL.toFixed(2)} (${partialPnlPercent.toFixed(2)}%), signals=[${trapSignals}]`);
+              }
+            } else {
+              positionLogger.info(`🪤 LIQUIDITY_TRAP_PARTIAL_SKIP: score=${trapScore} — already partial_level=${currentPartialLevel} or notional=$${positionNotional.toFixed(2)} < $${minPartialSize}`);
+            }
+            
+            // ALSO tighten stop (runs regardless of partial close)
             const tightenAmount = currentATR * 0.75;
             let tightenedStop = currentSL;
             if (position.side === 'BUY') {
@@ -998,7 +1086,7 @@ serve(async (req) => {
               if (!trapSlError) {
                 position.stop_loss = tightenedStop;
                 updatedStopLossMap.set(position.id, tightenedStop);
-                positionLogger.warn(`🪤 LIQUIDITY_TRAP_AGGRESSIVE: score=${trapScore}, type=${trapType} — stop tightened $${currentSL.toFixed(2)} → $${tightenedStop.toFixed(2)} (ATR×0.75=$${tightenAmount.toFixed(2)}), signals=[${trapSignals}]`);
+                positionLogger.warn(`🪤 LIQUIDITY_TRAP_AGGRESSIVE_STOP: score=${trapScore}, type=${trapType} — stop tightened $${currentSL.toFixed(2)} → $${tightenedStop.toFixed(2)} (ATR×0.75=$${tightenAmount.toFixed(2)})`);
               }
             }
           } else {
