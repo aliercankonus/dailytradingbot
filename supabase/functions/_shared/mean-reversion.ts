@@ -897,24 +897,18 @@ export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipReg
   const allowed = regimeAllowsMR || extremeExhaustionDetected;
   
   if (!allowed) {
-    // NEAR-MISS DIAGNOSTICS: Log how close we were to qualifying
-    const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                   trendData?.stochasticRsi?.['4h']?.k ?? 
-                   trendData?.stochasticRsi?.aggregated?.k ?? 50;
-    const percentB = trendData?.bollingerBands?.['4h']?.percentB ?? 50;
-    const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-    const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
-    const momentumScore = trendData?.momentum?.score ?? 0;
-    const symbol = trendData?.symbol ?? 'unknown';
+    // NEAR-MISS DIAGNOSTICS: All reads from MFS
+    const stochK = mfs.stochRsi['4h'].k;
+    const percentB = mfs.bollinger['4h'].percentB;
     const distToExtremeOversold = Math.abs(stochK - 10);
     const distToExtremeOverbought = Math.abs(stochK - 90);
     const nearestExtremeK = Math.min(distToExtremeOversold, distToExtremeOverbought);
     console.log(
-      `[EXHAUSTION_NEAR_MISS] ${symbol} REGIME_BLOCKED | ` +
+      `[EXHAUSTION_NEAR_MISS] ${mfs.symbol} REGIME_BLOCKED | ` +
       `phase=${trendPhase}/${expansionState} | ` +
       `K=${stochK.toFixed(1)} (dist_to_extreme=${nearestExtremeK.toFixed(1)}) | ` +
-      `%B=${percentB.toFixed(1)} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | ` +
-      `momentum=${momentumScore.toFixed(0)} | ` +
+      `%B=${percentB.toFixed(1)} | ADX=${mfs.adx.toFixed(1)} slope=${mfs.adxSlope.toFixed(2)} | ` +
+      `momentum=${mfs.momentumScore.toFixed(0)} | ` +
       `oversold_score=${oversoldSignal.exhaustionScore} overbought_score=${overboughtSignal.exhaustionScore} | ` +
       `oversold_triggers=[${oversoldSignal.triggers.join('; ')}] | ` +
       `overbought_triggers=[${overboughtSignal.triggers.join('; ')}]`
