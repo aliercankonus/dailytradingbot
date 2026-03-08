@@ -385,9 +385,11 @@ export interface MarketFeatureSnapshot {
     "4h": number[];
   };
   
-  // === Raw Klines (for pullback detection) ===
+  // === Raw Klines (for pullback detection and LTF analysis) ===
   klines15m: any[];
   klines30m: any[];
+  klines5m: any[];
+  klines1m: any[];
   
   // === Top-level Volume Ratio (for early trend detection) ===
   volumeRatio: number;
