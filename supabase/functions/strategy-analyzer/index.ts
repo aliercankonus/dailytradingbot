@@ -2986,7 +2986,50 @@ serve(async (req) => {
         const adx = mfs.adx;
         const adxSlope = mfs.adxSlope;
         const adxRising = mfs.adxRising;
-        const momentum = trendData.momentum;
+        
+        // ============= MFS COMPATIBILITY SHIM =============
+        // All downstream code reads from these MFS-backed aliases instead of raw trendData.
+        // Fields NOT in MFS (klines15m, klines30m, klines4h, volumeZScore) remain as trendData.
+        const momentum = {
+          state: mfs.momentumState,
+          score: mfs.momentumScore,
+          prevScore: mfs.prevMomentumScore,
+          confirms: mfs.momentumConfirms,
+          macdExpanding: mfs.macdExpanding,
+          macdStrong: mfs.macdStrong,
+          macdHistogram: mfs.macdHistogram,
+          macdDirectionAligned: mfs.macdDirectionAligned,
+          hasDivergence: mfs.hasDivergence,
+          divergence: mfs.hasDivergence,
+          volumeConfirms: mfs.volumeConfirms,
+          adxRising: mfs.adxRisingMomentum,
+          fakeBreakoutRisk: mfs.fakeBreakoutRisk,
+          genuineMomentum: mfs.genuineMomentum,
+          consecutiveBars1h: mfs.consecutiveBars1h,
+          consecutiveBars15m: mfs.consecutiveBars15m,
+          consecutiveBars30m: mfs.consecutiveBars30m,
+          directionStableBars: mfs.directionStableBars,
+          direction: mfs.momentumDirection,
+          prevMacdHistogram: mfs.prevMacdHistogram,
+          // Fields not directly in MFS — read from raw trendData with fallbacks
+          lastCloseAlignsWithTrend: trendData.momentum?.lastCloseAlignsWithTrend ?? false,
+          rsi: trendData.momentum?.rsi ?? 50,
+          adx: mfs.adx,
+          adxSlope: mfs.adxSlope,
+        };
+        
+        // MFS-backed sub-object aliases (replaces direct trendData access)
+        const microTrend = mfs.microTrend;
+        const stealthTrend = mfs.stealthTrend;
+        const priceDistanceFromSwing = {
+          distanceFromHighPercent: mfs.distanceFromHighPercent,
+          distanceFromLowPercent: mfs.distanceFromLowPercent,
+          atrNormalizedFromHigh: mfs.atrNormalizedFromHigh,
+          atrNormalizedFromLow: mfs.atrNormalizedFromLow,
+          high24h: mfs.high24h,
+          low24h: mfs.low24h,
+        };
+        const priceActionMomentumData = mfs.priceActionMomentum;
         
         // ============= ENHANCED TRUE ALIGNMENT FIELDS (v2.0) =============
         // Read from snapshot for consistency
