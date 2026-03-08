@@ -4363,7 +4363,7 @@ export const MARKET_REGIME_CLASSIFIER = {
       bollingerMinPercentB: -5,
       stochRsiMaxK: 95,
       stochRsiMinK: 5,
-      momentumScoreMinimum: 0,           // Momentum score cannot block at strong trend
+      momentumScoreMinimum: 10,          // Min |momentum| >= 10 required (was 0) — prevents weak-momentum entries
       qualityBoost: 5,                   // +5 to quality score
       positionMultiplier: 0.55,          // 55% position
     },
