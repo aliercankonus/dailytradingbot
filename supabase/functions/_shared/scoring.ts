@@ -4372,7 +4372,7 @@ export const deriveTradeDirection = (
     
     // Evidence 2: StochRSI extreme (K >= 90 or K <= 10)
     // NEW: Absolute extreme (K >= 98 or K <= 2) counts as 2 points when ADX < strong trend
-    const stochK4h = extractStochRsiK(trendData, '4h');
+    const stochK4h = mfs.stochRsi["4h"].k;
     const absoluteExtremeHigh = BR.STOCHRSI_ABSOLUTE_EXTREME_K_HIGH ?? 98;
     const absoluteExtremeLow = BR.STOCHRSI_ABSOLUTE_EXTREME_K_LOW ?? 2;
     const absoluteExtremeMaxAdx = BR.STOCHRSI_ABSOLUTE_EXTREME_MAX_ADX ?? 30;
