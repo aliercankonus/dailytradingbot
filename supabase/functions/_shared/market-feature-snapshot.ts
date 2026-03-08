@@ -351,6 +351,31 @@ export interface MarketFeatureSnapshot {
   
   // === Market Regime (raw from trendData) ===
   regime: string;
+  
+  // === Aggregate Scores (top-level trendData fields) ===
+  volumeScore: number;           // Aggregate volume quality score
+  reversalScore: number;         // Reversal risk metric
+  volumeZScore: number;          // Volume z-score from volatility
+  
+  // === Momentum Extended ===
+  lastCloseAlignsWithTrend: boolean;
+  momentumRsi: number;           // RSI from momentum object
+  
+  // === Trend Age ===
+  trendAgeBars: number;          // Bars since trend started
+  
+  // === StochRSI History (for Flash Crash detection) ===
+  stochRsiHistory: {
+    "1h": number[];
+    "4h": number[];
+  };
+  
+  // === Raw Klines (for pullback detection) ===
+  klines15m: any[];
+  klines30m: any[];
+  
+  // === Top-level Volume Ratio (for early trend detection) ===
+  volumeRatio: number;
 }
 
 // ============= DEFAULTS =============
