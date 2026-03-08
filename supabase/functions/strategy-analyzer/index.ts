@@ -1558,7 +1558,7 @@ const analyzePullbackEntry = (mfs: MarketFeatureSnapshot, trend: string, smartPu
     }
     
     // AVOID: Oversold in weak downtrend
-    if (rsi < RSI_THRESHOLDS.OVERSOLD || stochRsi.oversoldCount >= 2) {
+    if (rsi < RSI_THRESHOLDS.OVERSOLD || mfs.stochRsiAggregated.oversoldCount >= 2) {
       return { isPullback: false, hasBothConditions: false, pullbackDepth: 0, entryTimingScore: 0, reason: "Avoid: Oversold in weak downtrend" };
     }
   }
