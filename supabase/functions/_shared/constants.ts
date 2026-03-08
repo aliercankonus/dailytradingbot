@@ -7455,12 +7455,11 @@ export const STOCHRSI_RUNWAY_GATE = {
   // Prevents shorting deep oversold after 3% drops, or longing deep overbought after 3% rallies
   DEEP_EXHAUSTION_COMPOUND: {
     ENABLED: true,
-    // SHORT: Block when K < 15 AND moveFromHigh > 2%
-    // RELAXED: was 12, raised to 15 to catch AVAX(K=14), SOL(K=3.7) etc.
-    SHORT_MAX_K: 15,
+    // SHORT: Block when K < 20 AND moveFromHigh > 2% (tightened from 15)
+    SHORT_MAX_K: 20,
     SHORT_MIN_MOVE_PERCENT: 2.0,
-    // LONG: Block when K > 85 AND moveFromLow > 2%
-    LONG_MIN_K: 85,
+    // LONG: Block when K > 80 AND moveFromLow > 2% (tightened from 85)
+    LONG_MIN_K: 80,
     LONG_MIN_MOVE_PERCENT: 2.0,
     // Position multiplier if ADX is very high (probe instead of block)
     // RELAXED: Lowered from 35 to 30 — AVAX(ADX=34), XRP(ADX=33) were being hard-blocked
