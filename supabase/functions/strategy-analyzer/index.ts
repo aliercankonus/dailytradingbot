@@ -185,7 +185,9 @@ import {
   TREND_EXPANSION_EXEMPTION,
   // NEW: Risk Score Position Scaling & Dynamic Entry Window
   RISK_SCORE_SCALING,
-  DYNAMIC_ENTRY_WINDOW
+  DYNAMIC_ENTRY_WINDOW,
+  // NEW: LTF Micro Timing Gate (1m/5m entry timing quality)
+  LTF_MICRO_TIMING_GATE
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
