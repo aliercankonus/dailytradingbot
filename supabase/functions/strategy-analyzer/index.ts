@@ -611,13 +611,8 @@ const logRejectionWithAI = async (
     isTransitioning: mfs.smartMomentum?.isTransitioning ?? null,
   } : {};
   
-  // Extract regime data from MFS
-  const regimeData = mfs ? {
-    effectiveRegime: mfs.regime?.regime ?? null,
-    regimeConfidence: mfs.regime?.confidence ?? null,
-    regimePersistence: mfs.regime?.persistedBars ?? null,
-    regimeCandidate: mfs.regime?.candidate ?? null,
-  } : {};
+  // Regime data is not in MFS (computed separately) — pass empty, let filtersStatus override
+  const regimeData = {};
   
   // Extract volume data from MFS
   const volumeData = mfs ? {
