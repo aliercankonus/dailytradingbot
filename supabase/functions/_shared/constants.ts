@@ -5814,10 +5814,10 @@ export const MOVE_EXHAUSTION_FILTER_PARAMS = {
     // ADX slope must be <= 0 (flat or declining) - trend energy decay required
     MAX_ADX_SLOPE: 0,
     // StochRSI extremes required for counter-trend entry
-    // LONG bounce: K must be < 15 (oversold)
-    LONG_MAX_K_FOR_EXCEPTION: 15,
-    // SHORT fade: K must be > 85 (overbought)
-    SHORT_MIN_K_FOR_EXCEPTION: 85,
+    // LONG bounce: K must be < 20 (oversold) — widened from 15
+    LONG_MAX_K_FOR_EXCEPTION: 20,
+    // SHORT fade: K must be > 80 (overbought) — widened from 85
+    SHORT_MIN_K_FOR_EXCEPTION: 80,
     // Position size for mean reversion exceptions (probe size)
     POSITION_SIZE: 0.25,
     // Minimum move percentage before mean reversion is allowed
