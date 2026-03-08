@@ -255,13 +255,7 @@ import {
   // NEW: 4-State Regime Classifier + Persistence
   classify4StateRegime,
   applyRegimePersistence,
-  // CENTRALIZED EXTRACTION HELPERS (consistency across all edge functions)
-  extractADX,
-  extractADXSlope,
-  extractStochRsiK,
-  extractStochRsiD,
-  extractAtrPercent,
-  extractPriceChange,
+  // Legacy extractors removed — all logic reads from MarketFeatureSnapshot (mfs) directly
   type UnifiedReversalResult,
   type MarketRegime,
   type MarketRegimeEnhancedResult,

@@ -3,19 +3,94 @@
 // Built ONCE per symbol per cycle; gates read from snapshot, never from raw trendData.
 // This eliminates repeated extraction calls, fallback inconsistencies, and path divergence.
 
-import type { TrendDataResponse, PartialTrendData, TrendDirection, MomentumState, BollingerPricePosition } from "./trend-types.ts";
-import {
-  extractADX,
-  extractADXSlope,
-  extractStochRsiK,
-  extractStochRsiD,
-  extractAtrPercent,
-  extractAtr,
-  extractCurrentPrice,
-  extractMomentumState,
-  extractPriceChange,
-  extractTimeframeTrend,
-} from "./scoring.ts";
+import type { TrendDataResponse, PartialTrendData, TrendDirection, MomentumState, BollingerPricePosition, ADXSlopeResult } from "./trend-types.ts";
+
+// ============= INTERNAL EXTRACTORS (MFS-native) =============
+// These were previously in scoring.ts. Now co-located with the only consumer: buildMarketFeatureSnapshot.
+// No other module should call these — all downstream code reads from the snapshot.
+
+const extractADX = (trendData: PartialTrendData | any, defaultValue: number = 20): number => {
+  const volatilityAdx = trendData?.volatility?.adx;
+  if (typeof volatilityAdx === 'number' && !isNaN(volatilityAdx)) return volatilityAdx;
+  if (typeof volatilityAdx === 'object' && volatilityAdx !== null) {
+    const objValue = (volatilityAdx as any).value;
+    if (typeof objValue === 'number' && !isNaN(objValue)) return objValue;
+  }
+  const momentumAdx = (trendData?.momentum as any)?.adx;
+  if (typeof momentumAdx === 'number' && !isNaN(momentumAdx)) return momentumAdx;
+  return defaultValue;
+};
+
+const extractADXSlope = (trendData: PartialTrendData | any): ADXSlopeResult => {
+  const volatilitySlope = (trendData?.volatility as any)?.adxSlope;
+  if (typeof volatilitySlope === 'number' && !isNaN(volatilitySlope)) {
+    return { slope: volatilitySlope, isRising: volatilitySlope > 0, source: 'adxSlope' };
+  }
+  const momentumSlope = (trendData?.momentum as any)?.adxSlope;
+  if (typeof momentumSlope === 'number' && !isNaN(momentumSlope)) {
+    return { slope: momentumSlope, isRising: momentumSlope > 0, source: 'momentum' };
+  }
+  const adxRising = trendData?.momentum?.adxRising === true;
+  return { slope: 0, isRising: adxRising, source: adxRising ? 'momentum' : 'default' };
+};
+
+const extractStochRsiK = (trendData: PartialTrendData | any, timeframe: '4h' | '1h' | '30m' | '15m' = '4h', defaultValue: number = 50): number => {
+  const stochRsiPath = trendData?.stochasticRsi?.[timeframe]?.k;
+  if (typeof stochRsiPath === 'number' && !isNaN(stochRsiPath)) return stochRsiPath;
+  const indicatorsPath = (trendData?.timeframes as any)?.[timeframe]?.indicators?.stochRsi?.k;
+  if (typeof indicatorsPath === 'number' && !isNaN(indicatorsPath)) return indicatorsPath;
+  if (timeframe === '4h') {
+    const aggregatedPath = (trendData?.stochasticRsi as any)?.aggregated?.k;
+    if (typeof aggregatedPath === 'number' && !isNaN(aggregatedPath)) return aggregatedPath;
+  }
+  return defaultValue;
+};
+
+const extractStochRsiD = (trendData: PartialTrendData | any, timeframe: '4h' | '1h' | '30m' | '15m' = '4h', defaultValue: number = 50): number => {
+  const stochRsiPath = trendData?.stochasticRsi?.[timeframe]?.d;
+  if (typeof stochRsiPath === 'number' && !isNaN(stochRsiPath)) return stochRsiPath;
+  const indicatorsPath = (trendData?.timeframes as any)?.[timeframe]?.indicators?.stochRsi?.d;
+  if (typeof indicatorsPath === 'number' && !isNaN(indicatorsPath)) return indicatorsPath;
+  if (timeframe === '4h') {
+    const aggregatedPath = (trendData?.stochasticRsi as any)?.aggregated?.d;
+    if (typeof aggregatedPath === 'number' && !isNaN(aggregatedPath)) return aggregatedPath;
+  }
+  return defaultValue;
+};
+
+const extractAtrPercent = (trendData: PartialTrendData | any, defaultValue: number = 1.5): number => {
+  const atrPercent = trendData?.volatility?.atrPercent;
+  if (typeof atrPercent === 'number' && !isNaN(atrPercent)) return atrPercent;
+  return defaultValue;
+};
+
+const extractAtr = (trendData: PartialTrendData | any, defaultValue: number = 0): number => {
+  const atr = trendData?.volatility?.atr;
+  if (typeof atr === 'number' && !isNaN(atr)) return atr;
+  return defaultValue;
+};
+
+const extractCurrentPrice = (trendData: PartialTrendData | any, defaultValue: number = 0): number => {
+  const price = trendData?.currentPrice;
+  if (typeof price === 'number' && !isNaN(price) && price > 0) return price;
+  return defaultValue;
+};
+
+const extractMomentumState = (trendData: PartialTrendData | any): 'none' | 'mixed' | 'confirmed' | 'building' | 'exhausted' => {
+  const state = trendData?.momentum?.state;
+  if (state === 'none' || state === 'mixed' || state === 'confirmed' || state === 'building' || state === 'exhausted') return state;
+  return 'none';
+};
+
+const extractPriceChange = (trendData: PartialTrendData | any, timeframe: '4h' | '24h' = '4h'): number => {
+  if (timeframe === '4h') return (trendData as any)?.priceChange?.percent4h ?? 0;
+  return (trendData as any)?.priceChange?.percent24h ?? 0;
+};
+
+const extractTimeframeTrend = (trendData: PartialTrendData | any, timeframe: '4h' | '1h' | '30m' | '15m'): { trend: string; confidence: number } => {
+  const tf = trendData?.timeframes?.[timeframe];
+  return { trend: tf?.trend ?? 'neutral', confidence: tf?.confidence ?? 0 };
+};
 
 // ============= TIMEFRAME FEATURE SET =============
 export interface TimeframeFeatures {
