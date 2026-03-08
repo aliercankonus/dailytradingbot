@@ -232,7 +232,7 @@ export function checkLtfStructureFlip(
  * Main entry point for counter-trend admission evaluation
  * Single authority for allowing reversal entries
  * 
- * @param trendData - Full trend data from calculate-trend
+ * @param mfs - MarketFeatureSnapshot for the symbol
  * @param derivedDirection - The direction derived by the signal generator
  * @param htfTrend - The higher timeframe trend ('bullish', 'bearish', 'neutral')
  * @returns CounterTrendAdmissionResult with pass/fail and detailed diagnostics
