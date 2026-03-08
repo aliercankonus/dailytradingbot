@@ -41,11 +41,27 @@ async function logExecutionRejection(
   symbol: string,
   reason: string,
   signal: any,
-  trendData: PartialTrendData | null,
+  mfsSnapshot: MarketFeatureSnapshot | null,
   additionalData?: Record<string, unknown>
 ) {
   const symbolLogger = logger.forSymbol(symbol);
   try {
+    // Write compact MFS summary to trend_data column instead of raw trendData
+    const mfsSummary = mfsSnapshot ? {
+      primaryTrend: mfsSnapshot.primaryTrend,
+      adx: mfsSnapshot.adx,
+      adxSlope: mfsSnapshot.adxSlope,
+      atrPercent: mfsSnapshot.atrPercent,
+      regime: mfsSnapshot.regime,
+      momentumState: mfsSnapshot.momentumState,
+      volumeScore: mfsSnapshot.volumeScore,
+      reversalScore: mfsSnapshot.reversalScore,
+      stochRsi4hK: mfsSnapshot.stochRsi['4h'].k,
+      trueAlignmentScore: mfsSnapshot.trueAlignment?.score,
+      bollinger1hSqueeze: mfsSnapshot.bollinger['1h'].squeeze,
+      bollinger1hPercentB: mfsSnapshot.bollinger['1h'].percentB,
+    } : null;
+
     await supabase.from('signal_rejection_log').insert({
       user_id: userId,
       symbol: symbol,
@@ -62,7 +78,7 @@ async function logExecutionRejection(
         executionFilter: reason,
         ...additionalData
       },
-      trend_data: trendData,
+      trend_data: mfsSummary,
       checked_at: new Date().toISOString()
     });
     symbolLogger.info(`📝 Logged execution rejection: ${reason}`);
