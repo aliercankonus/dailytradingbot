@@ -2732,7 +2732,7 @@ const checkExtremeMomentumVeto = (
 };
 
 export const deriveTradeDirection = (
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   primaryTrend: string,
   orderFlowData?: { score: number; signal: string } | null
 ): DirectionResult => {
@@ -2740,11 +2740,15 @@ export const deriveTradeDirection = (
   const P = DIRECTION_DERIVATION_PARAMS;
   
   
-  if (!trendData) {
+  if (!mfs) {
     return { direction: null, confidence: 0, source: "none", reasons: ["No trend data"] };
   }
   
-  const timeframes = trendData.timeframes || {};
+  // ============= MFS ADAPTER LAYER =============
+  // Map MFS fields to local variables matching old trendData access patterns.
+  // This allows the 2000+ lines of tier logic below to remain unchanged.
+  // Future: inline these directly once migration is validated.
+  const timeframes = mfs.timeframes;
   const trend4h = timeframes['4h']?.trend || "neutral";
   const trend1h = timeframes['1h']?.trend || "neutral";
   const trend30m = timeframes['30m']?.trend || "neutral";
@@ -2757,8 +2761,84 @@ export const deriveTradeDirection = (
   let outerWeightedScore = 0;
   
   // Get ADX for price action override check
-  const adx = trendData.volatility?.adx || trendData.momentum?.adx || 0;
-  const adxSlope = trendData.volatility?.adxSlope || trendData.momentum?.adxSlope || 0;
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  
+  // ============= trendData COMPATIBILITY SHIM =============
+  // Provides trendData-shaped access for code paths that still reference it.
+  // This is a read-only proxy — all data comes from MFS.
+  const trendData = {
+    timeframes: mfs.timeframes,
+    volatility: {
+      adx: mfs.adx,
+      adxSlope: mfs.adxSlope,
+      adxRising: mfs.adxRising,
+      volumeRatio: mfs.volume["1h"].volumeRatio,
+      relativeATR: mfs.relativeATR,
+    },
+    momentum: {
+      adx: mfs.adx,
+      adxSlope: mfs.adxSlope,
+      adxRising: mfs.adxRisingMomentum,
+      score: mfs.smartMomentum?.score ?? 0,
+      macdHistogram: mfs.macdHistogram,
+      macdSlope: mfs.smartMomentum?.components?.macdSlope ?? 0,
+      rsi: mfs.timeframes["1h"].rsi,
+      confirms: mfs.momentumConfirms,
+      state: mfs.momentumState,
+      volumeConfirms: mfs.volumeConfirms,
+      consecutiveBars1h: mfs.consecutiveBars1h,
+      consecutiveBars30m: mfs.consecutiveBars30m,
+      consecutiveBars: mfs.consecutiveBars1h,
+      direction: mfs.momentumDirection,
+      directionStableBars: mfs.directionStableBars,
+      prevMacdHistogram: mfs.prevMacdHistogram,
+      momentumScore: mfs.smartMomentum?.score ?? 0,
+      stochRsiK: mfs.stochRsi["4h"].k,
+    },
+    indicators: {
+      rsi: mfs.timeframes["1h"].rsi,
+      macdHistogram: mfs.macdHistogram,
+    },
+    smartMomentum: mfs.smartMomentum ? {
+      ...mfs.smartMomentum,
+      components: mfs.smartMomentum.components ?? {
+        macdSlope: 0,
+        priceImpulse: 0,
+        emaSpreadRoC: 0,
+        rsiMomentum: 0,
+      },
+    } : undefined,
+    stochasticRsi: {
+      '15m': mfs.stochRsi["15m"],
+      '30m': mfs.stochRsi["30m"],
+      '1h': mfs.stochRsi["1h"],
+      '4h': mfs.stochRsi["4h"],
+    },
+    stochRsi: mfs.stochRsi["1h"],
+    stochRsi1h: mfs.stochRsi["1h"],
+    bollingerBands: {
+      '15m': mfs.bollinger["15m"],
+      '30m': mfs.bollinger["30m"],
+      '1h': mfs.bollinger["1h"],
+      '4h': mfs.bollinger["4h"],
+      squeezeActive: mfs.bollinger.squeezeActive,
+    },
+    bollingerBand: {
+      squeeze: mfs.bollinger["4h"].squeeze,
+    },
+    confidence: mfs.confidence,
+    isAligned: mfs.isAligned,
+    trueAlignment: mfs.trueAlignment,
+    volume: {
+      ratio: mfs.volume["1h"].volumeRatio,
+    },
+    squeeze: {
+      justReleased: mfs.squeezeJustReleased,
+    },
+    priceActionMomentum: mfs.priceActionMomentum,
+    adx: mfs.adx,
+  };
   
   // ============= PHASE 1: REGIME CLASSIFICATION =============
   // Classify market regime BEFORE direction derivation to adjust gate behavior
