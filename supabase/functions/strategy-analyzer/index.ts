@@ -18233,6 +18233,14 @@ serve(async (req) => {
               signalType,
               gate: "CORRELATION_RISK",
             },
+            trend_data: {
+              primaryTrend: mfs.primaryTrend ?? null, adx: mfs.adx ?? null,
+              adxSlope: mfs.adxSlope ?? null, reversalScore: mfs.reversalScore ?? null,
+              volumeScore: mfs.volumeScore ?? null,
+              stochRsi4hK: mfs.stochRsi?.["4h"]?.k ?? null, stochRsi1hK: mfs.stochRsi?.["1h"]?.k ?? null,
+              momentumScore: mfs.smartMomentum?.score ?? null, momentumPhase: mfs.smartMomentum?.phase ?? null,
+              confidence: mfs.confidence ?? null,
+            },
           });
           continue;
         }
