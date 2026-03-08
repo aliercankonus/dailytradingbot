@@ -196,6 +196,78 @@ export async function createBinanceSignature(queryString: string, apiSecret: str
     .join('');
 }
 
+// ============= FETCH TIMEOUT & CACHE =============
+
+/** Timeouts by endpoint type */
+const FETCH_TIMEOUTS = {
+  klines: 5000,    // 5s for kline data
+  ticker: 3000,    // 3s for ticker/price
+  depth: 3000,     // 3s for order book
+  exchangeInfo: 5000,
+} as const;
+
+/**
+ * Fetch with AbortController timeout — prevents 30-50s hangs from Binance throttling
+ */
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error(`BINANCE_TIMEOUT after ${timeoutMs}ms: ${url.split('?')[0]}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/**
+ * In-memory kline cache — prevents redundant Binance calls within the same cycle.
+ * TTL is 80% of the timeframe duration (e.g., 48s for 1m, 720s for 15m).
+ */
+const klineCache = new Map<string, { data: any[]; ts: number }>();
+
+function getKlineCacheTTL(interval: string): number {
+  const intervalSeconds: Record<string, number> = {
+    '1m': 60, '3m': 180, '5m': 300, '15m': 900,
+    '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400,
+    '1d': 86400,
+  };
+  const seconds = intervalSeconds[interval] || 3600;
+  return seconds * 0.8 * 1000; // 80% of timeframe in ms
+}
+
+/**
+ * Bounded concurrency limiter for Binance API calls.
+ * Prevents overwhelming Binance with parallel requests.
+ */
+const MAX_CONCURRENT_BINANCE_FETCHES = 3;
+let activeFetches = 0;
+const fetchQueue: Array<{ resolve: () => void }> = [];
+
+async function acquireFetchSlot(): Promise<void> {
+  if (activeFetches < MAX_CONCURRENT_BINANCE_FETCHES) {
+    activeFetches++;
+    return;
+  }
+  return new Promise<void>((resolve) => {
+    fetchQueue.push({ resolve });
+  });
+}
+
+function releaseFetchSlot(): void {
+  activeFetches--;
+  if (fetchQueue.length > 0) {
+    const next = fetchQueue.shift()!;
+    activeFetches++;
+    next.resolve();
+  }
+}
+
 // ============= API HELPERS =============
 
 /**
@@ -203,7 +275,12 @@ export async function createBinanceSignature(queryString: string, apiSecret: str
  */
 export async function getCurrentPrice(symbol: string): Promise<number | null> {
   try {
-    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    await acquireFetchSlot();
+    const response = await fetchWithTimeout(
+      `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
+      FETCH_TIMEOUTS.ticker
+    );
+    releaseFetchSlot();
     if (!response.ok) {
       logger.warn(`Failed to fetch price for ${symbol}: ${response.status}`);
       return null;
@@ -211,6 +288,7 @@ export async function getCurrentPrice(symbol: string): Promise<number | null> {
     const data = await response.json();
     return parseFloat(data.price);
   } catch (error) {
+    releaseFetchSlot();
     logger.error(`Error fetching price for ${symbol}: ${error}`);
     return null;
   }
@@ -221,13 +299,19 @@ export async function getCurrentPrice(symbol: string): Promise<number | null> {
  */
 export async function get24hrTicker(symbol: string): Promise<any | null> {
   try {
-    const response = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+    await acquireFetchSlot();
+    const response = await fetchWithTimeout(
+      `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`,
+      FETCH_TIMEOUTS.ticker
+    );
+    releaseFetchSlot();
     if (!response.ok) {
       logger.warn(`Failed to fetch 24hr ticker for ${symbol}: ${response.status}`);
       return null;
     }
     return await response.json();
   } catch (error) {
+    releaseFetchSlot();
     logger.error(`Error fetching 24hr ticker for ${symbol}: ${error}`);
     return null;
   }
@@ -238,7 +322,12 @@ export async function get24hrTicker(symbol: string): Promise<any | null> {
  */
 export async function getOrderBookSpread(symbol: string): Promise<{ bid: number; ask: number; spread: number } | null> {
   try {
-    const response = await fetch(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=5`);
+    await acquireFetchSlot();
+    const response = await fetchWithTimeout(
+      `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=5`,
+      FETCH_TIMEOUTS.depth
+    );
+    releaseFetchSlot();
     if (!response.ok) {
       return null;
     }
@@ -249,6 +338,7 @@ export async function getOrderBookSpread(symbol: string): Promise<{ bid: number;
     
     return { bid: bestBid, ask: bestAsk, spread };
   } catch (error) {
+    releaseFetchSlot();
     logger.error(`Error fetching order book for ${symbol}: ${error}`);
     return null;
   }
@@ -256,6 +346,7 @@ export async function getOrderBookSpread(symbol: string): Promise<{ bid: number;
 
 /**
  * Fetch klines (candlestick data) from Binance
+ * Features: 5s timeout, in-memory cache, bounded concurrency, exponential backoff retry
  * @alias getKlines - Preferred name for consistency
  */
 export async function fetchKlines(
@@ -264,13 +355,25 @@ export async function fetchKlines(
   limit: number = 100,
   retries: number = 2
 ): Promise<any[]> {
+  // Check cache first
+  const cacheKey = `${symbol}_${interval}_${limit}`;
+  const cached = klineCache.get(cacheKey);
+  const ttl = getKlineCacheTTL(interval);
+  
+  if (cached && Date.now() - cached.ts < ttl) {
+    return cached.data;
+  }
+
   let lastError: Error | null = null;
   
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const response = await fetch(
-        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+      await acquireFetchSlot();
+      const response = await fetchWithTimeout(
+        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        FETCH_TIMEOUTS.klines
       );
+      releaseFetchSlot();
       
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500) {
@@ -280,10 +383,17 @@ export async function fetchKlines(
       }
       
       const klines = await response.json();
-      return Array.isArray(klines) ? klines : [];
+      const result = Array.isArray(klines) ? klines : [];
+      
+      // Store in cache
+      klineCache.set(cacheKey, { data: result, ts: Date.now() });
+      
+      return result;
     } catch (error) {
+      releaseFetchSlot();
       lastError = error instanceof Error ? error : new Error(String(error));
-      logger.warn(`Failed to fetch ${interval} klines for ${symbol} (attempt ${attempt + 1}/${retries + 1}): ${lastError.message}`);
+      const isTimeout = lastError.message.includes('BINANCE_TIMEOUT');
+      logger.warn(`${isTimeout ? '⏰' : '❌'} Failed to fetch ${interval} klines for ${symbol} (attempt ${attempt + 1}/${retries + 1}): ${lastError.message}`);
       
       if (attempt < retries) {
         await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt)));
