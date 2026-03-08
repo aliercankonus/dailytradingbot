@@ -192,6 +192,10 @@ const Index = () => {
                 <MomentumStatusDashboard />
               </TabsContent>
 
+              <TabsContent value="ltf-micro">
+                <LtfMicroMomentumWidget />
+              </TabsContent>
+
               <TabsContent value="regime">
                 <RegimeTransitionLog />
               </TabsContent>
