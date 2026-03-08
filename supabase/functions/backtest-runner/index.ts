@@ -398,17 +398,20 @@ function evaluateProductionGates(
     }
   }
 
-  // ===== GATE 3: Deep StochRSI Extremes (production DEEP_STOCHRSI_HARD_GATE) =====
+  // ===== GATE 3: Deep StochRSI Extremes — OPTIMIZED: ADX-aware relaxation =====
   if (stochK < STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERSOLD || stochK > STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERBOUGHT) {
-    // Strong Trend Tier0 Override
-    if (adx >= ADX_THRESHOLDS.EXTREME) {
+    // Strong Trend Tier0 Override — expanded from EXTREME to VERY_STRONG
+    if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.30);
+    } else if (adx >= ADX_THRESHOLDS.STRONG && adxSlope > 0.2) {
+      // NEW: Allow with reduced sizing when trend is building
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
     } else {
       return fail('DEEP_STOCHRSI_EXTREME');
     }
   }
 
-  // ===== GATE 4: Determine Direction =====
+  // ===== GATE 4: Determine Direction — OPTIMIZED: relaxed thresholds =====
   let direction: 'LONG' | 'SHORT' | null = null;
   const emaBullish = primaryTrend === 'bullish';
   const emaBearish = primaryTrend === 'bearish';
@@ -417,10 +420,17 @@ function evaluateProductionGates(
     direction = 'LONG';
   } else if (emaBearish && momentumResult.score < 0) {
     direction = 'SHORT';
-  } else if (momentumResult.score > 20 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score > 15 && adx > ADX_THRESHOLDS.STRONG) {
+    // Relaxed from >20 to >15
     direction = 'LONG';
-  } else if (momentumResult.score < -20 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score < -15 && adx > ADX_THRESHOLDS.STRONG) {
     direction = 'SHORT';
+  } else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
+    // NEW: Strong structural trend can derive direction from DI
+    const diPlus = mfs.diPlus || 0;
+    const diMinus = mfs.diMinus || 0;
+    if (diPlus > diMinus + 5) direction = 'LONG';
+    else if (diMinus > diPlus + 5) direction = 'SHORT';
   }
   
   if (!direction) {
@@ -588,20 +598,20 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: decayResult.exitReason };
   }
 
-  // 5. Production Trailing Stop (peak-adaptive)
-  if (position.peakPnl >= 1.0) {
-    // Tiered trailing distance based on peak
+  // 5. Production Trailing Stop (peak-adaptive) — OPTIMIZED: tighter distances
+  if (position.peakPnl >= 0.8) {
     let trailDistance: number;
     if (position.peakPnl >= 2.0) {
-      trailDistance = 0.15; // Tight for capture zone
+      trailDistance = 0.12; // Capture zone (was 0.15)
     } else if (position.peakPnl >= 1.5) {
-      trailDistance = 0.18; // Harvest zone
+      trailDistance = 0.15; // Harvest zone (was 0.18)
+    } else if (position.peakPnl >= 1.0) {
+      trailDistance = 0.18; // Probe zone (was 0.22)
     } else {
-      trailDistance = 0.22; // Probe zone
+      trailDistance = 0.25; // Early zone — new tier for 0.8-1.0 peak
     }
     
-    // Min floor
-    const minTrailFloor = 0.8;
+    const minTrailFloor = 0.5; // Lowered from 0.8 to lock profits earlier
     const lockLevel = Math.max(minTrailFloor, position.peakPnl * (1 - trailDistance));
     
     if (pnlPercent < lockLevel && pnlPercent > 0) {
@@ -609,8 +619,8 @@ function checkProductionExits(
     }
   }
 
-  // 6. Micro Profit Lock (production)
-  if (position.peakPnl > 0.15 && position.peakPnl < 0.50) {
+  // 6. Micro Profit Lock (production) — OPTIMIZED: wider window
+  if (position.peakPnl > 0.10 && position.peakPnl < 0.60) {
     const microResult = evaluateMicroProfitLock(posCtx, position.peakPnl);
     if (microResult.applied && microResult.newStopLoss !== null) {
       const shouldExit = side === 'LONG'
@@ -622,8 +632,8 @@ function checkProductionExits(
     }
   }
 
-  // 7. Progressive Profit Lock (production)
-  if (position.peakPnl >= 0.50 && position.peakPnl < 2.75) {
+  // 7. Progressive Profit Lock (production) — OPTIMIZED: earlier activation
+  if (position.peakPnl >= 0.40 && position.peakPnl < 2.75) {
     const progResult = evaluateProgressiveProfitLock(posCtx, position.peakPnl);
     if (progResult.applied && progResult.newStopLoss !== null) {
       const shouldExit = side === 'LONG'
@@ -643,9 +653,24 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'time_stop_24h' };
   }
 
-  // 9. Moderate exhaustion exit (production)
-  if (position.peakPnl > 0.50 && pnlPercent < position.peakPnl * 0.3) {
+  // 9. Moderate exhaustion exit — OPTIMIZED: lower floor (was 0.50)
+  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
+  }
+
+  // 10. NEW: Momentum reversal exit — cut losses when trend flips
+  if (hoursHeld > 2) {
+    if ((side === 'LONG' && momentumScore < -25 && primaryTrend === 'bearish') ||
+        (side === 'SHORT' && momentumScore > 25 && primaryTrend === 'bullish')) {
+      if (pnlPercent < -0.5) {
+        return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
+      }
+    }
+  }
+
+  // 11. NEW: ADX collapse exit — exit when structure breaks down
+  if (adx < 15 && adxSlope < -1.0 && hoursHeld > 4 && pnlPercent < 0.3) {
+    return { shouldExit: true, exitReason: 'adx_collapse_exit' };
   }
 
   return { shouldExit: false, exitReason: '' };
