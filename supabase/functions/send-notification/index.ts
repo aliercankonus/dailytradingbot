@@ -599,7 +599,7 @@ const handler = async (req: Request): Promise<Response> => {
       twilioAccountSid &&
       twilioAuthToken &&
       twilioPhoneNumber &&
-      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation' || payload.type === 'bot_health_critical' || payload.type === 'micro_exhaustion_exit' || isBinanceCredentialError)
+      (payload.type === 'stop_loss_hit' || payload.type === 'take_profit_hit' || payload.type === 'strategy_rotation' || payload.type === 'bot_health_critical' || isBinanceCredentialError)
     ) {
       try {
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
