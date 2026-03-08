@@ -29,7 +29,7 @@ serve(async (req) => {
     const { data: pendingEvents, error: fetchError } = await supabase
       .from('oversold_event_study')
       .select('*')
-      .eq('evaluation_complete', false)
+      .eq('evaluated', false)
       .lte('event_time', cutoff24h)
       .limit(50);
 
