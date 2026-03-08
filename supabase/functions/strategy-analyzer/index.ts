@@ -10538,7 +10538,7 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🚫 OVEREXTENSION ATR BYPASS blocked by cascade protection: ${symbolProbeCount}/${maxProbes6h} probes in 6h${isProbeBarCooldownActive(symbol) ? ', bar cooldown active' : ''} — falling through to standard block`);
               // Fall through to standard block below
             } else {
-              positionMultiplier = Math.min(positionMultiplier, 0.20);
+              moveExhaustionPositionMultiplier = Math.min(moveExhaustionPositionMultiplier, 0.20);
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 OVEREXTENSION ATR BYPASS: trendAcceleration confirmed (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, momentum=${smartMomentum.score.toFixed(0)}) — allowing 20% probe despite ${currentOverextensionAtr.toFixed(2)} ATR overextension`);
             }
           } else if (!isMRDirection) {
