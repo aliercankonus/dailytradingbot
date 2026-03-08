@@ -9,6 +9,8 @@ const corsHeaders = {
 
 // Intervals to pre-cache (used by strategy-analyzer)
 const CACHE_INTERVALS = [
+  { interval: '1m', limit: 200 },
+  { interval: '5m', limit: 200 },
   { interval: '15m', limit: 200 },
   { interval: '30m', limit: 200 },
   { interval: '1h', limit: 200 },
