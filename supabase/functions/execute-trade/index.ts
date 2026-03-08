@@ -2212,7 +2212,7 @@ serve(async (req) => {
     // ATR at entry provides stable baseline for volatility-adjusted exits
     // ============================================================
     // ATR is extracted from trendData volatility object
-    const entryAtrPercent = trendData?.volatility?.atrPercent ?? atrPercent ?? 1.5;
+    const entryAtrPercent = mfs.atrPercent || atrPercent || 1.5;
     const entryAtr = (entryAtrPercent / 100) * executedPrice;  // Convert percent to absolute ATR
     logger.info(`📊 Entry ATR stored: ${entryAtr.toFixed(4)} (${entryAtrPercent.toFixed(2)}% of entry price)`);
 
