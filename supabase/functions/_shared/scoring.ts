@@ -3160,7 +3160,7 @@ export const deriveTradeDirection = (
     let persistenceBonus = 0;
     if (GATE_RELAXATION_FLAGS.DIRECTION_PERSISTENCE) {
       // Check if direction has been stable for N candles (from trend data if available)
-      const directionStableBars = trendData.momentum?.directionStableBars ?? 0;
+      const directionStableBars = mfs.directionStableBars ?? 0;
       if (directionStableBars >= P.PERSISTENCE_BARS) {
         persistenceBonus = P.PERSISTENCE_BONUS;
         reasons.push(`PERSISTENCE BONUS: Direction stable for ${directionStableBars} bars → +${(persistenceBonus * 100).toFixed(0)}% threshold reduction`);
