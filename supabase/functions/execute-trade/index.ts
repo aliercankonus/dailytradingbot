@@ -1563,16 +1563,16 @@ serve(async (req) => {
               trend: currentTrend,
               confidence: signal.confidence_score || 0,
               trendConsistency: trendConsistency,
-              adx: trendData?.volatility?.adx || 0,
-              rsi: trendData?.timeframes?.['1h']?.indicators?.rsi || 50,
-              macdHistogram: trendData?.timeframes?.['1h']?.indicators?.macdHistogram || 0,
-              stochRSI: trendData?.stochasticRsi?.['1h'] || { k: 50, d: 50, signal: 'neutral' },
+              adx: mfs.adx,
+              rsi: mfs.timeframes['1h'].indicators?.rsi ?? 50,
+              macdHistogram: mfs.timeframes['1h'].indicators?.macdHistogram ?? 0,
+              stochRSI: { k: mfs.stochRsi['1h'].k, d: mfs.stochRsi['1h'].d, signal: mfs.stochRsi['1h'].signal },
               bollingerBands: {
                 percentB: bb1h.percentB || 50,
                 squeeze: bb1h.squeeze || false
               },
-              momentum: trendData?.momentum || { confirms: false, divergence: false },
-              volumeConfirms: trendData?.volumeConfirms || false
+              momentum: mfs.momentum || { confirms: false, divergence: false },
+              volumeConfirms: mfs.momentum?.volumeConfirms || false
             },
             strategyName: signal.strategy_name || 'Unknown',
             entryPrice: currentPrice,
