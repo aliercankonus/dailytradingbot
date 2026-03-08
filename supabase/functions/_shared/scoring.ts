@@ -1633,6 +1633,7 @@ export const detectMarketRegimeEnhanced = (mfs: MarketFeatureSnapshot): MarketRe
   const P = REGIME_SCORE_PARAMS;
   
   // MFS MIGRATED: All reads from MarketFeatureSnapshot
+  let regimeScore = 0;
   const adx = mfs.adx;
   const atrPercent = mfs.atrPercent;
   const confidence = mfs.confidence;
