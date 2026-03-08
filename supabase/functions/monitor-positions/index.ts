@@ -468,12 +468,11 @@ serve(async (req) => {
       // DYNAMIC THRESHOLDS (aligned with strategy-analyzer)
       // Use ADX and volume to determine exit sensitivity
       // ============================================================
-      const trendDataForPosition = trendDataMap.get(position.symbol);
       const mfsForPosition = mfsMap.get(position.symbol);
-      // MFS MIGRATION: Use MFS for ADX instead of individual extractors
+      // MFS-NATIVE: All reads from MarketFeatureSnapshot — no trendData fallbacks
       const positionAdx = mfsForPosition?.adx ?? 20;
-      const positionVolumeScore = trendDataForPosition?.volumeScore ?? 0;
-      const positionConfidence = mfsForPosition?.confidence ?? trendDataForPosition?.confidence ?? 50;
+      const positionVolumeScore = mfsForPosition?.volumeScore ?? 0;
+      const positionConfidence = mfsForPosition?.confidence ?? 50;
       
       // ============================================================
       // CONFIDENCE PENALTY (imported from shared scoring module)
