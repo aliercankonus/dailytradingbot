@@ -1675,7 +1675,7 @@ serve(async (req) => {
       // ============= PHASE 3: EXIT SIGNAL SCORING =============
       // Calculate comprehensive exit signal based on multiple factors
       if (momentumData && swingData && position.opened_at) {
-        const reversalScoreForExit = trendDataForPosition?.reversalScore || 0;
+        const reversalScoreForExit = mfsForPosition?.reversalScore ?? 0;
         
         const exitSignal = calculateExitSignal(
           {
