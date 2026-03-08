@@ -311,8 +311,10 @@ function buildBacktestMFS(
     },
     
     timeframes: {
-      "15m": defaultTimeframe, "30m": defaultTimeframe,
-      "1h": primaryTF, "4h": { ...primaryTF }, // Use 1h as proxy
+      "15m": defaultTimeframe,
+      "30m": tf30m,
+      "1h": primaryTF,
+      "4h": tf4h,
     },
     
     bollinger: {
