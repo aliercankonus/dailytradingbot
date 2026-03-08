@@ -9553,6 +9553,36 @@ serve(async (req) => {
                   );
                   // Track NEAR_24H_LOW event for bounce study (location-based, skip stochK filter)
                   await trackOversoldEvent(symbol, 'NEAR_24H_LOW_HARD', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                  // Shadow tracking: measure what would happen if we allowed this trade
+                  if (shadowModeEnabled) {
+                    try {
+                      const _dedupSkipNL1 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
+                      if (!_dedupSkipNL1) {
+                        const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                        await supabase.from('shadow_mode_signals').insert({
+                          user_id: userId,
+                          symbol,
+                          signal_type: derivedDirection,
+                          strategy_name: `Shadow: NEAR_24H_LOW_HARD (regime-aware block)`,
+                          gate_blocked_by: 'NEAR_24H_LOW_HARD',
+                          old_gate_result: 'BLOCKED',
+                          new_gate_result: 'WOULD_PASS',
+                          gate_details: {
+                            gate: 'NEAR_24H_LOW_HARD',
+                            subGate: 'REGIME_AWARE_BLOCK',
+                            distanceFromLow: distanceFromLow.toFixed(3),
+                            adx: adx.toFixed(1),
+                            momentum: smartMomentum.score.toFixed(1),
+                          },
+                          confidence_score: confidence,
+                          entry_price: trendData?.currentPrice,
+                          stop_loss: _shadowSLTP.stopLoss,
+                          take_profit: _shadowSLTP.takeProfit,
+                          trend: trend || null,
+                        });
+                      }
+                    } catch (e) { /* shadow logging non-critical */ }
+                  }
                   continue;
                 } else {
                   // Bypass allowed but with reduced size
@@ -9695,6 +9725,24 @@ serve(async (req) => {
                       );
                       // Track NEAR_24H_LOW expanded event for bounce study
                       await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                      // Shadow tracking for NEAR_24H_LOW_HARD (expanded opposing momentum)
+                      if (shadowModeEnabled) {
+                        try {
+                          const _dedupSkipNL2 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
+                          if (!_dedupSkipNL2) {
+                            const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                            await supabase.from('shadow_mode_signals').insert({
+                              user_id: userId, symbol, signal_type: derivedDirection,
+                              strategy_name: `Shadow: NEAR_24H_LOW_HARD (expanded opposing momentum)`,
+                              gate_blocked_by: 'NEAR_24H_LOW_HARD',
+                              old_gate_result: 'BLOCKED', new_gate_result: 'WOULD_PASS',
+                              gate_details: { gate: 'NEAR_24H_LOW_HARD', subGate: 'EXPANDED_OPPOSING_MOMENTUM', distanceFromLow: distanceFromLow.toFixed(3), adx: adx.toFixed(1), momentum: smartMomentum.score.toFixed(1) },
+                              confidence_score: confidence, entry_price: trendData?.currentPrice,
+                              stop_loss: _shadowSLTP.stopLoss, take_profit: _shadowSLTP.takeProfit, trend: trend || null,
+                            });
+                          }
+                        } catch (e) { /* non-critical */ }
+                      }
                       continue;
                       } // end bearish bypass else (standard block)
                     }
@@ -9725,6 +9773,24 @@ serve(async (req) => {
                     );
                     // Track NEAR_24H_LOW expanded fallback event for bounce study
                     await trackOversoldEvent(symbol, 'NEAR_24H_LOW_EXPANDED_FALLBACK', mfs.stochRsi["4h"].k, adx, fullAdxResult?.adxSlope ?? 0, smartMomentum?.score ?? 0, fourStateRegime?.regime || currentRegime || 'UNKNOWN', trend || 'unknown', mfs?.currentPrice ?? 0, mfs?.atr ?? 0, true);
+                    // Shadow tracking for NEAR_24H_LOW_HARD (expanded fallback)
+                    if (shadowModeEnabled) {
+                      try {
+                        const _dedupSkipNL3 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
+                        if (!_dedupSkipNL3) {
+                          const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                          await supabase.from('shadow_mode_signals').insert({
+                            user_id: userId, symbol, signal_type: derivedDirection,
+                            strategy_name: `Shadow: NEAR_24H_LOW_HARD (expanded fallback)`,
+                            gate_blocked_by: 'NEAR_24H_LOW_HARD',
+                            old_gate_result: 'BLOCKED', new_gate_result: 'WOULD_PASS',
+                            gate_details: { gate: 'NEAR_24H_LOW_HARD', subGate: 'EXPANDED_MOMENTUM_BLOCK', distanceFromLow: distanceFromLow.toFixed(3), adx: adx.toFixed(1), momentum: smartMomentum.score.toFixed(1) },
+                            confidence_score: confidence, entry_price: trendData?.currentPrice,
+                            stop_loss: _shadowSLTP.stopLoss, take_profit: _shadowSLTP.takeProfit, trend: trend || null,
+                          });
+                        }
+                      } catch (e) { /* non-critical */ }
+                    }
                     continue;
                   }
                 }
@@ -9791,6 +9857,24 @@ serve(async (req) => {
                     riskParams.ai_analysis_enabled !== false,
                     earlyOrderFlowAnalysis
                   );
+                  // Shadow tracking for NEAR_24H_LOW_HARD (hard zone graduation failed)
+                  if (shadowModeEnabled) {
+                    try {
+                      const _dedupSkipNL4 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
+                      if (!_dedupSkipNL4) {
+                        const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                        await supabase.from('shadow_mode_signals').insert({
+                          user_id: userId, symbol, signal_type: derivedDirection,
+                          strategy_name: `Shadow: NEAR_24H_LOW_HARD (graduation failed)`,
+                          gate_blocked_by: 'NEAR_24H_LOW_HARD',
+                          old_gate_result: 'BLOCKED', new_gate_result: 'WOULD_PASS',
+                          gate_details: { gate: 'NEAR_24H_LOW_HARD', subGate: 'GRADUATION_FAILED', distanceFromLow: distanceFromLow.toFixed(2), adx: adx.toFixed(1), adxSlope: adxSlope.toFixed(2) },
+                          confidence_score: confidence, entry_price: trendData?.currentPrice,
+                          stop_loss: _shadowSLTP.stopLoss, take_profit: _shadowSLTP.takeProfit, trend: trend || null,
+                        });
+                      }
+                    } catch (e) { /* non-critical */ }
+                  }
                   continue;
                 }
               } else if (!nearExtremeBlocked && !ltfSupportsShort) {
