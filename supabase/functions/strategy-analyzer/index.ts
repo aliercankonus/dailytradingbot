@@ -424,8 +424,9 @@ interface BufferedRejection {
   symbol: string;
   rejection_reason: string;
   filters_status: any;
+  trend_data?: any;
   checked_at: string;
-  ai_context?: { trendData: any; enableAI: boolean };
+  ai_context?: { mfs: MarketFeatureSnapshot | null; enableAI: boolean };
 }
 
 class RejectionBuffer {
