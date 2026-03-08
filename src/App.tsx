@@ -57,6 +57,7 @@ const AnimatedRoutes = () => {
           <Route path="/symbols" element={<ProtectedRoute><Symbols /></ProtectedRoute>} />
           <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
           <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
+          <Route path="/backtest" element={<ProtectedRoute><Backtest /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

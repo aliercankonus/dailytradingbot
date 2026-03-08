@@ -55,7 +55,7 @@ interface BacktestResult {
 
 const Backtest = () => {
   const { user } = useAuth();
-  const { symbols } = useSymbols();
+  const { symbols } = useSymbolsContext();
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['BTCUSDT']);
   const [barInterval, setBarInterval] = useState('1h');
   const [period, setPeriod] = useState('7');

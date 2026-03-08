@@ -28,6 +28,7 @@ const navItems = [
   { label: "Analytics", to: "/performance", icon: BarChart3 },
   { label: "Markets", to: "/symbols", icon: Coins },
   { label: "Health", to: "/health", icon: HeartPulse },
+  { label: "Backtest", to: "/backtest", icon: FlaskConical },
 ];
 
 export const AppHeader = () => {
