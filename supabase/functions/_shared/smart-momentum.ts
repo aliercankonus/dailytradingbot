@@ -285,7 +285,7 @@ export function calculateMomentumScore(
     overextensionATR >= MSC.EXHAUSTION_ATR_THRESHOLD && 
     !adxRising;
 
-  if (isWeakening) reasons.push("⚠️ Momentum WEAKENING");
+  // Note: isWeakening reason is pushed inside the EMA(3) block above
   if (isExhausted) reasons.push("🛑 Trend EXHAUSTED");
   // Note: isAccelerating reason is pushed inside the EMA(3) block above
 
