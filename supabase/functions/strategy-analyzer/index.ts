@@ -15955,7 +15955,7 @@ serve(async (req) => {
           
           // ===== PHASE 5: RECOVERY SQUEEZE EXCEPTION (Finding 6) =====
           // Allow recovery trade if squeeze breakout + HTF aligned, skip pullback score check
-          const squeezeBreakoutRecovery = isValidSqueezeBreakout(trendData, derivedDirection);
+          const squeezeBreakoutRecovery = isValidSqueezeBreakout(mfs, derivedDirection);
           const hasRecoverySqueezeException = squeezeBreakoutRecovery.isValid && htfAlignedForRecovery;
           
           if (hasRecoverySqueezeException) {
