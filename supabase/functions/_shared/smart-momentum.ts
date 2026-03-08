@@ -15,6 +15,16 @@ import { ADX_THRESHOLDS, ADX_EXHAUSTION_PARAMS, MOMENTUM_SCORE_COMPONENTS, DYNAM
 // - 5-phase state machine (strong_bullish, bullish, transition_up, transition_down, strong_bearish)
 export type MomentumPhase = "strong_bullish" | "bullish" | "transition_up" | "neutral" | "transition_down" | "bearish" | "strong_bearish";
 
+export interface MicroExhaustionResult {
+  detected: boolean;
+  score: number;                    // 0-100: exhaustion severity
+  signals: string[];                // Which signals triggered
+  momentumDeceleration: boolean;    // EMA(3) slope reversing
+  volumeDryUp: boolean;             // Volume declining in trend direction
+  rsiDivergence: boolean;           // Price making new extreme but RSI not confirming
+  recommendation: "hold" | "tighten_stop" | "exit_partial" | "exit_full";
+}
+
 export interface MomentumScoreResult {
   score: number;                    // -100 to +100
   direction: "bullish" | "bearish" | "neutral";
@@ -23,6 +33,7 @@ export interface MomentumScoreResult {
   isWeakening: boolean;
   isExhausted: boolean;
   isTransitioning: boolean;        // v2.0: true when EMA spread narrowing toward crossover
+  microExhaustion: MicroExhaustionResult; // v4.0: multi-signal exhaustion detection
   components: {
     emaSpreadRoC: number;          // Rate of change of EMA spread
     rsiMomentum: number;           // RSI directional momentum
