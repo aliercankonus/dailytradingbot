@@ -3225,7 +3225,7 @@ serve(async (req) => {
         // Log if 15m and 1h ADX diverge significantly (diagnostic only)
         const adxDrift = Math.abs(adx - earlyFullAdxResult.adx);
         if (adxDrift > 5.0) {
-          logger.forSymbol(symbol).info(
+          logger.forSymbol(symbol).debug(
             `${LOG_CATEGORIES.GATE} 📊 ADX_TIMEFRAME_DELTA: 1h=${adx.toFixed(1)} vs 15m=${earlyFullAdxResult.adx.toFixed(1)} (Δ=${adxDrift.toFixed(1)}) — 1h is authoritative for gates`
           );
         }
