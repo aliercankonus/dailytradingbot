@@ -3183,13 +3183,6 @@ serve(async (req) => {
             adx5m.adx, adx5m.adxSlope > 0, atr5m, adx5m.adxSlope
           );
           
-          // Collect for batch snapshot persist
-          symbolLtfMicroMap.set(symbol, {
-            score5m: mom5m.score, direction5m: mom5m.direction,
-            score1m: mom1m.score, direction1m: mom1m.direction,
-            ltfAlignment, entryTimingScore, microTrendConfirms, recentCandlePattern,
-            isAccelerating5m: mom5m.isAccelerating, isReverting1m,
-          });
           // 1m momentum (lighter — fewer candles, used for micro-trend direction only)
           let mom1m = { score: 0, direction: "neutral" as string, phase: "neutral" as string };
           let recentCandlePattern = "none";
