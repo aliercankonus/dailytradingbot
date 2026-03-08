@@ -434,7 +434,9 @@ interface GateResult {
 function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
   momentumResult: MomentumScoreResult,
+  symbol?: string,
 ): GateResult {
+  const sp = getSymbolParams(symbol || mfs.symbol);
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
