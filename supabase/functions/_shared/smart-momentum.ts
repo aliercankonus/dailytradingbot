@@ -54,6 +54,11 @@ export function calculateMomentumScore(
   currentATR: number,
   adxSlope: number = 0
 ): MomentumScoreResult {
+  const defaultMicroExhaustion: MicroExhaustionResult = {
+    detected: false, score: 0, signals: [],
+    momentumDeceleration: false, volumeDryUp: false, rsiDivergence: false,
+    recommendation: "hold"
+  };
   const defaultResult: MomentumScoreResult = {
     score: 0,
     direction: "neutral",
@@ -62,6 +67,7 @@ export function calculateMomentumScore(
     isWeakening: false,
     isExhausted: false,
     isTransitioning: false,
+    microExhaustion: defaultMicroExhaustion,
     components: { emaSpreadRoC: 0, rsiMomentum: 0, macdSlope: 0, adxTrend: 0, transitionBonus: 0, priceImpulse: 0 },
     overextensionATR: 0,
     reasons: []
