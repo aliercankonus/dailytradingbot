@@ -86,6 +86,7 @@ export interface MarketFeatureSnapshot {
   adx: number;
   adxSlope: number;
   adxRising: boolean;
+  adxArray: number[];     // Historical ADX values for slope persistence checks
   adx15m?: number;      // diagnostic only
   adx30m?: number;
   adx4h?: number;
@@ -435,6 +436,7 @@ export function buildMarketFeatureSnapshot(
     adx,
     adxSlope: adxSlopeResult.slope,
     adxRising: adxSlopeResult.isRising,
+    adxArray: trendData?.volatility?.adxArray ?? [],
     adx15m: trendData?.volatility?.adx15m,
     adx30m: trendData?.volatility?.adx30m,
     adx4h: trendData?.volatility?.adx4h,

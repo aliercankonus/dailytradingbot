@@ -23,6 +23,7 @@ import {
   MEAN_REVERSION_REGIME_REQUIREMENTS,
   COUNTER_TREND_ADMISSION
 } from "./constants.ts";
+import type { MarketFeatureSnapshot } from "./market-feature-snapshot.ts";
 
 // ============= TYPE DEFINITIONS =============
 
@@ -185,76 +186,31 @@ export function checkVolatilityContracting(
  * @returns Object with flip status and confidence score
  */
 export function checkLtfStructureFlip(
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   direction: 'long' | 'short'
 ): { flipped: boolean; score: number; details: string } {
-  const tf15m = trendData?.timeframes?.['15m'];
-  const tf30m = trendData?.timeframes?.['30m'];
+  const tf15m = mfs.timeframes['15m'];
+  const tf30m = mfs.timeframes['30m'];
   
   let score = 0;
   const details: string[] = [];
   
   if (direction === 'long') {
-    // For LONG: Look for Higher Low + Higher High (bullish structure)
-    
-    // Check 15m
-    if (tf15m?.structure?.higherLow) {
-      score += 5;
-      details.push('15m HL');
-    }
-    if (tf15m?.structure?.higherHigh) {
-      score += 5;
-      details.push('15m HH');
-    }
-    
-    // Check 30m (weighted slightly higher)
-    if (tf30m?.structure?.higherLow) {
-      score += 6;
-      details.push('30m HL');
-    }
-    if (tf30m?.structure?.higherHigh) {
-      score += 6;
-      details.push('30m HH');
-    }
-    
-    // Alternative: Check trend direction flip
-    if (tf15m?.trend === 'bullish' || tf15m?.indicators?.trend === 'bullish') {
+    // Alternative: Check trend direction flip (structure fields not available via MFS)
+    if (tf15m.trend === 'bullish') {
       score += 4;
       details.push('15m bullish');
     }
-    if (tf30m?.trend === 'bullish' || tf30m?.indicators?.trend === 'bullish') {
+    if (tf30m.trend === 'bullish') {
       score += 5;
       details.push('30m bullish');
     }
   } else {
-    // For SHORT: Look for Lower High + Lower Low (bearish structure)
-    
-    // Check 15m
-    if (tf15m?.structure?.lowerHigh) {
-      score += 5;
-      details.push('15m LH');
-    }
-    if (tf15m?.structure?.lowerLow) {
-      score += 5;
-      details.push('15m LL');
-    }
-    
-    // Check 30m (weighted slightly higher)
-    if (tf30m?.structure?.lowerHigh) {
-      score += 6;
-      details.push('30m LH');
-    }
-    if (tf30m?.structure?.lowerLow) {
-      score += 6;
-      details.push('30m LL');
-    }
-    
-    // Alternative: Check trend direction flip
-    if (tf15m?.trend === 'bearish' || tf15m?.indicators?.trend === 'bearish') {
+    if (tf15m.trend === 'bearish') {
       score += 4;
       details.push('15m bearish');
     }
-    if (tf30m?.trend === 'bearish' || tf30m?.indicators?.trend === 'bearish') {
+    if (tf30m.trend === 'bearish') {
       score += 5;
       details.push('30m bearish');
     }
@@ -282,7 +238,7 @@ export function checkLtfStructureFlip(
  * @returns CounterTrendAdmissionResult with pass/fail and detailed diagnostics
  */
 export function evaluateCounterTrendAdmission(
-  trendData: any,
+  mfs: MarketFeatureSnapshot,
   derivedDirection: 'long' | 'short',
   htfTrend: string
 ): CounterTrendAdmissionResult {
@@ -290,19 +246,17 @@ export function evaluateCounterTrendAdmission(
   const failureReasons: string[] = [];
   const triggers: string[] = [];
   
-  // Extract indicators
-  const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
-  const adxArray = trendData?.volatility?.adxArray ?? [];
-  const stochK = trendData?.timeframes?.['4h']?.indicators?.stochRsi?.k ?? 
-                 trendData?.stochasticRsi?.['4h']?.k ?? 
-                 trendData?.stochasticRsi?.aggregated?.k ?? 50;
+  // MFS MIGRATION: All indicators read from MarketFeatureSnapshot
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
+  const adxArray = mfs.adxArray;
+  const stochK = mfs.stochRsi['4h'].k;
   
-  // Volatility data
-  const currentBbWidth = trendData?.bollingerBands?.['4h']?.width ?? null;
-  const prevBbWidth = trendData?.bollingerBands?.['4h']?.prevWidth ?? null;
-  const currentAtr = trendData?.volatility?.atr ?? trendData?.atr ?? null;
-  const prevAtr = trendData?.volatility?.prevAtr ?? null;
+  // Volatility data from MFS
+  const currentBbWidth = mfs.bollinger['4h'].bandwidth || null;
+  const prevBbWidth: number | null = null; // prevWidth not available in MFS — permissive fallback
+  const currentAtr = mfs.atr || null;
+  const prevAtr: number | null = null; // prevAtr not available in MFS — permissive fallback
   
   // Determine if this is a counter-trend entry
   const isCounterTrend = (
@@ -376,7 +330,7 @@ export function evaluateCounterTrendAdmission(
   
   // ===== CHECK 5: LTF STRUCTURE FLIP (Optional Bonus) =====
   const ltfCheck = config.LTF_STRUCTURE_ENABLED 
-    ? checkLtfStructureFlip(trendData, derivedDirection)
+    ? checkLtfStructureFlip(mfs, derivedDirection)
     : { flipped: true, score: 0, details: 'LTF check disabled' };
   
   if (ltfCheck.flipped) {
@@ -443,9 +397,9 @@ export function evaluateCounterTrendAdmission(
  * Classifies the current trend phase based on ADX and slope
  * Independent of expansion state for clean separation of concerns
  */
-export function classifyTrendPhase(trendData: any): 'RANGE' | 'EARLY_TREND' | 'LATE_TREND' {
-  const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+export function classifyTrendPhase(mfs: MarketFeatureSnapshot): 'RANGE' | 'EARLY_TREND' | 'LATE_TREND' {
+  const adx = mfs.adx;
+  const adxSlope = mfs.adxSlope;
   
   // RANGE: Very low ADX
   if (adx < TREND_PHASE_GATE.RANGE.ADX_MAX) {
@@ -473,10 +427,10 @@ export function classifyTrendPhase(trendData: any): 'RANGE' | 'EARLY_TREND' | 'L
  * Classifies the expansion state based on volume and squeeze indicators
  * Independent of trend phase for clean separation of concerns
  */
-export function classifyExpansionState(trendData: any): 'NORMAL' | 'EXPANSION' | 'BREAKOUT' {
-  const volumeRatio = trendData?.volume?.ratio ?? 1.0;
-  const squeezeReleased = trendData?.squeeze?.justReleased ?? false;
-  const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+export function classifyExpansionState(mfs: MarketFeatureSnapshot): 'NORMAL' | 'EXPANSION' | 'BREAKOUT' {
+  const volumeRatio = mfs.volume['1h'].volumeRatio;
+  const squeezeReleased = mfs.squeezeJustReleased;
+  const adxSlope = mfs.adxSlope;
   
   // BREAKOUT: Very high volume spike
   if (volumeRatio >= EXPANSION_GATE.BREAKOUT.VOLUME_SPIKE_MIN) {
@@ -943,15 +897,42 @@ function checkOverboughtExhaustion(trendData: any): ExhaustionCheck {
  *   Used by the ADX transitional zone (18-22) bypass, which already constrains the ADX range
  *   and doesn't need the regime filter to re-block based on trend phase classification.
  */
-export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: boolean }): ExhaustionSignal {
+export function detectExhaustion(trendData: any, options?: { skipRegimeGating?: boolean; mfs?: MarketFeatureSnapshot }): ExhaustionSignal {
   // 1. FIRST: Evaluate exhaustion checks BEFORE regime gating
   // This prevents the regime from blocking detection of extreme exhaustion
   const oversoldSignal = checkOversoldExhaustion(trendData);
   const overboughtSignal = checkOverboughtExhaustion(trendData);
   
   // 2. Classify regime using orthogonal checks
-  const trendPhase = classifyTrendPhase(trendData);
-  const expansionState = classifyExpansionState(trendData);
+  // MFS MIGRATION: classifyTrendPhase and classifyExpansionState now require MFS.
+  // If MFS is provided, use it directly. Otherwise build a minimal shim from trendData.
+  let mfsForClassification: MarketFeatureSnapshot;
+  if (options?.mfs) {
+    mfsForClassification = options.mfs;
+  } else {
+    // Minimal shim for classifyTrendPhase (adx, adxSlope) and classifyExpansionState (volume, squeeze, adxSlope)
+    const adx = trendData?.volatility?.adx ?? trendData?.adx ?? 0;
+    const adxSlope = trendData?.volatility?.adxSlope ?? trendData?.adxSlope ?? 0;
+    const volumeRatio = trendData?.volume?.ratio ?? trendData?.volume?.['1h']?.volumeRatio ?? 1.0;
+    const squeezeReleased = trendData?.squeeze?.justReleased ?? false;
+    mfsForClassification = {
+      adx,
+      adxSlope,
+      adxRising: adxSlope > 0,
+      adxArray: trendData?.volatility?.adxArray ?? [],
+      squeezeJustReleased: squeezeReleased,
+      volume: {
+        "15m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "30m": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "1h": { volumeRatio, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        "4h": { volumeRatio: 1, volumeTrend: "stable", volumeSpike: false, volumeDirection: "neutral" },
+        confirmsDirection: false,
+        hasRangeExpansion1h: false,
+      },
+    } as any as MarketFeatureSnapshot;
+  }
+  const trendPhase = classifyTrendPhase(mfsForClassification);
+  const expansionState = classifyExpansionState(mfsForClassification);
   
   // 3. Check if regime allows mean reversion
   //    skipRegimeGating: ADX transitional zone (18-22) already constrains the range,
