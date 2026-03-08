@@ -424,8 +424,9 @@ interface BufferedRejection {
   symbol: string;
   rejection_reason: string;
   filters_status: any;
+  trend_data?: any;
   checked_at: string;
-  ai_context?: { trendData: any; enableAI: boolean };
+  ai_context?: { mfs: MarketFeatureSnapshot | null; enableAI: boolean };
 }
 
 class RejectionBuffer {
@@ -650,6 +651,20 @@ const logRejectionWithAI = async (
     };
   }
 
+  // Build MFS compact summary for trend_data column (forensic analysis)
+  const mfsCompactSummary = mfs ? {
+    primaryTrend: mfs.primaryTrend ?? null,
+    adx: mfs.adx ?? null,
+    adxSlope: mfs.adxSlope ?? null,
+    reversalScore: mfs.reversalScore ?? null,
+    volumeScore: mfs.volumeScore ?? null,
+    stochRsi4hK: mfs.stochRsi?.["4h"]?.k ?? null,
+    stochRsi1hK: mfs.stochRsi?.["1h"]?.k ?? null,
+    momentumScore: mfs.smartMomentum?.score ?? null,
+    momentumPhase: mfs.smartMomentum?.phase ?? null,
+    confidence: mfs.confidence ?? null,
+  } : null;
+
   // Use active buffer if set (batch mode), otherwise fall back to direct insert
   if (activeRejectionBuffer) {
     activeRejectionBuffer.add({
@@ -657,6 +672,7 @@ const logRejectionWithAI = async (
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
+      trend_data: mfsCompactSummary,
       ai_context: { mfs, enableAI },
     });
     return;
@@ -670,6 +686,7 @@ const logRejectionWithAI = async (
       symbol,
       rejection_reason: rejectionReason,
       filters_status: enrichedFiltersStatus,
+      trend_data: mfsCompactSummary,
       checked_at: new Date().toISOString(),
     })
     .select("id")
