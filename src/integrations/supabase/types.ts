@@ -1477,6 +1477,15 @@ export type Database = {
           api_secret: string
         }[]
       }
+      jsonb_set_snapshot_field: {
+        Args: {
+          p_field: string
+          p_symbol: string
+          p_user_id: string
+          p_value: Json
+        }
+        Returns: undefined
+      }
       store_encrypted_api_key: {
         Args: { p_key_type: string; p_key_value: string; p_user_id: string }
         Returns: string
