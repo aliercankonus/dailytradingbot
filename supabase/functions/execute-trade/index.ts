@@ -953,7 +953,7 @@ serve(async (req) => {
     const minQuoteVolume = isMainPair ? VOLUME_FILTER.MIN_QUOTE_VOLUME_MAIN : VOLUME_FILTER.MIN_QUOTE_VOLUME_OTHER;
     
     if (quoteVolume24h < minQuoteVolume) {
-      await logExecutionRejection(supabase, user.id, signal.symbol, 'Insufficient 24h Volume', signal, trendData, { quoteVolume: quoteVolume24h, minRequired: minQuoteVolume, isMainPair });
+      await logExecutionRejection(supabase, user.id, signal.symbol, 'Insufficient 24h Volume', signal, mfs, { quoteVolume: quoteVolume24h, minRequired: minQuoteVolume, isMainPair });
       throw new Error(`Insufficient 24h volume ($${(quoteVolume24h/1_000_000).toFixed(2)}M < $${minQuoteVolume/1_000_000}M required) - trade cancelled to avoid illiquid market`);
     }
     logger.validation(`✓ Volume check passed: $${(quoteVolume24h/1_000_000).toFixed(2)}M >= $${minQuoteVolume/1_000_000}M minimum`, true);
