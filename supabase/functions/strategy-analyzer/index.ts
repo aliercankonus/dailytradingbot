@@ -153,6 +153,7 @@ import {
   // NEW: LTF Confirmation Gate and Near-Extreme Protection
   LTF_CONFIRMATION_GATE,
   NEAR_EXTREME_PROTECTION_GATE,
+  LIQUIDITY_SWEEP_REVERSAL,
   // NEW: Priority 1-2 Gates (no ADX override)
   MOMENTUM_SLOPE_GATE,
   LTF_SPIKE_PROTECTION_GATE,
