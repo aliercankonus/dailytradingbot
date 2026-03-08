@@ -19,10 +19,15 @@ export interface MicroExhaustionResult {
   detected: boolean;
   score: number;                    // 0-100: exhaustion severity
   signals: string[];                // Which signals triggered
-  momentumDeceleration: boolean;    // EMA(3) slope reversing
-  volumeDryUp: boolean;             // Volume declining in trend direction
-  rsiDivergence: boolean;           // Price making new extreme but RSI not confirming
+  momentumDeceleration: boolean;    // EMA-smoothed momentum declining
+  accelerationFlip: boolean;        // Momentum acceleration turned negative
+  priceDivergence: boolean;         // Price making new extreme while momentum fades
+  // Legacy compat (kept for MFS/monitor-positions interface)
+  volumeDryUp: boolean;
+  rsiDivergence: boolean;
   recommendation: "hold" | "tighten_stop" | "exit_partial" | "exit_full";
+  // v5.0: Position sizing multiplier for strategy-analyzer integration
+  positionMultiplier: number;       // 1.0 = no change, 0.65/0.4 = reduced
 }
 
 export interface MomentumScoreResult {
