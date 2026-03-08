@@ -3322,7 +3322,7 @@ serve(async (req) => {
         if (liquidityTrap.detected) {
           logger.forSymbol(symbol).warn(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score}, type=${liquidityTrap.trapType}, signals=[${liquidityTrap.signals.join(', ')}], mult=×${liquidityTrap.positionMultiplier}`);
         } else {
-          logger.forSymbol(symbol).info(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
+          logger.forSymbol(symbol).debug(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
         }
         
         // MOMENTUM_COMPONENTS with real trap score (deferred from momentum calc)
