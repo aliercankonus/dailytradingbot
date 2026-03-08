@@ -1575,23 +1575,24 @@ export const TRAILING_MIN_PROFIT_FLOOR = {
   // Slippage estimate for market/trailing stop fills
   SLIPPAGE_ESTIMATE_PERCENT: 0.06,
   // Minimum net profit multiplier over fees before trailing activates
-  // e.g., 2.0 means profit must be ≥ 2× total costs (fees + slippage)
-  MIN_PROFIT_OVER_COSTS_MULTIPLIER: 2.0,
-  // Calculated: min activation = (0.20 + 0.06) × 2.0 = 0.52%
-  // This ensures at least ~0.26% net profit after trailing triggers
+  // TIGHTENED: Was 2.0 → 1.5 — data shows 60 trades with 100% giveback at 2.0x
+  // At 1.5x: min activation = (0.20 + 0.06) × 1.5 = 0.39%
+  // This activates trailing earlier, capturing more of the 0.5-0.8% peaks
+  MIN_PROFIT_OVER_COSTS_MULTIPLIER: 1.5,
 
   // Strong trend floor: When ADX ≥ 30 and trend aligned, require higher minimum
   // to let the trend develop instead of chopping out early
   STRONG_TREND_ENABLED: true,
   STRONG_TREND_MIN_ADX: 30,
-  STRONG_TREND_MIN_PROFIT_PERCENT: 0.80,  // Must reach 0.80% before trailing in strong trends
+  STRONG_TREND_MIN_PROFIT_PERCENT: 0.60,  // TIGHTENED: Was 0.80 → 0.60 (data shows peaks avg 0.97%)
 
   // Very strong trend floor: ADX ≥ 40, let the move run
   VERY_STRONG_TREND_MIN_ADX: 40,
-  VERY_STRONG_TREND_MIN_PROFIT_PERCENT: 1.20,  // Must reach 1.20% before trailing
+  VERY_STRONG_TREND_MIN_PROFIT_PERCENT: 0.90,  // TIGHTENED: Was 1.20 → 0.90
 
   // Override: Always allow trailing if profit is dropping fast (panic protection)
-  PANIC_DRAWDOWN_FROM_PEAK_PERCENT: 0.40,  // If fallen 0.40% from peak, activate regardless
+  // TIGHTENED: Was 0.40 → 0.25 — activate panic earlier to save more profit
+  PANIC_DRAWDOWN_FROM_PEAK_PERCENT: 0.25,
 } as const;
 
 // ============= PHASE 3: R-MULTIPLE TRAILING PARAMETERS =============
