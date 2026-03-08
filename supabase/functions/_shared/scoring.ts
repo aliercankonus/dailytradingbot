@@ -3735,13 +3735,13 @@ export const deriveTradeDirection = (
     const MO = MOMENTUM_OVERRIDE_DIRECTION_PARAMS;
     const T2 = TIER2_WEIGHTED_CONFIRMATION;
     
-    // Get momentum data
-    const momentumScore = trendData.smartMomentum?.score ?? trendData.momentum?.score ?? 0;
-    const momentumSlope = trendData.smartMomentum?.components?.macdSlope ?? trendData.momentum?.macdSlope ?? 0;
-    const stochK = trendData.stochRsi?.k ?? trendData.stochRsi1h?.k ?? trendData.stochasticRsi?.['1h']?.k ?? 50;
+    // Get momentum data — MFS direct
+    const momentumScore = mfs.smartMomentum?.score ?? 0;
+    const momentumSlope = mfs.smartMomentum?.components?.macdSlope ?? 0;
+    const stochK = mfs.stochRsi["1h"].k;
     
-    // Get 30m ADX data for blocking condition
-    const adx30m = timeframes['30m']?.adx ?? trendData.volatility?.adx ?? 0;
+    // Get 30m ADX data for blocking condition — MFS direct
+    const adx30m = timeframes['30m']?.adx ?? mfs.adx;
     
     // Get order flow data
     const ofScore = orderFlowData?.score ?? 0;
