@@ -1088,7 +1088,7 @@ serve(async (req) => {
         
         // FILTER 10: OBV trend confirmation - BLOCK on strong divergence
         if (signalSide === 'BUY' && obvDirection === 'bearish' && obvChange < -OBV_FILTER.STRONG_DIVERGENCE_BLOCK_PERCENT) {
-          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, trendData, { obvDirection, obvChange, signalSide });
+          await logExecutionRejection(supabase, user.id, signal.symbol, 'OBV Divergence (LONG vs Bearish)', signal, mfs, { obvDirection, obvChange, signalSide });
           throw new Error(`OBV divergence: LONG signal but volume strongly bearish (${obvChange.toFixed(1)}% decline) - trade cancelled`);
         }
         
