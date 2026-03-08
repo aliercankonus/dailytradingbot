@@ -904,7 +904,8 @@ serve(async (req) => {
       }
     }
     
-    const breakoutPotential = trendData?.bollingerBands?.breakoutPotential || false;
+    // MFS MIGRATED: breakoutPotential read from snapshot instead of raw trendData
+    const breakoutPotential = mfs.bollinger.squeezeBreakoutPotential || false;
     if (breakoutPotential) {
       logger.info(`🚀 HIGH BREAKOUT POTENTIAL detected - bands expanding after squeeze`);
       bollingerBoostMultiplier *= BOLLINGER_POSITION_ADJ.BREAKOUT_POTENTIAL_BOOST;
