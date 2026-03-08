@@ -3225,7 +3225,7 @@ serve(async (req) => {
         // Log if 15m and 1h ADX diverge significantly (diagnostic only)
         const adxDrift = Math.abs(adx - earlyFullAdxResult.adx);
         if (adxDrift > 5.0) {
-          logger.forSymbol(symbol).info(
+          logger.forSymbol(symbol).debug(
             `${LOG_CATEGORIES.GATE} 📊 ADX_TIMEFRAME_DELTA: 1h=${adx.toFixed(1)} vs 15m=${earlyFullAdxResult.adx.toFixed(1)} (Δ=${adxDrift.toFixed(1)}) — 1h is authoritative for gates`
           );
         }
@@ -3322,11 +3322,11 @@ serve(async (req) => {
         if (liquidityTrap.detected) {
           logger.forSymbol(symbol).warn(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score}, type=${liquidityTrap.trapType}, signals=[${liquidityTrap.signals.join(', ')}], mult=×${liquidityTrap.positionMultiplier}`);
         } else {
-          logger.forSymbol(symbol).info(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
+          logger.forSymbol(symbol).debug(`🪤 LIQUIDITY_TRAP: score=${liquidityTrap.score} (no trap detected)`);
         }
         
         // MOMENTUM_COMPONENTS with real trap score (deferred from momentum calc)
-        logger.forSymbol(symbol).info(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning} microExh=${earlySmartMomentum.microExhaustion.detected}(${earlySmartMomentum.microExhaustion.score}/${earlySmartMomentum.microExhaustion.recommendation}) trap=${liquidityTrap.score}(${liquidityTrap.trapType})`);
+        logger.forSymbol(symbol).debug(`📊 MOMENTUM_COMPONENTS: emaSpreadRoC=${_mc.emaSpreadRoC.toFixed(4)} rsiMomentum=${_mc.rsiMomentum.toFixed(2)} macdSlope=${_mc.macdSlope.toFixed(6)} adxTrend=${_mc.adxTrend.toFixed(0)} transitionBonus=${_mc.transitionBonus.toFixed(0)} priceImpulse=${_mc.priceImpulse.toFixed(1)} | overext=${earlySmartMomentum.overextensionATR} acc=${earlySmartMomentum.isAccelerating} weak=${earlySmartMomentum.isWeakening} trans=${earlySmartMomentum.isTransitioning} microExh=${earlySmartMomentum.microExhaustion.detected}(${earlySmartMomentum.microExhaustion.score}/${earlySmartMomentum.microExhaustion.recommendation}) trap=${liquidityTrap.score}(${liquidityTrap.trapType})`);
 
         // ============= LTF MICRO-MOMENTUM (5m/1m) =============
         // Uses DB-cached 5m and 1m klines for ultra-short-term momentum and entry timing
@@ -3413,7 +3413,7 @@ serve(async (req) => {
           (mfs as any).klines5m = ltfData.klines5m;
           (mfs as any).klines1m = ltfData.klines1m;
           
-          logger.forSymbol(symbol).info(
+          logger.forSymbol(symbol).debug(
             `🔬 LTF_MICRO: 5m=${mom5m.score.toFixed(0)}(${mom5m.direction}/${mom5m.phase}) 1m=${mom1m.score.toFixed(0)}(${mom1m.direction}) align=${ltfAlignment.toFixed(2)} timing=${entryTimingScore} confirms=${microTrendConfirms} pattern=${recentCandlePattern}${isReverting1m ? ' ⚠️REVERTING' : ''}`
           );
           
@@ -5097,7 +5097,7 @@ serve(async (req) => {
         // ============= BYPASS EVALUATION LOGGING =============
         const dirCtx = directionResult?.directionContext;
         const dirWeightedScoreForLog = dirCtx?.weightedScore ?? 0;
-        logger.forSymbol(symbol).info(
+        logger.forSymbol(symbol).debug(
           `${LOG_CATEGORIES.GATE} 📊 DIRECTION_EVAL: direction=${directionResult.direction || 'null'}, ` +
           `weightedScore=${dirWeightedScoreForLog.toFixed(3)}, source=${directionResult.source}, ` +
           `weakProbe=${weakDirectionProbeApplied}, lateGrind=${lateGrindAccepted}, ` +
@@ -5209,7 +5209,7 @@ serve(async (req) => {
           : momentumDirectionOverrideApplied ? ' [MOMENTUM_OVERRIDE]' 
           : orderFlowDirectionOverrideApplied ? ' [ORDER_FLOW_OVERRIDE]' 
           : lateGrindAccepted ? ' [LATE_GRIND]' : '';
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${overrideSuffix}`);
+        logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} Direction derived: ${derivedDirection} from ${derivedSource} (${directionResult.confidence.toFixed(0)}% conf)${overrideSuffix}`);
         if (directionResult.reasons.some(r => r.includes("Warning"))) {
           logger.forSymbol(symbol).warn(`   ${directionResult.reasons.filter(r => r.includes("Warning")).join(", ")}`);
         }
@@ -5253,7 +5253,7 @@ serve(async (req) => {
         // Capture raw regime BEFORE persistence override (needed for correct history storage)
         const rawDetectedRegime = fourStateRegime.regime;
         
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (raw): ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
+        logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} 🏷️ 4-STATE REGIME (raw): ${fourStateRegime.regime} - ${fourStateRegime.reason}`);
         
         // ============= REGIME PERSISTENCE =============
         // Apply asymmetric persistence to prevent boundary-condition flip-flopping
@@ -8964,7 +8964,7 @@ serve(async (req) => {
           // Log zone distribution for all symbols (not just blocked ones)
           if (moveZoneDetails) {
             const relaxedTag = moveZoneDetails.relaxationApplied ? ` [RELAXED: ${moveZoneDetails.relaxationCondition}]` : '';
-            logger.forSymbol(symbol).info(`📊 ZONE_ANALYTICS: ${moveZoneDetails.zone} | move=${moveZoneDetails.distancePercent.toFixed(1)}% | dir=${moveZoneDetails.direction} | outcome=${moveZoneDetails.outcome} | size=${(moveZoneDetails.positionMultiplier * 100).toFixed(0)}% | K=${moveZoneDetails.stochRsiK.toFixed(0)} | ADX=${moveZoneDetails.adx.toFixed(1)}${moveZoneDetails.overrideReason ? ` | reason=${moveZoneDetails.overrideReason}` : ''}${relaxedTag}`);
+            logger.forSymbol(symbol).debug(`📊 ZONE_ANALYTICS: ${moveZoneDetails.zone} | move=${moveZoneDetails.distancePercent.toFixed(1)}% | dir=${moveZoneDetails.direction} | outcome=${moveZoneDetails.outcome} | size=${(moveZoneDetails.positionMultiplier * 100).toFixed(0)}% | K=${moveZoneDetails.stochRsiK.toFixed(0)} | ADX=${moveZoneDetails.adx.toFixed(1)}${moveZoneDetails.overrideReason ? ` | reason=${moveZoneDetails.overrideReason}` : ''}${relaxedTag}`);
           }
           
           // ===== MEAN REVERSION DIRECTION FLIP =====
@@ -10463,7 +10463,7 @@ serve(async (req) => {
             const dirWeightedScore = directionCtx?.weightedScore ?? 0;
             const bypassEligible = Math.abs(dirWeightedScore) > 0.10;
             
-            logger.forSymbol(symbol).info(
+            logger.forSymbol(symbol).debug(
               `${LOG_CATEGORIES.GATE} 📊 RANGE_REGIME_EVAL: ` +
               `trendNeutral=${trendIsNeutral}, momentumNoEdge=${momentumHasNoEdge}(${momentumState}), ` +
               `adxTooLow=${adxTooLow}(${adx.toFixed(1)}<${hardBlock.MAX_ADX}), ` +
@@ -10927,14 +10927,14 @@ serve(async (req) => {
         }
         
         // Log smart momentum analysis
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.MOMENTUM} SMART MOMENTUM: score=${smartMomentum.score} dir=${smartMomentum.direction} accel=${smartMomentum.isAccelerating} weak=${smartMomentum.isWeakening} exhaust=${smartMomentum.isExhausted} microExh=${smartMomentum.microExhaustion.detected}(${smartMomentum.microExhaustion.score}/${smartMomentum.microExhaustion.recommendation})`);
+        logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.MOMENTUM} SMART MOMENTUM: score=${smartMomentum.score} dir=${smartMomentum.direction} accel=${smartMomentum.isAccelerating} weak=${smartMomentum.isWeakening} exhaust=${smartMomentum.isExhausted} microExh=${smartMomentum.microExhaustion.detected}(${smartMomentum.microExhaustion.score}/${smartMomentum.microExhaustion.recommendation})`);
         if (smartMomentum.reasons.length > 0) {
           logger.forSymbol(symbol).debug(`   Components: ${smartMomentum.reasons.slice(0, 3).join(' | ')}`);
         }
         if (smartPullback.isPullback) {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.ENTRY} PULLBACK: type=${smartPullback.pullbackType} depth=${smartPullback.pullbackDepth.toFixed(1)}% valid=${smartPullback.isValidPullback} recovering=${smartPullback.isRecovering}`);
         }
-        logger.forSymbol(symbol).info(`${LOG_CATEGORIES.TREND} SMART REGIME: ${smartRegime.regime} (score=${smartRegime.regimeScore}) tradeable=${smartRegime.tradeable} threshold=${smartRegime.qualityThreshold}`);
+        logger.forSymbol(symbol).debug(`${LOG_CATEGORIES.TREND} SMART REGIME: ${smartRegime.regime} (score=${smartRegime.regimeScore}) tradeable=${smartRegime.tradeable} threshold=${smartRegime.qualityThreshold}`);
         
         // ============= SMART MOMENTUM GATES =============
         const regimeAwareEnabled = riskParams.regime_aware_trading !== false;

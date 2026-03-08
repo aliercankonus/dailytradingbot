@@ -901,7 +901,7 @@ export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipReg
     const distToExtremeOversold = Math.abs(stochK - 10);
     const distToExtremeOverbought = Math.abs(stochK - 90);
     const nearestExtremeK = Math.min(distToExtremeOversold, distToExtremeOverbought);
-    console.log(
+    console.debug(
       `[EXHAUSTION_NEAR_MISS] ${mfs.symbol} REGIME_BLOCKED | ` +
       `phase=${trendPhase}/${expansionState} | ` +
       `K=${stochK.toFixed(1)} (dist_to_extreme=${nearestExtremeK.toFixed(1)}) | ` +
@@ -953,7 +953,7 @@ export function detectExhaustion(mfs: MarketFeatureSnapshot, options?: { skipReg
     const nearestExtremeK = Math.min(distToExtremeOversold, distToExtremeOverbought);
     // Only log if reasonably close to any threshold (K within 25 of extreme)
     if (nearestExtremeK <= 25) {
-      console.log(
+      console.debug(
         `[EXHAUSTION_NEAR_MISS] ${mfs.symbol} NOT_DETECTED | ` +
         `K=${stochK.toFixed(1)} (dist_to_extreme=${nearestExtremeK.toFixed(1)}, need ≤10 or ≥90) | ` +
         `%B=${percentB.toFixed(1)} | ADX=${mfs.adx.toFixed(1)} slope=${mfs.adxSlope.toFixed(2)} | ` +
