@@ -3455,8 +3455,8 @@ export const deriveTradeDirection = (
     const slopeIsFlattening = Math.abs(momentumSlopeEarly) < contextualExtremeMaxSlope;
     
     // Additional deceleration evidence: ADX slope declining or flat, or momentum score weakening
-    const adxSlope = trendData.volatility?.adxSlope ?? trendData.momentum?.adxSlope ?? 0;
-    const momentumDecelerating = adxSlope <= 0 || momentumSlopeEarly <= 0;
+    const adxSlopeLocal = mfs.adxSlope;
+    const momentumDecelerating = adxSlopeLocal <= 0 || momentumSlopeEarly <= 0;
     const decelRequirementMet = !contextualExtremeRequireDecel || momentumDecelerating;
     
     const contextualExtremeBypass = contextualExtremeEnabled &&
