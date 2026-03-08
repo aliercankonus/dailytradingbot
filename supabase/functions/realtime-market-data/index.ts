@@ -376,18 +376,33 @@ serve(async (req) => {
     console.log('[MarketData-Edge] Client WebSocket closed - cleaning up resources');
     activeConnections = Math.max(0, activeConnections - 1);
     
-    // Clean up Binance connection
-    if (binanceSocket) {
-      if (binanceSocket.readyState === WebSocket.OPEN || binanceSocket.readyState === WebSocket.CONNECTING) {
-        binanceSocket.close();
+    // Final flush of kline data before cleanup
+    flushKlinesToDb().catch(() => {});
+    
+    // Clean up Binance ticker connection
+    if (binanceTickerSocket) {
+      if (binanceTickerSocket.readyState === WebSocket.OPEN || binanceTickerSocket.readyState === WebSocket.CONNECTING) {
+        binanceTickerSocket.close();
       }
-      binanceSocket = null;
+      binanceTickerSocket = null;
+    }
+    
+    // Clean up Binance kline connection
+    if (binanceKlineSocket) {
+      if (binanceKlineSocket.readyState === WebSocket.OPEN || binanceKlineSocket.readyState === WebSocket.CONNECTING) {
+        binanceKlineSocket.close();
+      }
+      binanceKlineSocket = null;
     }
     
     // Clear intervals and timeouts
     if (heartbeatInterval !== null) {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
+    }
+    if (klineDbFlushInterval !== null) {
+      clearInterval(klineDbFlushInterval);
+      klineDbFlushInterval = null;
     }
     if (reconnectTimeout !== null) {
       clearTimeout(reconnectTimeout);
