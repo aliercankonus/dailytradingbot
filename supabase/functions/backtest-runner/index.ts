@@ -1170,7 +1170,7 @@ serve(async (req) => {
     let startDate = body.startDate;
     let endDate = body.endDate;
     if (!startDate || !endDate) {
-      const days = body.days || 7;
+      const days = body.periodDays || body.days || 7;
       const now = new Date();
       endDate = now.toISOString();
       startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
