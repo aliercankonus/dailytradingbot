@@ -37,6 +37,7 @@ interface BacktestConfig {
   startDate: string;
   endDate: string;
   barInterval: string; // '1h' or '4h'
+  sideFilter?: 'LONG' | 'SHORT' | null; // Filter to only take one side
 }
 
 interface BacktestTrade {
