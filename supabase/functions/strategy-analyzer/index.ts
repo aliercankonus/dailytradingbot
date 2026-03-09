@@ -188,7 +188,9 @@ import {
   RISK_SCORE_SCALING,
   DYNAMIC_ENTRY_WINDOW,
   // NEW: LTF Micro Timing Gate (1m/5m entry timing quality)
-  LTF_MICRO_TIMING_GATE
+  LTF_MICRO_TIMING_GATE,
+  // Production strategy routing per symbol
+  BTC_PARAMS
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -19516,6 +19518,35 @@ serve(async (req) => {
           expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 minute TTL for actionable signals
           created_by_rebalancer: false,
         };
+
+        // ===== BTC SHORT STRATEGY ROUTING (Production) =====
+        // Block non-SQUEEZE_BREAKOUT strategies for BTC SHORTs based on 60-day backtest validation
+        if (BTC_PARAMS.shortStrategyRouting.enabled && 
+            BTC_PARAMS.symbols.includes(symbol) && 
+            signalType === 'short') {
+          const routingConfig = BTC_PARAMS.shortStrategyRouting;
+          if (!routingConfig.enabledStrategies.includes(strategy.name)) {
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.REJECTION} 🚫 BTC_SHORT_ROUTING: Strategy "${strategy.name}" blocked for BTC SHORT ` +
+              `(allowed: ${routingConfig.enabledStrategies.join(', ')})`
+            );
+            rejectionBuffer.add({
+              user_id: userId,
+              symbol,
+              rejection_reason: `BTC_SHORT_ROUTING: ${strategy.name} blocked`,
+              filters_status: { 
+                gate: 'BTC_SHORT_STRATEGY_ROUTING', 
+                blockedStrategy: strategy.name,
+                allowedStrategies: routingConfig.enabledStrategies,
+              },
+            });
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'BTC_SHORT_STRATEGY_ROUTING' as GateType, 
+              details: `${strategy.name} blocked for BTC SHORT` 
+            });
+            continue;
+          }
+        }
 
         // ===== MICRO_PROBE SHADOW-ONLY ROUTING =====
         // If MICRO_PROBE tier and SHADOW_ONLY=true, route to shadow instead of live

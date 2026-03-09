@@ -1038,7 +1038,7 @@ async function runBacktest(
                 gateResult.strategyName === 'SQUEEZE_BREAKOUT' && 
                 gateResult.direction === 'SHORT') {
               const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
-              if (atr <= prevAtr * 0.95) { // ATR must be at least 95% of previous (allow tiny dips)
+              if (atr <= prevAtr * (BTC_PARAMS.shortStrategyRouting.atrExpansionMultiplier ?? 1.05)) { // ATR must expand 5%+
                 gateStats['SQUEEZE_ATR_NOT_EXPANDING'] = (gateStats['SQUEEZE_ATR_NOT_EXPANDING'] || 0) + 1;
                 continue;
               }
