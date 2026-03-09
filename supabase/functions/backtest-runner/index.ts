@@ -1103,32 +1103,35 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    const body = await req.json();
     const authHeader = req.headers.get('Authorization');
     let userId: string;
     
-    // Service role key bypass for internal/testing calls
-    const cronSecret = Deno.env.get('CRON_SECRET');
-    const internalSecret = req.headers.get('x-cron-secret');
-    if (internalSecret && cronSecret && internalSecret === cronSecret) {
-      const body_peek = await req.clone().json();
-      userId = body_peek.user_id || 'd21aecef-ebef-4bc6-b260-b9a24b984e68';
-    } else {
-      if (!authHeader) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
+    if (authHeader) {
       const token = authHeader.replace('Bearer ', '');
-      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-      if (authError || !user) {
+      // Check if it's the service role key
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if (token === serviceKey) {
+        userId = body.user_id || 'd21aecef-ebef-4bc6-b260-b9a24b984e68';
+      } else {
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        if (authError || !user) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        userId = user.id;
+      }
+    } else {
+      // No auth header — check for internal user_id in body (only works with verify_jwt=false)
+      if (body.user_id) {
+        userId = body.user_id;
+      } else {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
-      userId = user.id;
     }
-
-    const body = await req.json();
     
     // Support "days" shorthand: auto-calculate startDate/endDate
     let startDate = body.startDate;
