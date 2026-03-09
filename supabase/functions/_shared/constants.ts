@@ -347,15 +347,17 @@ export const BTC_PARAMS = {
   // ============= SQUEEZE DEPTH FILTER =============
   // Filters shallow squeezes that produce false breakouts
   // squeezeDepth = bbWidth / ATR — lower = tighter squeeze = more energy
+  // NOTE: BB width = 4σ, ATR ≈ 1.5σ, so baseline ratio is ~2.7-3.0 at squeeze
+  // Normal (non-squeeze) ratio is typically 5-7. True squeezes compress to 3-4.
   // 90-day backtest: Aralık PF 0.61 due to shallow squeezes (high squeezeDepth)
   squeezeDepthFilter: {
     enabled: true,
-    maxSqueezeDepth: 1.6,           // Block if bbWidth/ATR > 1.6 (too shallow)
-    aggressiveMaxDepth: 1.4,        // Aggressive filter variant
+    maxSqueezeDepth: 5.0,           // Block if bbWidth/ATR > 5.0 (too shallow / not really a squeeze)
+    aggressiveMaxDepth: 4.0,        // Aggressive filter variant
     // Position sizing based on squeeze quality
-    deepSqueezeBonusThreshold: 1.2, // squeezeDepth < 1.2 = very tight = bonus
+    deepSqueezeBonusThreshold: 3.0, // squeezeDepth < 3.0 = very tight = bonus
     deepSqueezeBonusMultiplier: 1.15, // 15% bigger position for deep squeezes
-    shallowPenaltyThreshold: 1.5,   // 1.5-1.6 range = penalized
+    shallowPenaltyThreshold: 4.5,   // 4.5-5.0 range = penalized
     shallowPenaltyMultiplier: 0.60, // 40% smaller position for shallow squeezes
   },
   // ============= VOLUME EXPANSION FILTER =============

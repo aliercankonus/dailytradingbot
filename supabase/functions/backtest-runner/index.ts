@@ -688,6 +688,8 @@ function evaluateProductionGates(
       const bbWidth = (mfs.bollinger?.["1h"]?.upper ?? 0) - (mfs.bollinger?.["1h"]?.lower ?? 0);
       const squeezeDepth = mfs.atr > 0 ? bbWidth / mfs.atr : 99;
 
+      logger.debug(`SQUEEZE_DEPTH: bbWidth=${bbWidth.toFixed(2)} atr=${mfs.atr.toFixed(2)} ratio=${squeezeDepth.toFixed(2)} max=${sqFilter.maxSqueezeDepth}`);
+
       if (squeezeDepth > sqFilter.maxSqueezeDepth) {
         return fail('SQUEEZE_TOO_SHALLOW');
       }
