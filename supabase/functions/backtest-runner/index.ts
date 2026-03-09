@@ -738,22 +738,40 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: decayResult.exitReason };
   }
 
-  // 5. Production Trailing Stop (peak-adaptive) — OPTIMIZED: tighter distances
-  if (position.peakPnl >= 0.8) {
+  // 5. Production Trailing Stop — BTC SHORT uses optimized wider trailing
+  const isBtcShort = position.symbol.startsWith('BTC') && side === 'SHORT';
+  const btcShortTrail = BTC_PARAMS.shortTrailing;
+  
+  if (isBtcShort && position.peakPnl >= btcShortTrail.activationPercent) {
+    // BTC SHORT-optimized: wider distances, higher activation
+    let trailDistance = btcShortTrail.tiers[0].trailDistance; // default to first tier
+    for (const tier of btcShortTrail.tiers) {
+      if (position.peakPnl >= tier.peakThreshold) {
+        trailDistance = tier.trailDistance;
+      }
+    }
+    // ADX relaxation: strong trends get even wider trailing
+    if (adx >= btcShortTrail.adxRelaxationThreshold) {
+      trailDistance *= btcShortTrail.adxRelaxationMultiplier;
+    }
+    const lockLevel = Math.max(btcShortTrail.minTrailFloor, position.peakPnl * (1 - trailDistance));
+    if (pnlPercent < lockLevel && pnlPercent > 0) {
+      return { shouldExit: true, exitReason: 'trailing_stop' };
+    }
+  } else if (!isBtcShort && position.peakPnl >= 0.8) {
+    // Standard trailing for non-BTC-SHORT positions
     let trailDistance: number;
     if (position.peakPnl >= 2.0) {
-      trailDistance = 0.12; // Capture zone (was 0.15)
+      trailDistance = 0.12;
     } else if (position.peakPnl >= 1.5) {
-      trailDistance = 0.15; // Harvest zone (was 0.18)
+      trailDistance = 0.15;
     } else if (position.peakPnl >= 1.0) {
-      trailDistance = 0.18; // Probe zone (was 0.22)
+      trailDistance = 0.18;
     } else {
-      trailDistance = 0.25; // Early zone — new tier for 0.8-1.0 peak
+      trailDistance = 0.25;
     }
-    
-    const minTrailFloor = 0.5; // Lowered from 0.8 to lock profits earlier
+    const minTrailFloor = 0.5;
     const lockLevel = Math.max(minTrailFloor, position.peakPnl * (1 - trailDistance));
-    
     if (pnlPercent < lockLevel && pnlPercent > 0) {
       return { shouldExit: true, exitReason: 'trailing_stop' };
     }
