@@ -419,6 +419,39 @@ export const ALTCOIN_PARAMS = {
     earlyFlipMinHours: 0.5,           // 30 min
     earlyFlipMaxHours: 1.5,
   },
+  // ============= ALTCOIN STRATEGY ROUTING (Production) =============
+  // UNVALIDATED — restricting all altcoins to safe strategies
+  // Altcoin volatility makes STRONG_TREND/TREND_CONTINUATION high-risk
+  strategyRouting: {
+    enabled: true,
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    disabledStrategies: {
+      STRONG_TREND: { enabled: false, reason: 'Violent bounces cause premature stops on altcoins' },
+      TREND_CONTINUATION: { enabled: false, reason: 'Short squeezes invalidate trend-following on altcoins' },
+    },
+    requireAtrExpansion: true,
+    atrExpansionMultiplier: 1.05,
+    qualityScoreMin: 50,
+    adxMin: 20,
+    // Altcoin-specific: tighter squeeze depth (more prone to fakeouts)
+    squeezeDepthFilter: {
+      enabled: true,
+      maxBandwidth: 3.0, // Tighter than BTC (3.5)
+    },
+    // Volume expansion enabled for altcoins (more important for validation)
+    volumeExpansionFilter: {
+      enabled: true,
+      minVolumeRatio: 1.2,
+    },
+    // Candle body filter enabled for altcoins (catches wicks-only fakeouts)
+    candleBodyFilter: {
+      enabled: true,
+      minBodyAtrRatio: 0.40,
+    },
+    exitOverrides: {
+      moderate_exhaustion_exit: false, // disable early exit for squeeze trades
+    },
+  },
 } as const;
 
 // Helper to get params for a symbol
