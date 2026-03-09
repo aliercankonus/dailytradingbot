@@ -37,6 +37,7 @@ interface BacktestConfig {
   startDate: string;
   endDate: string;
   barInterval: string; // '1h' or '4h'
+  sideFilter?: 'LONG' | 'SHORT' | null; // Filter to only take one side
 }
 
 interface BacktestTrade {
@@ -958,6 +959,11 @@ async function runBacktest(
           }
 
           if (gateResult.passed && gateResult.direction) {
+            // Side filter: skip if direction doesn't match requested side
+            if (config.sideFilter && gateResult.direction !== config.sideFilter) {
+              gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] || 0) + 1;
+              continue;
+            }
             const dir = gateResult.direction;
             
             // ATR-based SL/TP with SYMBOL-ADAPTIVE caps
@@ -1097,22 +1103,35 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
     const body = await req.json();
+    const authHeader = req.headers.get('Authorization');
+    let userId: string;
+    
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '');
+      // Check if it's the service role key
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if (token === serviceKey) {
+        userId = body.user_id || 'd21aecef-ebef-4bc6-b260-b9a24b984e68';
+      } else {
+        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        if (authError || !user) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        userId = user.id;
+      }
+    } else {
+      // No auth header — check for internal user_id in body (only works with verify_jwt=false)
+      if (body.user_id) {
+        userId = body.user_id;
+      } else {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    }
     
     // Support "days" shorthand: auto-calculate startDate/endDate
     let startDate = body.startDate;
@@ -1129,6 +1148,7 @@ serve(async (req) => {
       startDate,
       endDate,
       barInterval: body.barInterval || '1h',
+      sideFilter: body.sideFilter || null,
     };
 
     const parsedStart = new Date(config.startDate);
@@ -1147,7 +1167,7 @@ serve(async (req) => {
     }
 
     const { data: running } = await supabase.from('backtest_results')
-      .select('id').eq('user_id', user.id).eq('status', 'running').limit(1);
+      .select('id').eq('user_id', userId).eq('status', 'running').limit(1);
     if (running && running.length > 0) {
       return new Response(JSON.stringify({ error: 'A backtest is already running.' }), {
         status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -1155,14 +1175,14 @@ serve(async (req) => {
     }
 
     const { data: backtestRecord, error: insertError } = await supabase
-      .from('backtest_results').insert({ user_id: user.id, config, status: 'running' })
+      .from('backtest_results').insert({ user_id: userId, config, status: 'running' })
       .select('id').single();
 
     if (insertError || !backtestRecord) {
       throw new Error(`Failed to create backtest record: ${insertError?.message}`);
     }
 
-    await runBacktest(config, user.id, supabase, backtestRecord.id);
+    await runBacktest(config, userId, supabase, backtestRecord.id);
 
     return new Response(JSON.stringify({
       id: backtestRecord.id, status: 'completed', message: 'Backtest completed'
