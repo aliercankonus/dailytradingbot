@@ -19519,6 +19519,35 @@ serve(async (req) => {
           created_by_rebalancer: false,
         };
 
+        // ===== BTC SHORT STRATEGY ROUTING (Production) =====
+        // Block non-SQUEEZE_BREAKOUT strategies for BTC SHORTs based on 60-day backtest validation
+        if (BTC_PARAMS.shortStrategyRouting.enabled && 
+            BTC_PARAMS.symbols.includes(symbol) && 
+            signalType === 'short') {
+          const routingConfig = BTC_PARAMS.shortStrategyRouting;
+          if (!routingConfig.enabledStrategies.includes(strategy.name)) {
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.REJECTION} 🚫 BTC_SHORT_ROUTING: Strategy "${strategy.name}" blocked for BTC SHORT ` +
+              `(allowed: ${routingConfig.enabledStrategies.join(', ')})`
+            );
+            rejectionBuffer.add({
+              user_id: userId,
+              symbol,
+              rejection_reason: `BTC_SHORT_ROUTING: ${strategy.name} blocked`,
+              filters_status: { 
+                gate: 'BTC_SHORT_STRATEGY_ROUTING', 
+                blockedStrategy: strategy.name,
+                allowedStrategies: routingConfig.enabledStrategies,
+              },
+            });
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'BTC_SHORT_STRATEGY_ROUTING' as GateType, 
+              details: `${strategy.name} blocked for BTC SHORT` 
+            });
+            continue;
+          }
+        }
+
         // ===== MICRO_PROBE SHADOW-ONLY ROUTING =====
         // If MICRO_PROBE tier and SHADOW_ONLY=true, route to shadow instead of live
         if ((trendData as any).microProbeShadowOnly === true) {
