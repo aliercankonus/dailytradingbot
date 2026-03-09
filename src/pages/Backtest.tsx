@@ -364,12 +364,14 @@ const Backtest = () => {
                   {running ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      Çalışıyor...
+                      {batchProgress
+                        ? `Batch ${batchProgress.current}/${batchProgress.total}`
+                        : 'Çalışıyor...'}
                     </>
                   ) : (
                     <>
                       <Play className="h-3.5 w-3.5 mr-1.5" />
-                      Backtest Başlat
+                      {parseInt(period) > 30 ? `Batch Backtest (${Math.ceil(parseInt(period) / 30)}×30g)` : 'Backtest Başlat'}
                     </>
                   )}
                 </Button>
