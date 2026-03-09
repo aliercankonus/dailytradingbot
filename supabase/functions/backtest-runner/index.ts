@@ -666,7 +666,7 @@ function evaluateProductionGates(
                                (direction === 'SHORT' && macdHist < 0);
     if (squeezeDirConfirmed) {
       strategyName = 'SQUEEZE_BREAKOUT';
-    } else if (squeezeDirPartial && adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0) {
+    } else if (squeezeDirPartial && adx >= (shortOverrides?.squeezeMinAdxForPartial ?? ADX_THRESHOLDS.MODERATE) && adxSlope > 0) {
       // Partial confirmation: MACD direction matches but not yet expanding
       strategyName = 'SQUEEZE_BREAKOUT';
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
