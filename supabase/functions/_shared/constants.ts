@@ -345,36 +345,32 @@ export const BTC_PARAMS = {
     },
   },
   // ============= SQUEEZE DEPTH FILTER =============
-  // Filters shallow squeezes that produce false breakouts
-  // squeezeDepth = bbWidth / ATR — lower = tighter squeeze = more energy
-  // NOTE: BB width = 4σ, ATR ≈ 1.5σ, so baseline ratio is ~2.7-3.0 at squeeze
-  // Normal (non-squeeze) ratio is typically 5-7. True squeezes compress to 3-4.
-  // 90-day backtest: Aralık PF 0.61 due to shallow squeezes (high squeezeDepth)
+  // Uses Bollinger bandwidth (bbWidth/SMA*100) directly — already normalized
+  // isCompressed triggers at bandwidth < 4. Tighter bandwidth = stronger squeeze.
+  // bandwidth < 2 = very tight, bandwidth 3-4 = marginal squeeze
   squeezeDepthFilter: {
     enabled: true,
-    maxSqueezeDepth: 5.0,           // Block if bbWidth/ATR > 5.0 (too shallow / not really a squeeze)
-    aggressiveMaxDepth: 4.0,        // Aggressive filter variant
+    maxBandwidth: 3.5,              // Block if bandwidth > 3.5% (too shallow for breakout)
     // Position sizing based on squeeze quality
-    deepSqueezeBonusThreshold: 3.0, // squeezeDepth < 3.0 = very tight = bonus
+    deepSqueezeBonusBandwidth: 2.0, // bandwidth < 2.0 = very tight = bonus
     deepSqueezeBonusMultiplier: 1.15, // 15% bigger position for deep squeezes
-    shallowPenaltyThreshold: 4.5,   // 4.5-5.0 range = penalized
+    shallowPenaltyBandwidth: 3.0,   // 3.0-3.5 range = penalized
     shallowPenaltyMultiplier: 0.60, // 40% smaller position for shallow squeezes
   },
   // ============= VOLUME EXPANSION FILTER =============
-  // Confirms breakout has real participation (not fake/thin breakout)
-  // 90-day: Aralık fake breakouts had low volume
+  // DISABLED for calibration — re-enable after squeeze depth tuning
   volumeExpansionFilter: {
-    enabled: true,
-    minVolumeRatio: 1.3,            // Volume must be 30% above MA
-    softMinVolumeRatio: 1.15,       // 15-30% above = reduced position
-    softPositionMultiplier: 0.50,   // 50% position for weak volume
+    enabled: false,
+    minVolumeRatio: 1.3,
+    softMinVolumeRatio: 0.9,
+    softPositionMultiplier: 0.50,
   },
   // ============= CANDLE BODY SIZE FILTER =============
-  // Breakout candle must have meaningful body (not doji/indecision)
+  // DISABLED for calibration — re-enable after squeeze depth tuning
   candleBodyFilter: {
-    enabled: true,
-    minBodyAtrRatio: 0.4,           // Candle body must be >= 40% of ATR
-    strongBreakoutThreshold: 0.7,   // Body >= 70% ATR = strong breakout signal
+    enabled: false,
+    minBodyAtrRatio: 0.15,
+    strongBreakoutThreshold: 0.7,
   },
 } as const;
 
