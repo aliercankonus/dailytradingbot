@@ -162,14 +162,16 @@ const Backtest = () => {
 
   // Run a single chunk backtest
   const runSingleChunk = async (startDate: Date, endDate: Date): Promise<BacktestResult | null> => {
-    const { data, error } = await supabase.functions.invoke('backtest-runner', {
-      body: {
-        symbols: selectedSymbols,
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString(),
-        barInterval,
-      },
-    });
+    const body: any = {
+      symbols: selectedSymbols,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      barInterval,
+    };
+    if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
+    if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
+
+    const { data, error } = await supabase.functions.invoke('backtest-runner', { body });
 
     if (error) throw error;
 
