@@ -336,6 +336,7 @@ export const BTC_PARAMS = {
     },
     // ATR expansion filter: confirm breakout is real (not false breakout)
     requireAtrExpansion: true,
+    atrExpansionMultiplier: 1.05, // ATR must be 5% above previous (filters false breakouts)
     // Wider trailing for SQUEEZE_BREAKOUT (fast trend moves)
     squeezeBreakoutTrailing: {
       activationPercent: 0.8,       // Activate trailing earlier (0.8% vs 1.5%)
