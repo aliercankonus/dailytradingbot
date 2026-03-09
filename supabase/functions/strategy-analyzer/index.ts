@@ -190,7 +190,8 @@ import {
   // NEW: LTF Micro Timing Gate (1m/5m entry timing quality)
   LTF_MICRO_TIMING_GATE,
   // Production strategy routing per symbol
-  BTC_PARAMS
+  BTC_PARAMS,
+  ALTCOIN_PARAMS
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -19543,6 +19544,64 @@ serve(async (req) => {
             perSymbolGateAttribution.set(symbol, { 
               gate: 'BTC_SHORT_STRATEGY_ROUTING' as GateType, 
               details: `${strategy.name} blocked for BTC SHORT` 
+            });
+            continue;
+          }
+        }
+
+        // ===== BTC LONG STRATEGY ROUTING (Production) =====
+        // Block non-SQUEEZE_BREAKOUT strategies for BTC LONGs — unvalidated edge
+        if (BTC_PARAMS.longStrategyRouting?.enabled && 
+            BTC_PARAMS.symbols.includes(symbol) && 
+            signalType === 'long') {
+          const routingConfig = BTC_PARAMS.longStrategyRouting;
+          if (!routingConfig.enabledStrategies.includes(strategy.name)) {
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.REJECTION} 🚫 BTC_LONG_ROUTING: Strategy "${strategy.name}" blocked for BTC LONG ` +
+              `(allowed: ${routingConfig.enabledStrategies.join(', ')})`
+            );
+            rejectionBuffer.add({
+              user_id: userId,
+              symbol,
+              rejection_reason: `BTC_LONG_ROUTING: ${strategy.name} blocked`,
+              filters_status: { 
+                gate: 'BTC_LONG_STRATEGY_ROUTING', 
+                blockedStrategy: strategy.name,
+                allowedStrategies: routingConfig.enabledStrategies,
+              },
+            });
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'BTC_LONG_STRATEGY_ROUTING' as GateType, 
+              details: `${strategy.name} blocked for BTC LONG` 
+            });
+            continue;
+          }
+        }
+
+        // ===== ALTCOIN STRATEGY ROUTING (Production) =====
+        // Block non-safe strategies for all altcoins (both LONG and SHORT)
+        if (ALTCOIN_PARAMS.strategyRouting?.enabled && 
+            ALTCOIN_PARAMS.symbols.includes(symbol)) {
+          const routingConfig = ALTCOIN_PARAMS.strategyRouting;
+          if (!routingConfig.enabledStrategies.includes(strategy.name)) {
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.REJECTION} 🚫 ALTCOIN_ROUTING: Strategy "${strategy.name}" blocked for ${symbol} ${signalType?.toUpperCase()} ` +
+              `(allowed: ${routingConfig.enabledStrategies.join(', ')})`
+            );
+            rejectionBuffer.add({
+              user_id: userId,
+              symbol,
+              rejection_reason: `ALTCOIN_ROUTING: ${strategy.name} blocked`,
+              filters_status: { 
+                gate: 'ALTCOIN_STRATEGY_ROUTING', 
+                blockedStrategy: strategy.name,
+                allowedStrategies: routingConfig.enabledStrategies,
+                side: signalType,
+              },
+            });
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'ALTCOIN_STRATEGY_ROUTING' as GateType, 
+              details: `${strategy.name} blocked for ${symbol} ${signalType?.toUpperCase()}` 
             });
             continue;
           }
