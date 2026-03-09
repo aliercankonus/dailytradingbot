@@ -617,17 +617,19 @@ function evaluateProductionGates(
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
 
-  // ===== GATE 10: Quality Score (production calculateQualityScore) =====
+  // ===== GATE 10: Quality Score — BTC SHORT uses lower floor =====
   const effectiveTrend = direction === 'LONG' ? 'bullish' : 'bearish';
   const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
   const qualityScore = qualityResult.score;
 
-  // Hard floor — SYMBOL-ADAPTIVE quality minimum
-  if (qualityScore < sp.gates.MIN_QUALITY_SCORE) {
+  const effectiveQualityFloor = (isBtcShort && shortOverrides)
+    ? shortOverrides.minQualityScore
+    : sp.gates.MIN_QUALITY_SCORE;
+  if (qualityScore < effectiveQualityFloor) {
     return fail('LOW_QUALITY_HARD_FLOOR');
   }
 
-  if (qualityScore < QUALITY_THRESHOLDS.MIN_ENTRY_QUALITY) {
+  if (!isBtcShort && qualityScore < QUALITY_THRESHOLDS.MIN_ENTRY_QUALITY) {
     return fail('LOW_QUALITY');
   }
 
