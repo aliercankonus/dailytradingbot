@@ -683,19 +683,19 @@ function evaluateProductionGates(
     const volFilter = BTC_PARAMS.volumeExpansionFilter;
     const bodyFilter = BTC_PARAMS.candleBodyFilter;
 
-    // --- Squeeze Depth Filter: bbWidth / ATR ---
+    // --- Squeeze Depth Filter: uses bandwidth (bbWidth/SMA*100) directly ---
+    // bandwidth < 4 = squeeze detected; tighter bandwidth = better squeeze
     if (sqFilter.enabled) {
-      const bbWidth = (mfs.bollinger?.["1h"]?.upper ?? 0) - (mfs.bollinger?.["1h"]?.lower ?? 0);
-      const squeezeDepth = mfs.atr > 0 ? bbWidth / mfs.atr : 99;
+      const bw = mfs.bollinger?.["1h"]?.bandwidth ?? 99;
 
-      logger.debug(`SQUEEZE_DEPTH: bbWidth=${bbWidth.toFixed(2)} atr=${mfs.atr.toFixed(2)} ratio=${squeezeDepth.toFixed(2)} max=${sqFilter.maxSqueezeDepth}`);
+      logger.info(`SQUEEZE_QUALITY: bandwidth=${bw.toFixed(2)} max=${sqFilter.maxBandwidth}`);
 
-      if (squeezeDepth > sqFilter.maxSqueezeDepth) {
+      if (bw > sqFilter.maxBandwidth) {
         return fail('SQUEEZE_TOO_SHALLOW');
       }
-      if (squeezeDepth > sqFilter.shallowPenaltyThreshold) {
+      if (bw > sqFilter.shallowPenaltyBandwidth) {
         adxPositionMultiplier = Math.min(adxPositionMultiplier, sqFilter.shallowPenaltyMultiplier);
-      } else if (squeezeDepth < sqFilter.deepSqueezeBonusThreshold) {
+      } else if (bw < sqFilter.deepSqueezeBonusBandwidth) {
         adxPositionMultiplier *= sqFilter.deepSqueezeBonusMultiplier;
       }
     }
