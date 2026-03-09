@@ -358,21 +358,19 @@ export const BTC_PARAMS = {
     shallowPenaltyMultiplier: 0.60, // 40% smaller position for shallow squeezes
   },
   // ============= VOLUME EXPANSION FILTER =============
-  // Confirms breakout has real participation (not fake/thin breakout)
-  // Soft gate: reduces position instead of hard blocking
+  // DISABLED for calibration — re-enable after squeeze depth tuning
   volumeExpansionFilter: {
-    enabled: true,
-    minVolumeRatio: 1.3,            // Volume >= 30% above MA = full position
-    softMinVolumeRatio: 0.9,        // Below 0.9 = hard block (truly dead volume)
-    softPositionMultiplier: 0.50,   // 0.9-1.3 range = 50% position
+    enabled: false,
+    minVolumeRatio: 1.3,
+    softMinVolumeRatio: 0.9,
+    softPositionMultiplier: 0.50,
   },
   // ============= CANDLE BODY SIZE FILTER =============
-  // Breakout candle must have meaningful body (not doji/indecision)
-  // Soft gate: only blocks tiny doji candles
+  // DISABLED for calibration — re-enable after squeeze depth tuning
   candleBodyFilter: {
-    enabled: true,
-    minBodyAtrRatio: 0.15,          // Candle body must be >= 15% of ATR (blocks doji only)
-    strongBreakoutThreshold: 0.7,   // Body >= 70% ATR = strong breakout signal
+    enabled: false,
+    minBodyAtrRatio: 0.15,
+    strongBreakoutThreshold: 0.7,
   },
 } as const;
 
