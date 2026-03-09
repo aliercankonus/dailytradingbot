@@ -1032,7 +1032,7 @@ async function runBacktest(
           const mfs = buildBacktestMFS(symbol, wCloses, wHighs, wLows, wVolumes, wKlines, momResult, adxResult);
           
           // Run production gate pipeline
-          const gateResult = evaluateProductionGates(mfs, momResult, symbol, config.sideFilter);
+          const gateResult = evaluateProductionGates(mfs, momResult, symbol, config.sideFilter, wKlines);
 
           if (gateResult.gate) {
             gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
