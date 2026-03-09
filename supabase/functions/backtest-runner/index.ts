@@ -677,6 +677,50 @@ function evaluateProductionGates(
       // No direction confirmation after squeeze — block entry
       return fail('SQUEEZE_NO_DIRECTION');
     }
+
+    // ===== SQUEEZE QUALITY GATES (post-classification) =====
+    const sqFilter = BTC_PARAMS.squeezeDepthFilter;
+    const volFilter = BTC_PARAMS.volumeExpansionFilter;
+    const bodyFilter = BTC_PARAMS.candleBodyFilter;
+
+    // --- Squeeze Depth Filter: bbWidth / ATR ---
+    if (sqFilter.enabled) {
+      const bbWidth = (mfs.bollinger?.["1h"]?.upper ?? 0) - (mfs.bollinger?.["1h"]?.lower ?? 0);
+      const squeezeDepth = mfs.atr > 0 ? bbWidth / mfs.atr : 99;
+
+      if (squeezeDepth > sqFilter.maxSqueezeDepth) {
+        return fail('SQUEEZE_TOO_SHALLOW');
+      }
+      if (squeezeDepth > sqFilter.shallowPenaltyThreshold) {
+        adxPositionMultiplier = Math.min(adxPositionMultiplier, sqFilter.shallowPenaltyMultiplier);
+      } else if (squeezeDepth < sqFilter.deepSqueezeBonusThreshold) {
+        adxPositionMultiplier *= sqFilter.deepSqueezeBonusMultiplier;
+      }
+    }
+
+    // --- Volume Expansion Filter ---
+    if (volFilter.enabled) {
+      const volRatio = mfs.volume?.["1h"]?.volumeRatio ?? mfs.volumeRatio ?? 1.0;
+      if (volRatio < volFilter.softMinVolumeRatio) {
+        return fail('NO_VOLUME_EXPANSION');
+      }
+      if (volRatio < volFilter.minVolumeRatio) {
+        adxPositionMultiplier = Math.min(adxPositionMultiplier, volFilter.softPositionMultiplier);
+      }
+    }
+
+    // --- Candle Body Size Filter ---
+    if (bodyFilter.enabled && klines && klines.length > 0) {
+      const lastKline = klines[klines.length - 1];
+      const open = parseFloat(lastKline[1]);
+      const close = parseFloat(lastKline[4]);
+      const candleBody = Math.abs(close - open);
+      const bodyAtrRatio = mfs.atr > 0 ? candleBody / mfs.atr : 0;
+
+      if (bodyAtrRatio < bodyFilter.minBodyAtrRatio) {
+        return fail('WEAK_BREAKOUT_CANDLE');
+      }
+    }
   }
 
   return {
