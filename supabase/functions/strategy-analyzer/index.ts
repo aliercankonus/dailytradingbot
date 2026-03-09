@@ -190,7 +190,8 @@ import {
   // NEW: LTF Micro Timing Gate (1m/5m entry timing quality)
   LTF_MICRO_TIMING_GATE,
   // Production strategy routing per symbol
-  BTC_PARAMS
+  BTC_PARAMS,
+  ALTCOIN_PARAMS
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
