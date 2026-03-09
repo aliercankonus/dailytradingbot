@@ -451,8 +451,9 @@ function evaluateProductionGates(
   const stochK = mfs.stochRsi["1h"].k;
   const primaryTrend = mfs.primaryTrend;
 
-  // ===== GATE 1: ADX Hard Floor (production ADX_GATE) =====
-  if (adx < ADX_GATE.HARD_FLOOR) {
+  // ===== GATE 1: ADX Hard Floor — BTC SHORT uses lower floor =====
+  const effectiveHardFloor = shortOverrides?.adxHardFloor ?? ADX_GATE.HARD_FLOOR;
+  if (adx < effectiveHardFloor) {
     return fail('ADX_HARD_FLOOR');
   }
 
