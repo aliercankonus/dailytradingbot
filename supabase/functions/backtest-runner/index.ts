@@ -1135,6 +1135,7 @@ serve(async (req) => {
       startDate,
       endDate,
       barInterval: body.barInterval || '1h',
+      sideFilter: body.sideFilter || null,
     };
 
     const parsedStart = new Date(config.startDate);
