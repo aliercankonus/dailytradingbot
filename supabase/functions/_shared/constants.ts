@@ -359,18 +359,19 @@ export const BTC_PARAMS = {
   },
   // ============= VOLUME EXPANSION FILTER =============
   // Confirms breakout has real participation (not fake/thin breakout)
-  // 90-day: Aralık fake breakouts had low volume
+  // Soft gate: reduces position instead of hard blocking
   volumeExpansionFilter: {
     enabled: true,
-    minVolumeRatio: 1.3,            // Volume must be 30% above MA
-    softMinVolumeRatio: 1.15,       // 15-30% above = reduced position
-    softPositionMultiplier: 0.50,   // 50% position for weak volume
+    minVolumeRatio: 1.3,            // Volume >= 30% above MA = full position
+    softMinVolumeRatio: 0.9,        // Below 0.9 = hard block (truly dead volume)
+    softPositionMultiplier: 0.50,   // 0.9-1.3 range = 50% position
   },
   // ============= CANDLE BODY SIZE FILTER =============
   // Breakout candle must have meaningful body (not doji/indecision)
+  // Soft gate: only blocks tiny doji candles
   candleBodyFilter: {
     enabled: true,
-    minBodyAtrRatio: 0.4,           // Candle body must be >= 40% of ATR
+    minBodyAtrRatio: 0.15,          // Candle body must be >= 15% of ATR (blocks doji only)
     strongBreakoutThreshold: 0.7,   // Body >= 70% ATR = strong breakout signal
   },
 } as const;
