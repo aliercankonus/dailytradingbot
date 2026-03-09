@@ -1164,7 +1164,7 @@ serve(async (req) => {
     }
 
     const { data: running } = await supabase.from('backtest_results')
-      .select('id').eq('user_id', user.id).eq('status', 'running').limit(1);
+      .select('id').eq('user_id', userId).eq('status', 'running').limit(1);
     if (running && running.length > 0) {
       return new Response(JSON.stringify({ error: 'A backtest is already running.' }), {
         status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -1172,14 +1172,14 @@ serve(async (req) => {
     }
 
     const { data: backtestRecord, error: insertError } = await supabase
-      .from('backtest_results').insert({ user_id: user.id, config, status: 'running' })
+      .from('backtest_results').insert({ user_id: userId, config, status: 'running' })
       .select('id').single();
 
     if (insertError || !backtestRecord) {
       throw new Error(`Failed to create backtest record: ${insertError?.message}`);
     }
 
-    await runBacktest(config, user.id, supabase, backtestRecord.id);
+    await runBacktest(config, userId, supabase, backtestRecord.id);
 
     return new Response(JSON.stringify({
       id: backtestRecord.id, status: 'completed', message: 'Backtest completed'
