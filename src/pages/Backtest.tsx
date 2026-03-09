@@ -380,6 +380,38 @@ const Backtest = () => {
           </CardContent>
         </Card>
 
+        {/* Batch Progress Banner */}
+        {batchProgress && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="p-3 flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-foreground">
+                    Batch Backtest {batchProgress.current}/{batchProgress.total}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{batchProgress.label}</span>
+                </div>
+                <div className="w-full bg-secondary rounded-full h-1.5">
+                  <div
+                    className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                    style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Merged Result Badge */}
+        {activeResult?.id?.startsWith('merged-') && (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs border-primary/50 text-primary">
+              📊 Merged Result — {activeResult.config?.startDate ? new Date(activeResult.config.startDate).toLocaleDateString('tr-TR') : ''} → {activeResult.config?.endDate ? new Date(activeResult.config.endDate).toLocaleDateString('tr-TR') : ''}
+            </Badge>
+          </div>
+        )}
+
         {/* Results */}
         {activeResult && summary && (
           <>
