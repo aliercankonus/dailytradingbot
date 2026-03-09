@@ -436,8 +436,11 @@ function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
   momentumResult: MomentumScoreResult,
   symbol?: string,
+  sideFilter?: 'LONG' | 'SHORT' | null,
 ): GateResult {
   const sp = getSymbolParams(symbol || mfs.symbol);
+  const isBtcShort = BTC_PARAMS.symbols.includes(symbol || mfs.symbol) && sideFilter === 'SHORT';
+  const shortOverrides = isBtcShort ? BTC_PARAMS.shortGateOverrides : null;
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
@@ -448,8 +451,9 @@ function evaluateProductionGates(
   const stochK = mfs.stochRsi["1h"].k;
   const primaryTrend = mfs.primaryTrend;
 
-  // ===== GATE 1: ADX Hard Floor (production ADX_GATE) =====
-  if (adx < ADX_GATE.HARD_FLOOR) {
+  // ===== GATE 1: ADX Hard Floor — BTC SHORT uses lower floor =====
+  const effectiveHardFloor = shortOverrides?.adxHardFloor ?? ADX_GATE.HARD_FLOOR;
+  if (adx < effectiveHardFloor) {
     return fail('ADX_HARD_FLOOR');
   }
 
@@ -459,7 +463,7 @@ function evaluateProductionGates(
     if (ADX_GATE.GRADUATED_TIERS.ENABLED && adxSlope > 0) {
       // Early transition probe
       adxPositionMultiplier = ADX_GATE.GRADUATED_TIERS.EARLY_TRANSITION.POSITION_MULTIPLIER;
-    } else if (adxSlope > -0.5 && adx >= 18) {
+    } else if (adxSlope > -0.5 && adx >= (shortOverrides ? 16 : 18)) {
       // RELAXED: Allow flat/slightly declining slope at ADX 18-20 with reduced size
       adxPositionMultiplier = 0.30;
     } else {
@@ -486,41 +490,50 @@ function evaluateProductionGates(
     }
   }
 
-  // ===== GATE 4: Determine Direction — OPTIMIZED: relaxed thresholds =====
+  // ===== GATE 4: Determine Direction — BTC SHORT uses relaxed momentum =====
   let direction: 'LONG' | 'SHORT' | null = null;
   const emaBullish = primaryTrend === 'bullish';
   const emaBearish = primaryTrend === 'bearish';
+  const dirMinMom = shortOverrides?.directionMinMomentum ?? 10;
+  const dirMinAdx = shortOverrides?.directionMinAdxForMomentum ?? ADX_THRESHOLDS.VERY_STRONG;
   
   if (emaBullish && momentumResult.score > 0) {
     direction = 'LONG';
   } else if (emaBearish && momentumResult.score < 0) {
     direction = 'SHORT';
-  } else if (momentumResult.score > 10 && adx > ADX_THRESHOLDS.STRONG) {
-    // RELAXED: from >15 to >10 — allows moderate momentum with strong ADX
+  } else if (momentumResult.score > dirMinMom && adx > dirMinAdx) {
     direction = 'LONG';
-  } else if (momentumResult.score < -10 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score < -dirMinMom && adx > dirMinAdx) {
     direction = 'SHORT';
   } else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
-    // Strong structural trend can derive direction from DI
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diPlus > diMinus + 5) direction = 'LONG';
     else if (diMinus > diPlus + 5) direction = 'SHORT';
   } else if (adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0.2) {
-    // NEW: Rising ADX with moderate momentum can derive direction
     if (momentumResult.score > 5) direction = 'LONG';
     else if (momentumResult.score < -5) direction = 'SHORT';
+  }
+  // BTC SHORT extra: DI-based direction at moderate ADX with weak negative momentum
+  if (!direction && isBtcShort && adx >= 20 && momentumResult.score < -3) {
+    const diPlus = mfs.diPlus || 0;
+    const diMinus = mfs.diMinus || 0;
+    if (diMinus > diPlus + 3) {
+      direction = 'SHORT';
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.35);
+    }
   }
   
   if (!direction) {
     return fail('NO_DIRECTION');
   }
 
-  // ===== GATE 5: Counter-Trend Protection (production) =====
+  // ===== GATE 5: Counter-Trend — BTC SHORT uses higher ADX threshold =====
+  const ctMinAdx = shortOverrides?.counterTrendMinAdx ?? ADX_THRESHOLDS.EXCEPTIONAL;
   if (direction === 'LONG' && emaBearish && adx > ADX_THRESHOLDS.EXCEPTIONAL) {
     return fail('COUNTER_TREND');
   }
-  if (direction === 'SHORT' && emaBullish && adx > ADX_THRESHOLDS.EXCEPTIONAL) {
+  if (direction === 'SHORT' && emaBullish && adx > ctMinAdx) {
     return fail('COUNTER_TREND');
   }
 
@@ -604,17 +617,19 @@ function evaluateProductionGates(
     adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
   }
 
-  // ===== GATE 10: Quality Score (production calculateQualityScore) =====
+  // ===== GATE 10: Quality Score — BTC SHORT uses lower floor =====
   const effectiveTrend = direction === 'LONG' ? 'bullish' : 'bearish';
   const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
   const qualityScore = qualityResult.score;
 
-  // Hard floor — SYMBOL-ADAPTIVE quality minimum
-  if (qualityScore < sp.gates.MIN_QUALITY_SCORE) {
+  const effectiveQualityFloor = (isBtcShort && shortOverrides)
+    ? shortOverrides.minQualityScore
+    : sp.gates.MIN_QUALITY_SCORE;
+  if (qualityScore < effectiveQualityFloor) {
     return fail('LOW_QUALITY_HARD_FLOOR');
   }
 
-  if (qualityScore < QUALITY_THRESHOLDS.MIN_ENTRY_QUALITY) {
+  if (!isBtcShort && qualityScore < QUALITY_THRESHOLDS.MIN_ENTRY_QUALITY) {
     return fail('LOW_QUALITY');
   }
 
@@ -651,7 +666,7 @@ function evaluateProductionGates(
                                (direction === 'SHORT' && macdHist < 0);
     if (squeezeDirConfirmed) {
       strategyName = 'SQUEEZE_BREAKOUT';
-    } else if (squeezeDirPartial && adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0) {
+    } else if (squeezeDirPartial && adx >= (shortOverrides?.squeezeMinAdxForPartial ?? ADX_THRESHOLDS.MODERATE) && adxSlope > 0) {
       // Partial confirmation: MACD direction matches but not yet expanding
       strategyName = 'SQUEEZE_BREAKOUT';
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
@@ -970,7 +985,7 @@ async function runBacktest(
           const mfs = buildBacktestMFS(symbol, wCloses, wHighs, wLows, wVolumes, wKlines, momResult, adxResult);
           
           // Run production gate pipeline
-          const gateResult = evaluateProductionGates(mfs, momResult, symbol);
+          const gateResult = evaluateProductionGates(mfs, momResult, symbol, config.sideFilter);
 
           if (gateResult.gate) {
             gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
@@ -1155,7 +1170,7 @@ serve(async (req) => {
     let startDate = body.startDate;
     let endDate = body.endDate;
     if (!startDate || !endDate) {
-      const days = body.days || 7;
+      const days = body.periodDays || body.days || 7;
       const now = new Date();
       endDate = now.toISOString();
       startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -1173,8 +1188,8 @@ serve(async (req) => {
     const parsedEnd = new Date(config.endDate);
     const daysDiff = (parsedEnd.getTime() - parsedStart.getTime()) / (1000 * 60 * 60 * 24);
 
-    if (daysDiff > 30) {
-      return new Response(JSON.stringify({ error: 'Maximum backtest period is 30 days' }), {
+    if (daysDiff > 180) {
+      return new Response(JSON.stringify({ error: 'Maximum backtest period is 180 days' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
@@ -1183,6 +1198,12 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
+
+    // Clear stale running backtests (older than 5 min = likely timed out)
+    await supabase.from('backtest_results')
+      .update({ status: 'failed', error_message: 'timeout_cleanup' })
+      .eq('user_id', userId).eq('status', 'running')
+      .lt('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString());
 
     const { data: running } = await supabase.from('backtest_results')
       .select('id').eq('user_id', userId).eq('status', 'running').limit(1);

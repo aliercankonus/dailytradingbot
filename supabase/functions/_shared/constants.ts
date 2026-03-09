@@ -292,24 +292,33 @@ export const BTC_PARAMS = {
     earlyFlipMaxHours: 2,
   },
   // BTC SHORT-only trailing stop optimization
-  // Problem: Avg Win (+1.10%) too close to Avg Loss (-1.29%) → PF capped at ~1.7
-  // Solution: Raise activation to 1.5%, widen distances to let winners run to 2%+
   shortTrailing: {
-    // Activation: only start trailing after 1.5% peak (was 0.8% global)
     activationPercent: 1.5,
-    // Wider distances: BTC trends are linear, give them room to breathe
     tiers: [
-      { peakThreshold: 1.5, trailDistance: 0.30 },  // Early: keep 70% of 1.5% = 1.05%
-      { peakThreshold: 2.0, trailDistance: 0.25 },  // Mid: keep 75% of 2.0% = 1.50%
-      { peakThreshold: 2.5, trailDistance: 0.20 },  // Strong: keep 80% of 2.5% = 2.00%
-      { peakThreshold: 3.0, trailDistance: 0.15 },  // Capture: keep 85% of 3.0% = 2.55%
-      { peakThreshold: 4.0, trailDistance: 0.12 },  // Extended: keep 88% of 4.0% = 3.52%
+      { peakThreshold: 1.5, trailDistance: 0.30 },
+      { peakThreshold: 2.0, trailDistance: 0.25 },
+      { peakThreshold: 2.5, trailDistance: 0.20 },
+      { peakThreshold: 3.0, trailDistance: 0.15 },
+      { peakThreshold: 4.0, trailDistance: 0.12 },
     ],
-    // Minimum lock: never exit below this % profit once trailing is active
     minTrailFloor: 0.80,
-    // ADX trend relaxation: widen distance 20% if ADX >= 35 (let strong trends run)
     adxRelaxationThreshold: 35,
     adxRelaxationMultiplier: 1.20,
+  },
+  // BTC SHORT-only gate relaxation — increase trade count without sacrificing quality
+  // Top blockers: COUNTER_TREND (18), NO_DIRECTION (15), SQUEEZE_NO_DIR (13), ADX_FLOOR (12)
+  shortGateOverrides: {
+    // ADX hard floor: 16 → 14 (BTC has meaningful trends even at lower ADX)
+    adxHardFloor: 14,
+    // Counter-trend: only block at ADX 45+ (was 35) — BTC shorts in bullish EMA work at moderate ADX
+    counterTrendMinAdx: 45,
+    // Direction derivation: allow weaker momentum signals for SHORT
+    directionMinMomentum: 5,        // was 10
+    directionMinAdxForMomentum: 25, // was 30 (ADX_THRESHOLDS.VERY_STRONG)
+    // Quality floor: 45 → 38 (BTC SHORT has structural edge, quality is less predictive)
+    minQualityScore: 38,
+    // Squeeze: allow SHORT with partial MACD confirmation at lower ADX
+    squeezeMinAdxForPartial: 18,    // was ADX_THRESHOLDS.MODERATE (22)
   },
 } as const;
 
