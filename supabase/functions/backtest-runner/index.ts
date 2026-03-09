@@ -959,6 +959,11 @@ async function runBacktest(
           }
 
           if (gateResult.passed && gateResult.direction) {
+            // Side filter: skip if direction doesn't match requested side
+            if (config.sideFilter && gateResult.direction !== config.sideFilter) {
+              gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] || 0) + 1;
+              continue;
+            }
             const dir = gateResult.direction;
             
             // ATR-based SL/TP with SYMBOL-ADAPTIVE caps
