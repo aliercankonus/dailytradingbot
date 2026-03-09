@@ -999,6 +999,28 @@ async function runBacktest(
               gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] || 0) + 1;
               continue;
             }
+            
+            // Strategy filter: skip if strategy not in enabled list
+            if (config.enabledStrategies && config.enabledStrategies.length > 0 &&
+                !config.enabledStrategies.includes(gateResult.strategyName)) {
+              gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] = (gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] || 0) + 1;
+              continue;
+            }
+            
+            // STRONG_TREND filters: ATR expansion + momentum decay protection
+            if (config.strongTrendFilters && gateResult.strategyName === 'STRONG_TREND') {
+              // ATR must be expanding (current ATR > previous bar ATR) — confirms volatility breakout
+              const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
+              if (atr <= prevAtr) {
+                gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] = (gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] || 0) + 1;
+                continue;
+              }
+              // ADX must be rising — confirms trend is gaining energy, not exhausting
+              if (adxResult.adxSlope < 0.1) {
+                gateStats['STRONG_TREND_ADX_NOT_RISING'] = (gateStats['STRONG_TREND_ADX_NOT_RISING'] || 0) + 1;
+                continue;
+              }
+            }
             const dir = gateResult.direction;
             
             // ATR-based SL/TP with SYMBOL-ADAPTIVE caps
