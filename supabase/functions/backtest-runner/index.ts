@@ -490,30 +490,38 @@ function evaluateProductionGates(
     }
   }
 
-  // ===== GATE 4: Determine Direction — OPTIMIZED: relaxed thresholds =====
+  // ===== GATE 4: Determine Direction — BTC SHORT uses relaxed momentum =====
   let direction: 'LONG' | 'SHORT' | null = null;
   const emaBullish = primaryTrend === 'bullish';
   const emaBearish = primaryTrend === 'bearish';
+  const dirMinMom = shortOverrides?.directionMinMomentum ?? 10;
+  const dirMinAdx = shortOverrides?.directionMinAdxForMomentum ?? ADX_THRESHOLDS.VERY_STRONG;
   
   if (emaBullish && momentumResult.score > 0) {
     direction = 'LONG';
   } else if (emaBearish && momentumResult.score < 0) {
     direction = 'SHORT';
-  } else if (momentumResult.score > 10 && adx > ADX_THRESHOLDS.STRONG) {
-    // RELAXED: from >15 to >10 — allows moderate momentum with strong ADX
+  } else if (momentumResult.score > dirMinMom && adx > dirMinAdx) {
     direction = 'LONG';
-  } else if (momentumResult.score < -10 && adx > ADX_THRESHOLDS.STRONG) {
+  } else if (momentumResult.score < -dirMinMom && adx > dirMinAdx) {
     direction = 'SHORT';
   } else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
-    // Strong structural trend can derive direction from DI
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diPlus > diMinus + 5) direction = 'LONG';
     else if (diMinus > diPlus + 5) direction = 'SHORT';
   } else if (adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0.2) {
-    // NEW: Rising ADX with moderate momentum can derive direction
     if (momentumResult.score > 5) direction = 'LONG';
     else if (momentumResult.score < -5) direction = 'SHORT';
+  }
+  // BTC SHORT extra: DI-based direction at moderate ADX with weak negative momentum
+  if (!direction && isBtcShort && adx >= 20 && momentumResult.score < -3) {
+    const diPlus = mfs.diPlus || 0;
+    const diMinus = mfs.diMinus || 0;
+    if (diMinus > diPlus + 3) {
+      direction = 'SHORT';
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.35);
+    }
   }
   
   if (!direction) {
