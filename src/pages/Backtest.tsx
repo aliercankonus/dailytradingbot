@@ -127,6 +127,13 @@ const Backtest = () => {
     );
   };
 
+  // Auto-load history on mount
+  useEffect(() => {
+    if (user) {
+      loadHistory();
+    }
+  }, [user]);
+
   const summary = activeResult?.summary;
   const equityCurve = activeResult?.equity_curve || [];
   const gateStats = activeResult?.gate_stats || {};
