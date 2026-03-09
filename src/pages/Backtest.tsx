@@ -59,6 +59,8 @@ const Backtest = () => {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['BTCUSDT']);
   const [barInterval, setBarInterval] = useState('1h');
   const [period, setPeriod] = useState('7');
+  const [sideFilter, setSideFilter] = useState<string>('all');
+  const [enabledStrategies, setEnabledStrategies] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [results, setResults] = useState<BacktestResult[]>([]);
