@@ -538,12 +538,20 @@ const Backtest = () => {
                       <span className="text-xs text-muted-foreground">
                         {(r.config as any)?.symbols?.join(', ')}
                       </span>
+                      {(r.config as any)?.sideFilter && (
+                        <Badge variant="outline" className="text-[9px]">{(r.config as any).sideFilter}</Badge>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 text-xs">
                       {r.summary && (
-                        <span className={`font-mono font-medium ${(r.summary as any).totalReturnPercent >= 0 ? 'text-success' : 'text-danger'}`}>
-                          {(r.summary as any).totalReturnPercent >= 0 ? '+' : ''}{(r.summary as any).totalReturnPercent}%
-                        </span>
+                        <>
+                          <span className="text-muted-foreground font-mono">
+                            {(r.summary as any).totalTrades}T | PF {(r.summary as any).profitFactor}
+                          </span>
+                          <span className={`font-mono font-medium ${(r.summary as any).totalReturnPercent >= 0 ? 'text-success' : 'text-danger'}`}>
+                            {(r.summary as any).totalReturnPercent >= 0 ? '+' : ''}{(r.summary as any).totalReturnPercent}%
+                          </span>
+                        </>
                       )}
                       <span className="text-muted-foreground">
                         {new Date(r.created_at).toLocaleDateString('tr-TR')}
