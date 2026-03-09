@@ -162,11 +162,13 @@ const Backtest = () => {
 
   // Run a single chunk backtest
   const runSingleChunk = async (startDate: Date, endDate: Date): Promise<BacktestResult | null> => {
+    const { data: { session } } = await supabase.auth.getSession();
     const body: any = {
       symbols: selectedSymbols,
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       barInterval,
+      user_id: session?.user?.id,
     };
     if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
     if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
