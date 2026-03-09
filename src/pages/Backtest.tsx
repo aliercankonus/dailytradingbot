@@ -325,7 +325,7 @@ const Backtest = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {/* Period */}
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Süre</label>
@@ -354,6 +354,41 @@ const Backtest = () => {
                   <SelectContent>
                     <SelectItem value="1h">1 Saat</SelectItem>
                     <SelectItem value="4h">4 Saat</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Side Filter */}
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Yön Filtresi</label>
+                <Select value={sideFilter} onValueChange={setSideFilter}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tümü</SelectItem>
+                    <SelectItem value="long">Sadece LONG</SelectItem>
+                    <SelectItem value="short">Sadece SHORT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Strategy Filter */}
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Strateji Filtresi</label>
+                <Select
+                  value={enabledStrategies.length === 0 ? 'all' : enabledStrategies[0]}
+                  onValueChange={(v) => setEnabledStrategies(v === 'all' ? [] : [v])}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tüm Stratejiler</SelectItem>
+                    <SelectItem value="SQUEEZE_BREAKOUT">Squeeze Breakout</SelectItem>
+                    <SelectItem value="MOMENTUM_ACCELERATION">Momentum Accel.</SelectItem>
+                    <SelectItem value="STRONG_TREND">Strong Trend</SelectItem>
+                    <SelectItem value="TREND_CONTINUATION">Trend Continuation</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
