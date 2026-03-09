@@ -60,6 +60,7 @@ const Backtest = () => {
   const [barInterval, setBarInterval] = useState('1h');
   const [period, setPeriod] = useState('7');
   const [running, setRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [activeResult, setActiveResult] = useState<BacktestResult | null>(null);
 
@@ -76,45 +77,181 @@ const Backtest = () => {
     }
   };
 
-  // Run backtest
+  // Merge multiple backtest results into one combined view
+  const mergeBacktestResults = (batchResults: BacktestResult[]): BacktestResult => {
+    const allTrades: BacktestTrade[] = [];
+    const allEquity: { time: string; equity: number; drawdown: number }[] = [];
+    const mergedGateStats: Record<string, number> = {};
+    let totalDuration = 0;
+
+    // Collect trades and gate stats from all batches
+    for (const batch of batchResults) {
+      if (batch.trades) allTrades.push(...batch.trades);
+      if (batch.gate_stats) {
+        for (const [gate, count] of Object.entries(batch.gate_stats)) {
+          mergedGateStats[gate] = (mergedGateStats[gate] || 0) + (count as number);
+        }
+      }
+      totalDuration += batch.duration_ms || 0;
+    }
+
+    // Sort trades by entry time
+    allTrades.sort((a, b) => new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime());
+
+    // Rebuild equity curve from merged trades
+    let equity = 10000;
+    let peak = equity;
+    for (const trade of allTrades) {
+      const positionSize = equity * 0.015;
+      equity += positionSize * (trade.netPnlPercent / 100);
+      peak = Math.max(peak, equity);
+      const drawdown = peak > 0 ? ((peak - equity) / peak) * 100 : 0;
+      allEquity.push({ time: trade.exitTime, equity: Math.round(equity * 100) / 100, drawdown: Math.round(drawdown * 100) / 100 });
+    }
+
+    // Compute merged summary
+    const winningTrades = allTrades.filter(t => t.netPnlPercent > 0);
+    const losingTrades = allTrades.filter(t => t.netPnlPercent <= 0);
+    const winRate = allTrades.length > 0 ? (winningTrades.length / allTrades.length) * 100 : 0;
+    const avgWin = winningTrades.length > 0 ? winningTrades.reduce((s, t) => s + t.netPnlPercent, 0) / winningTrades.length : 0;
+    const avgLoss = losingTrades.length > 0 ? Math.abs(losingTrades.reduce((s, t) => s + t.netPnlPercent, 0) / losingTrades.length) : 0;
+    const profitFactor = avgLoss > 0 ? (avgWin * winningTrades.length) / (avgLoss * losingTrades.length) : winningTrades.length > 0 ? 999 : 0;
+    const maxDrawdown = allEquity.length > 0 ? Math.max(...allEquity.map(e => e.drawdown)) : 0;
+    const totalReturn = ((equity - 10000) / 10000) * 100;
+
+    const exitBreakdown: Record<string, number> = {};
+    for (const t of allTrades) {
+      exitBreakdown[t.exitReason] = (exitBreakdown[t.exitReason] || 0) + 1;
+    }
+
+    const firstConfig = batchResults[0]?.config;
+    const lastConfig = batchResults[batchResults.length - 1]?.config;
+
+    return {
+      id: `merged-${Date.now()}`,
+      status: 'completed',
+      config: {
+        symbols: firstConfig?.symbols || selectedSymbols,
+        startDate: firstConfig?.startDate || '',
+        endDate: lastConfig?.endDate || '',
+        barInterval: firstConfig?.barInterval || '1h',
+      },
+      summary: {
+        totalTrades: allTrades.length,
+        winningTrades: winningTrades.length,
+        losingTrades: losingTrades.length,
+        winRate: Math.round(winRate * 10) / 10,
+        avgWinPercent: Math.round(avgWin * 1000) / 1000,
+        avgLossPercent: Math.round(avgLoss * 1000) / 1000,
+        profitFactor: Math.round(profitFactor * 100) / 100,
+        maxDrawdownPercent: Math.round(maxDrawdown * 100) / 100,
+        totalReturnPercent: Math.round(totalReturn * 100) / 100,
+        finalEquity: Math.round(equity * 100) / 100,
+        exitBreakdown,
+      },
+      trades: allTrades,
+      equity_curve: allEquity,
+      gate_stats: mergedGateStats,
+      duration_ms: totalDuration,
+      error_message: null,
+      created_at: new Date().toISOString(),
+    };
+  };
+
+  // Run a single chunk backtest
+  const runSingleChunk = async (startDate: Date, endDate: Date): Promise<BacktestResult | null> => {
+    const { data, error } = await supabase.functions.invoke('backtest-runner', {
+      body: {
+        symbols: selectedSymbols,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        barInterval,
+      },
+    });
+
+    if (error) throw error;
+
+    const { data: result } = await supabase
+      .from('backtest_results')
+      .select('*')
+      .eq('id', data.id)
+      .single();
+
+    return result ? (result as any as BacktestResult) : null;
+  };
+
+  // Run backtest (batch for 60+ days)
   const runBacktest = async () => {
     if (!user) return;
     setRunning(true);
+    setBatchProgress(null);
 
     try {
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - parseInt(period));
+      const days = parseInt(period);
+      const CHUNK_SIZE = 30;
 
-      const { data, error } = await supabase.functions.invoke('backtest-runner', {
-        body: {
-          symbols: selectedSymbols,
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          barInterval,
-        },
-      });
+      if (days > CHUNK_SIZE) {
+        // Batch mode: split into 30-day chunks
+        const chunks: { start: Date; end: Date }[] = [];
+        const now = new Date();
+        let remaining = days;
+        let chunkEnd = now;
 
-      if (error) throw error;
+        while (remaining > 0) {
+          const chunkDays = Math.min(remaining, CHUNK_SIZE);
+          const chunkStart = new Date(chunkEnd.getTime() - chunkDays * 24 * 60 * 60 * 1000);
+          chunks.unshift({ start: chunkStart, end: chunkEnd });
+          chunkEnd = chunkStart;
+          remaining -= chunkDays;
+        }
 
-      toast.success(`Backtest tamamlandı: ${data.id?.substring(0, 8)}`);
+        const batchResults: BacktestResult[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const startLabel = chunk.start.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+          const endLabel = chunk.end.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+          setBatchProgress({ current: i + 1, total: chunks.length, label: `${startLabel} → ${endLabel}` });
 
-      // Fetch the full result
-      const { data: result } = await supabase
-        .from('backtest_results')
-        .select('*')
-        .eq('id', data.id)
-        .single();
+          toast.info(`Batch ${i + 1}/${chunks.length}: ${startLabel} → ${endLabel}`);
 
-      if (result) {
-        const typedResult = result as any as BacktestResult;
-        setActiveResult(typedResult);
-        setResults(prev => [typedResult, ...prev]);
+          const result = await runSingleChunk(chunk.start, chunk.end);
+          if (result && result.status === 'completed') {
+            batchResults.push(result);
+          } else {
+            toast.warning(`Batch ${i + 1} başarısız, devam ediliyor...`);
+          }
+        }
+
+        if (batchResults.length === 0) {
+          throw new Error('Hiçbir batch başarılı olamadı');
+        }
+
+        // Merge results
+        const merged = mergeBacktestResults(batchResults);
+        setActiveResult(merged);
+        toast.success(`${days} gün batch backtest tamamlandı: ${batchResults.length}/${chunks.length} batch, ${merged.summary?.totalTrades} trade`);
+
+        // Reload history to show individual chunks
+        await loadHistory();
+      } else {
+        // Single run mode
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+
+        const result = await runSingleChunk(startDate, endDate);
+
+        if (result) {
+          setActiveResult(result);
+          setResults(prev => [result, ...prev]);
+          toast.success(`Backtest tamamlandı: ${result.id?.substring(0, 8)}`);
+        }
       }
     } catch (error: any) {
       toast.error(`Backtest hatası: ${error.message}`);
     } finally {
       setRunning(false);
+      setBatchProgress(null);
     }
   };
 
@@ -227,12 +364,14 @@ const Backtest = () => {
                   {running ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      Çalışıyor...
+                      {batchProgress
+                        ? `Batch ${batchProgress.current}/${batchProgress.total}`
+                        : 'Çalışıyor...'}
                     </>
                   ) : (
                     <>
                       <Play className="h-3.5 w-3.5 mr-1.5" />
-                      Backtest Başlat
+                      {parseInt(period) > 30 ? `Batch Backtest (${Math.ceil(parseInt(period) / 30)}×30g)` : 'Backtest Başlat'}
                     </>
                   )}
                 </Button>
@@ -240,6 +379,38 @@ const Backtest = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Batch Progress Banner */}
+        {batchProgress && (
+          <Card className="border-primary/30 bg-primary/5">
+            <CardContent className="p-3 flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-foreground">
+                    Batch Backtest {batchProgress.current}/{batchProgress.total}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{batchProgress.label}</span>
+                </div>
+                <div className="w-full bg-secondary rounded-full h-1.5">
+                  <div
+                    className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                    style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Merged Result Badge */}
+        {activeResult?.id?.startsWith('merged-') && (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs border-primary/50 text-primary">
+              📊 Merged Result — {activeResult.config?.startDate ? new Date(activeResult.config.startDate).toLocaleDateString('tr-TR') : ''} → {activeResult.config?.endDate ? new Date(activeResult.config.endDate).toLocaleDateString('tr-TR') : ''}
+            </Badge>
+          </div>
+        )}
 
         {/* Results */}
         {activeResult && summary && (
