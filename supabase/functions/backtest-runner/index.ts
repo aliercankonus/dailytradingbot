@@ -439,6 +439,7 @@ function evaluateProductionGates(
   momentumResult: MomentumScoreResult,
   symbol?: string,
   sideFilter?: 'LONG' | 'SHORT' | null,
+  klines?: any[], // raw klines for candle body filter
 ): GateResult {
   const sp = getSymbolParams(symbol || mfs.symbol);
   const isBtcShort = BTC_PARAMS.symbols.includes(symbol || mfs.symbol) && sideFilter === 'SHORT';
