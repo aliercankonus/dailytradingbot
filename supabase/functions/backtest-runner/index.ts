@@ -436,8 +436,11 @@ function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
   momentumResult: MomentumScoreResult,
   symbol?: string,
+  sideFilter?: 'LONG' | 'SHORT' | null,
 ): GateResult {
   const sp = getSymbolParams(symbol || mfs.symbol);
+  const isBtcShort = BTC_PARAMS.symbols.includes(symbol || mfs.symbol) && sideFilter === 'SHORT';
+  const shortOverrides = isBtcShort ? BTC_PARAMS.shortGateOverrides : null;
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
