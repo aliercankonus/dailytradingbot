@@ -1199,11 +1199,11 @@ serve(async (req) => {
       });
     }
 
-    // Clear stale running backtests (older than 5 min = likely timed out)
+    // Clear stale running backtests (older than 2 min = likely timed out)
     await supabase.from('backtest_results')
       .update({ status: 'failed', error_message: 'timeout_cleanup' })
       .eq('user_id', userId).eq('status', 'running')
-      .lt('created_at', new Date(Date.now() - 5 * 60 * 1000).toISOString());
+      .lt('created_at', new Date(Date.now() - 2 * 60 * 1000).toISOString());
 
     const { data: running } = await supabase.from('backtest_results')
       .select('id').eq('user_id', userId).eq('status', 'running').limit(1);
