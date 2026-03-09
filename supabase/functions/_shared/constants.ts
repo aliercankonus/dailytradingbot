@@ -344,6 +344,36 @@ export const BTC_PARAMS = {
       minTrailFloor: 0.50,         // Minimum trail floor
     },
   },
+  // ============= SQUEEZE DEPTH FILTER =============
+  // Filters shallow squeezes that produce false breakouts
+  // squeezeDepth = bbWidth / ATR — lower = tighter squeeze = more energy
+  // 90-day backtest: Aralık PF 0.61 due to shallow squeezes (high squeezeDepth)
+  squeezeDepthFilter: {
+    enabled: true,
+    maxSqueezeDepth: 1.6,           // Block if bbWidth/ATR > 1.6 (too shallow)
+    aggressiveMaxDepth: 1.4,        // Aggressive filter variant
+    // Position sizing based on squeeze quality
+    deepSqueezeBonusThreshold: 1.2, // squeezeDepth < 1.2 = very tight = bonus
+    deepSqueezeBonusMultiplier: 1.15, // 15% bigger position for deep squeezes
+    shallowPenaltyThreshold: 1.5,   // 1.5-1.6 range = penalized
+    shallowPenaltyMultiplier: 0.60, // 40% smaller position for shallow squeezes
+  },
+  // ============= VOLUME EXPANSION FILTER =============
+  // Confirms breakout has real participation (not fake/thin breakout)
+  // 90-day: Aralık fake breakouts had low volume
+  volumeExpansionFilter: {
+    enabled: true,
+    minVolumeRatio: 1.3,            // Volume must be 30% above MA
+    softMinVolumeRatio: 1.15,       // 15-30% above = reduced position
+    softPositionMultiplier: 0.50,   // 50% position for weak volume
+  },
+  // ============= CANDLE BODY SIZE FILTER =============
+  // Breakout candle must have meaningful body (not doji/indecision)
+  candleBodyFilter: {
+    enabled: true,
+    minBodyAtrRatio: 0.4,           // Candle body must be >= 40% of ATR
+    strongBreakoutThreshold: 0.7,   // Body >= 70% ATR = strong breakout signal
+  },
 } as const;
 
 // Altcoin-optimized parameters (tighter gates for higher volatility)
