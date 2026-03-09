@@ -1188,8 +1188,8 @@ serve(async (req) => {
     const parsedEnd = new Date(config.endDate);
     const daysDiff = (parsedEnd.getTime() - parsedStart.getTime()) / (1000 * 60 * 60 * 24);
 
-    if (daysDiff > 30) {
-      return new Response(JSON.stringify({ error: 'Maximum backtest period is 30 days' }), {
+    if (daysDiff > 180) {
+      return new Response(JSON.stringify({ error: 'Maximum backtest period is 180 days' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
