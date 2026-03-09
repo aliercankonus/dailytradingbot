@@ -1233,10 +1233,19 @@ serve(async (req) => {
     
     if (authHeader) {
       const token = authHeader.replace('Bearer ', '');
-      // Check if it's the service role key
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
       if (token === serviceKey) {
         userId = body.user_id || 'd21aecef-ebef-4bc6-b260-b9a24b984e68';
+      } else if (token === anonKey) {
+        // Anon key passed as bearer — use user_id from body
+        if (body.user_id) {
+          userId = body.user_id;
+        } else {
+          return new Response(JSON.stringify({ error: 'Unauthorized - no user_id provided' }), {
+            status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
       } else {
         const { data: { user }, error: authError } = await supabase.auth.getUser(token);
         if (authError || !user) {
