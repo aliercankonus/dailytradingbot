@@ -320,6 +320,29 @@ export const BTC_PARAMS = {
     // Squeeze: allow SHORT with partial MACD confirmation at lower ADX
     squeezeMinAdxForPartial: 18,    // was ADX_THRESHOLDS.MODERATE (22)
   },
+  // ============= BTC SHORT PRODUCTION STRATEGY ROUTING =============
+  // Based on 60-day backtest validation:
+  //   SQUEEZE_BREAKOUT: PF 2.73, WR 50%, avg loss 0.58% (ALPHA SOURCE)
+  //   STRONG_TREND:     PF 1.10, WR 22%, avg loss 0.98% (DRAG)
+  //   TREND_CONTINUATION: PF <1, WR 50%, avg loss 0.61% (NOISE)
+  shortStrategyRouting: {
+    enabled: true,
+    // Only these strategies can generate SHORT signals for BTC
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    // Disabled strategies (kept as feature flags for future re-enablement)
+    disabledStrategies: {
+      STRONG_TREND: { enabled: false, reason: 'Late entry → pullback → stop. WR 22%, PF 1.10' },
+      TREND_CONTINUATION: { enabled: false, reason: 'Insufficient edge. WR 50%, PF <1' },
+    },
+    // ATR expansion filter: confirm breakout is real (not false breakout)
+    requireAtrExpansion: true,
+    // Wider trailing for SQUEEZE_BREAKOUT (fast trend moves)
+    squeezeBreakoutTrailing: {
+      activationPercent: 0.8,       // Activate trailing earlier (0.8% vs 1.5%)
+      trailDistanceAtr: 2.5,       // Wider trail distance (2.5x ATR)
+      minTrailFloor: 0.50,         // Minimum trail floor
+    },
+  },
 } as const;
 
 // Altcoin-optimized parameters (tighter gates for higher volatility)
