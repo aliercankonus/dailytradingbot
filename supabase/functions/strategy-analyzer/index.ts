@@ -188,7 +188,9 @@ import {
   RISK_SCORE_SCALING,
   DYNAMIC_ENTRY_WINDOW,
   // NEW: LTF Micro Timing Gate (1m/5m entry timing quality)
-  LTF_MICRO_TIMING_GATE
+  LTF_MICRO_TIMING_GATE,
+  // Production strategy routing per symbol
+  BTC_PARAMS
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
