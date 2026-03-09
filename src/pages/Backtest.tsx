@@ -197,6 +197,8 @@ const Backtest = () => {
                     <SelectItem value="7">7 Gün</SelectItem>
                     <SelectItem value="14">14 Gün</SelectItem>
                     <SelectItem value="30">30 Gün</SelectItem>
+                    <SelectItem value="60">60 Gün</SelectItem>
+                    <SelectItem value="90">90 Gün</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
