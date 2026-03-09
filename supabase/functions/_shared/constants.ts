@@ -344,6 +344,24 @@ export const BTC_PARAMS = {
       minTrailFloor: 0.50,         // Minimum trail floor
     },
   },
+  // ============= BTC LONG PRODUCTION STRATEGY ROUTING =============
+  // UNVALIDATED — restricting to safe strategies until backtest confirms edge
+  // Mirrors SHORT routing logic to prevent untested STRONG_TREND/TREND_CONTINUATION drag
+  longStrategyRouting: {
+    enabled: true,
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    disabledStrategies: {
+      STRONG_TREND: { enabled: false, reason: 'Unvalidated for LONG — risk of late entry in exhaustion' },
+      TREND_CONTINUATION: { enabled: false, reason: 'Unvalidated for LONG — no backtest edge confirmed' },
+    },
+    requireAtrExpansion: true,
+    atrExpansionMultiplier: 1.05,
+    qualityScoreMin: 45,
+    adxMin: 18,
+    exitOverrides: {
+      moderate_exhaustion_exit: false, // disable early exit for squeeze trades
+    },
+  },
   // ============= SQUEEZE DEPTH FILTER =============
   // Uses Bollinger bandwidth (bbWidth/SMA*100) directly — already normalized
   // isCompressed triggers at bandwidth < 4. Tighter bandwidth = stronger squeeze.
