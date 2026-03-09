@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AppHeader } from "@/components/AppHeader";
 import { AppFooter } from "@/components/AppFooter";
@@ -127,6 +127,13 @@ const Backtest = () => {
     );
   };
 
+  // Auto-load history on mount
+  useEffect(() => {
+    if (user) {
+      loadHistory();
+    }
+  }, [user]);
+
   const summary = activeResult?.summary;
   const equityCurve = activeResult?.equity_curve || [];
   const gateStats = activeResult?.gate_stats || {};
@@ -190,6 +197,8 @@ const Backtest = () => {
                     <SelectItem value="7">7 Gün</SelectItem>
                     <SelectItem value="14">14 Gün</SelectItem>
                     <SelectItem value="30">30 Gün</SelectItem>
+                    <SelectItem value="60">60 Gün</SelectItem>
+                    <SelectItem value="90">90 Gün</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -529,12 +538,20 @@ const Backtest = () => {
                       <span className="text-xs text-muted-foreground">
                         {(r.config as any)?.symbols?.join(', ')}
                       </span>
+                      {(r.config as any)?.sideFilter && (
+                        <Badge variant="outline" className="text-[9px]">{(r.config as any).sideFilter}</Badge>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 text-xs">
                       {r.summary && (
-                        <span className={`font-mono font-medium ${(r.summary as any).totalReturnPercent >= 0 ? 'text-success' : 'text-danger'}`}>
-                          {(r.summary as any).totalReturnPercent >= 0 ? '+' : ''}{(r.summary as any).totalReturnPercent}%
-                        </span>
+                        <>
+                          <span className="text-muted-foreground font-mono">
+                            {(r.summary as any).totalTrades}T | PF {(r.summary as any).profitFactor}
+                          </span>
+                          <span className={`font-mono font-medium ${(r.summary as any).totalReturnPercent >= 0 ? 'text-success' : 'text-danger'}`}>
+                            {(r.summary as any).totalReturnPercent >= 0 ? '+' : ''}{(r.summary as any).totalReturnPercent}%
+                          </span>
+                        </>
                       )}
                       <span className="text-muted-foreground">
                         {new Date(r.created_at).toLocaleDateString('tr-TR')}
