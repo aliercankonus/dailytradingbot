@@ -1000,7 +1000,20 @@ async function runBacktest(
               continue;
             }
             
-            // Strategy filter: skip if strategy not in enabled list
+            // ============= BTC SHORT STRATEGY ROUTING (Production Pipeline) =============
+            // Apply symbol-specific strategy routing when no manual enabledStrategies override
+            const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) && 
+              gateResult.direction === 'SHORT' && 
+              BTC_PARAMS.shortStrategyRouting.enabled;
+            
+            if (!config.enabledStrategies?.length && isBtcShortRouting) {
+              if (!BTC_PARAMS.shortStrategyRouting.enabledStrategies.includes(gateResult.strategyName)) {
+                gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] = (gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] || 0) + 1;
+                continue;
+              }
+            }
+            
+            // Manual strategy filter: skip if strategy not in enabled list
             if (config.enabledStrategies && config.enabledStrategies.length > 0 &&
                 !config.enabledStrategies.includes(gateResult.strategyName)) {
               gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] = (gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] || 0) + 1;
@@ -1009,15 +1022,24 @@ async function runBacktest(
             
             // STRONG_TREND filters: ATR expansion + momentum decay protection
             if (config.strongTrendFilters && gateResult.strategyName === 'STRONG_TREND') {
-              // ATR must be expanding (current ATR > previous bar ATR) — confirms volatility breakout
               const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
               if (atr <= prevAtr) {
                 gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] = (gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] || 0) + 1;
                 continue;
               }
-              // ADX must be rising — confirms trend is gaining energy, not exhausting
               if (adxResult.adxSlope < 0.1) {
                 gateStats['STRONG_TREND_ADX_NOT_RISING'] = (gateStats['STRONG_TREND_ADX_NOT_RISING'] || 0) + 1;
+                continue;
+              }
+            }
+            
+            // SQUEEZE_BREAKOUT ATR expansion validation (false breakout filter)
+            if (BTC_PARAMS.shortStrategyRouting.requireAtrExpansion && 
+                gateResult.strategyName === 'SQUEEZE_BREAKOUT' && 
+                gateResult.direction === 'SHORT') {
+              const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
+              if (atr <= prevAtr * 0.95) { // ATR must be at least 95% of previous (allow tiny dips)
+                gateStats['SQUEEZE_ATR_NOT_EXPANDING'] = (gateStats['SQUEEZE_ATR_NOT_EXPANDING'] || 0) + 1;
                 continue;
               }
             }
