@@ -528,11 +528,12 @@ function evaluateProductionGates(
     return fail('NO_DIRECTION');
   }
 
-  // ===== GATE 5: Counter-Trend Protection (production) =====
+  // ===== GATE 5: Counter-Trend — BTC SHORT uses higher ADX threshold =====
+  const ctMinAdx = shortOverrides?.counterTrendMinAdx ?? ADX_THRESHOLDS.EXCEPTIONAL;
   if (direction === 'LONG' && emaBearish && adx > ADX_THRESHOLDS.EXCEPTIONAL) {
     return fail('COUNTER_TREND');
   }
-  if (direction === 'SHORT' && emaBullish && adx > ADX_THRESHOLDS.EXCEPTIONAL) {
+  if (direction === 'SHORT' && emaBullish && adx > ctMinAdx) {
     return fail('COUNTER_TREND');
   }
 
