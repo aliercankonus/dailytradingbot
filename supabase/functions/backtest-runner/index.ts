@@ -999,6 +999,7 @@ async function runBacktest(
           const exitResult = checkProductionExits(
             pos, currentPrice, barTime, atr, atrPercent,
             adxResult.adx, adxResult.adxSlope ?? 0, primaryTrend, momResult.score,
+            config.exitOverrides,
           );
 
           if (exitResult.shouldExit) {
