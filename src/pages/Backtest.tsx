@@ -398,6 +398,18 @@ const Backtest = () => {
                 </Select>
               </div>
 
+              {/* Exit Override: Disable Exhaustion */}
+              <div className="flex items-center justify-between col-span-2 sm:col-span-4 p-2 rounded-md border border-border bg-muted/30">
+                <div>
+                  <label className="text-xs font-medium text-foreground">Exhaustion Exit Devre Dışı</label>
+                  <p className="text-[10px] text-muted-foreground">moderate_exhaustion_exit kapanır — squeeze trade'ler daha uzun tutulur</p>
+                </div>
+                <Switch
+                  checked={disableExhaustionExit}
+                  onCheckedChange={setDisableExhaustionExit}
+                />
+              </div>
+
               {/* Run Button */}
               <div className="flex items-end">
                 <Button
