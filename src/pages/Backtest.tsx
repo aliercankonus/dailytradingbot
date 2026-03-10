@@ -174,6 +174,7 @@ const Backtest = () => {
     };
     if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
     if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
+    if (disableExhaustionExit) body.exitOverrides = { moderate_exhaustion_exit: false };
 
     const { data, error } = await supabase.functions.invoke('backtest-runner', { body });
 
