@@ -5,6 +5,7 @@ import { AppFooter } from "@/components/AppFooter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSymbolsContext } from "@/contexts/SymbolsContext";
@@ -61,6 +62,7 @@ const Backtest = () => {
   const [period, setPeriod] = useState('7');
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [enabledStrategies, setEnabledStrategies] = useState<string[]>([]);
+  const [disableExhaustionExit, setDisableExhaustionExit] = useState(false);
   const [running, setRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [results, setResults] = useState<BacktestResult[]>([]);
@@ -172,6 +174,7 @@ const Backtest = () => {
     };
     if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
     if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
+    if (disableExhaustionExit) body.exitOverrides = { moderate_exhaustion_exit: false };
 
     const { data, error } = await supabase.functions.invoke('backtest-runner', { body });
 
@@ -393,6 +396,18 @@ const Backtest = () => {
                     <SelectItem value="TREND_CONTINUATION">Trend Continuation</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Exit Override: Disable Exhaustion */}
+              <div className="flex items-center justify-between col-span-2 sm:col-span-4 p-2 rounded-md border border-border bg-muted/30">
+                <div>
+                  <label className="text-xs font-medium text-foreground">Exhaustion Exit Devre Dışı</label>
+                  <p className="text-[10px] text-muted-foreground">moderate_exhaustion_exit kapanır — squeeze trade'ler daha uzun tutulur</p>
+                </div>
+                <Switch
+                  checked={disableExhaustionExit}
+                  onCheckedChange={setDisableExhaustionExit}
+                />
               </div>
 
               {/* Run Button */}

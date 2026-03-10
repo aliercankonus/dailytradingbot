@@ -40,6 +40,9 @@ interface BacktestConfig {
   sideFilter?: 'LONG' | 'SHORT' | null; // Filter to only take one side
   enabledStrategies?: string[] | null; // Filter to specific strategies only
   strongTrendFilters?: boolean; // Enable ATR expansion + momentum filters for STRONG_TREND
+  exitOverrides?: {
+    moderate_exhaustion_exit?: boolean; // false = disable for matching strategies
+  };
 }
 
 interface BacktestTrade {
@@ -748,6 +751,7 @@ function checkProductionExits(
   adxSlope: number,
   primaryTrend: string,
   momentumScore: number,
+  exitOverrides?: BacktestConfig['exitOverrides'],
 ): { shouldExit: boolean; exitReason: string } {
   const side = position.side;
   const pnlPercent = side === 'LONG'
@@ -876,7 +880,9 @@ function checkProductionExits(
   }
 
   // 9. Moderate exhaustion exit — reverted to working threshold
-  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
+  // Skip if exitOverrides disables it (e.g., for SQUEEZE_BREAKOUT)
+  const exhaustionDisabled = exitOverrides?.moderate_exhaustion_exit === false;
+  if (!exhaustionDisabled && position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
@@ -993,6 +999,7 @@ async function runBacktest(
           const exitResult = checkProductionExits(
             pos, currentPrice, barTime, atr, atrPercent,
             adxResult.adx, adxResult.adxSlope ?? 0, primaryTrend, momResult.score,
+            config.exitOverrides,
           );
 
           if (exitResult.shouldExit) {
