@@ -880,7 +880,9 @@ function checkProductionExits(
   }
 
   // 9. Moderate exhaustion exit — reverted to working threshold
-  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
+  // Skip if exitOverrides disables it (e.g., for SQUEEZE_BREAKOUT)
+  const exhaustionDisabled = exitOverrides?.moderate_exhaustion_exit === false;
+  if (!exhaustionDisabled && position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
