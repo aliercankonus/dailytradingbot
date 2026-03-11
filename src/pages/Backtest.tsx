@@ -175,7 +175,10 @@ const Backtest = () => {
     };
     if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
     if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
-    if (disableExhaustionExit) body.exitOverrides = { moderate_exhaustion_exit: false };
+    const exitOverrides: Record<string, boolean> = {};
+    if (disableExhaustionExit) exitOverrides.moderate_exhaustion_exit = false;
+    if (disableMomentumReversalExit) exitOverrides.momentum_reversal_exit = false;
+    if (Object.keys(exitOverrides).length > 0) body.exitOverrides = exitOverrides;
 
     const { data, error } = await supabase.functions.invoke('backtest-runner', { body });
 
