@@ -42,6 +42,7 @@ interface BacktestConfig {
   strongTrendFilters?: boolean; // Enable ATR expansion + momentum filters for STRONG_TREND
   exitOverrides?: {
     moderate_exhaustion_exit?: boolean; // false = disable for matching strategies
+    momentum_reversal_exit?: boolean;   // false = disable momentum reversal exit
   };
 }
 
@@ -887,13 +888,16 @@ function checkProductionExits(
   }
 
   // 10. Momentum reversal exit — SYMBOL-ADAPTIVE thresholds
-  // Get params from position's symbol
   const symParams = getSymbolParams(position.symbol);
-  if (hoursHeld > symParams.exits.momentumReversalMinHours) {
-    if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
-        (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
-      if (pnlPercent < symParams.exits.momentumReversalThreshold) {
-        return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
+  // Skip if exitOverrides disables it
+  const momentumReversalDisabled = exitOverrides?.momentum_reversal_exit === false;
+  if (!momentumReversalDisabled) {
+    if (hoursHeld > symParams.exits.momentumReversalMinHours) {
+      if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
+          (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
+        if (pnlPercent < symParams.exits.momentumReversalThreshold) {
+          return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
+        }
       }
     }
   }

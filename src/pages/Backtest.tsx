@@ -63,6 +63,7 @@ const Backtest = () => {
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [enabledStrategies, setEnabledStrategies] = useState<string[]>([]);
   const [disableExhaustionExit, setDisableExhaustionExit] = useState(false);
+  const [disableMomentumReversalExit, setDisableMomentumReversalExit] = useState(false);
   const [running, setRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [results, setResults] = useState<BacktestResult[]>([]);
@@ -174,7 +175,10 @@ const Backtest = () => {
     };
     if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
     if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
-    if (disableExhaustionExit) body.exitOverrides = { moderate_exhaustion_exit: false };
+    const exitOverrides: Record<string, boolean> = {};
+    if (disableExhaustionExit) exitOverrides.moderate_exhaustion_exit = false;
+    if (disableMomentumReversalExit) exitOverrides.momentum_reversal_exit = false;
+    if (Object.keys(exitOverrides).length > 0) body.exitOverrides = exitOverrides;
 
     const { data, error } = await supabase.functions.invoke('backtest-runner', { body });
 
@@ -407,6 +411,18 @@ const Backtest = () => {
                 <Switch
                   checked={disableExhaustionExit}
                   onCheckedChange={setDisableExhaustionExit}
+                />
+              </div>
+
+              {/* Exit Override: Disable Momentum Reversal */}
+              <div className="flex items-center justify-between col-span-2 sm:col-span-4 p-2 rounded-md border border-border bg-muted/30">
+                <div>
+                  <label className="text-xs font-medium text-foreground">Momentum Reversal Exit Devre Dışı</label>
+                  <p className="text-[10px] text-muted-foreground">momentum_reversal_exit kapanır — momentum dönüşlerinde erken çıkış engellenir</p>
+                </div>
+                <Switch
+                  checked={disableMomentumReversalExit}
+                  onCheckedChange={setDisableMomentumReversalExit}
                 />
               </div>
 
