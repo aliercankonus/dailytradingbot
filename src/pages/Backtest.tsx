@@ -63,6 +63,7 @@ const Backtest = () => {
   const [sideFilter, setSideFilter] = useState<string>('all');
   const [enabledStrategies, setEnabledStrategies] = useState<string[]>([]);
   const [disableExhaustionExit, setDisableExhaustionExit] = useState(false);
+  const [disableMomentumReversalExit, setDisableMomentumReversalExit] = useState(false);
   const [running, setRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [results, setResults] = useState<BacktestResult[]>([]);
