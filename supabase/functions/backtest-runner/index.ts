@@ -888,11 +888,10 @@ function checkProductionExits(
   }
 
   // 10. Momentum reversal exit — SYMBOL-ADAPTIVE thresholds
+  const symParams = getSymbolParams(position.symbol);
   // Skip if exitOverrides disables it
   const momentumReversalDisabled = exitOverrides?.momentum_reversal_exit === false;
   if (!momentumReversalDisabled) {
-    // Get params from position's symbol
-    const symParams = getSymbolParams(position.symbol);
     if (hoursHeld > symParams.exits.momentumReversalMinHours) {
       if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
           (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
