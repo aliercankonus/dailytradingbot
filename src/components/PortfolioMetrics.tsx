@@ -29,7 +29,7 @@ export const PortfolioMetrics = () => {
   const loading = riskLoading || metricsLoading || positionsLoading || balanceLoading;
 
   const metrics = useMemo(() => {
-    if (process.env.NODE_ENV === "development") {
+    if (import.meta.env.DEV) {
       console.log("[PortfolioMetrics] Recalculating metrics, positions:", positions.length);
     }
 
@@ -70,7 +70,7 @@ export const PortfolioMetrics = () => {
         return sum + pnl;
       }, 0);
 
-    if (process.env.NODE_ENV === "development") {
+    if (import.meta.env.DEV) {
       console.log("[PortfolioMetrics] Unrealized P&L:", unrealizedPnL, "Realized P&L:", realizedPnL);
     }
 

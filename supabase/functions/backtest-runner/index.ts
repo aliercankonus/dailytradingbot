@@ -1256,7 +1256,11 @@ serve(async (req) => {
           });
         }
       } else {
-        const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+        // User JWT token - create a user-scoped client to validate
+        const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+        });
+        const { data: { user }, error: authError } = await userClient.auth.getUser();
         if (authError || !user) {
           return new Response(JSON.stringify({ error: 'Unauthorized' }), {
             status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
