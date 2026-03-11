@@ -1297,6 +1297,7 @@ serve(async (req) => {
       sideFilter: body.sideFilter || null,
       enabledStrategies: body.enabledStrategies || null,
       strongTrendFilters: body.strongTrendFilters || false,
+      exitOverrides: body.exitOverrides || undefined,
     };
 
     const parsedStart = new Date(config.startDate);
