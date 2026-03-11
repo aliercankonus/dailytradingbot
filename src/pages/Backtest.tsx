@@ -414,6 +414,18 @@ const Backtest = () => {
                 />
               </div>
 
+              {/* Exit Override: Disable Momentum Reversal */}
+              <div className="flex items-center justify-between col-span-2 sm:col-span-4 p-2 rounded-md border border-border bg-muted/30">
+                <div>
+                  <label className="text-xs font-medium text-foreground">Momentum Reversal Exit Devre Dışı</label>
+                  <p className="text-[10px] text-muted-foreground">momentum_reversal_exit kapanır — momentum dönüşlerinde erken çıkış engellenir</p>
+                </div>
+                <Switch
+                  checked={disableMomentumReversalExit}
+                  onCheckedChange={setDisableMomentumReversalExit}
+                />
+              </div>
+
               {/* Run Button */}
               <div className="flex items-end">
                 <Button
