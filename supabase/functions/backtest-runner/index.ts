@@ -42,6 +42,7 @@ interface BacktestConfig {
   strongTrendFilters?: boolean; // Enable ATR expansion + momentum filters for STRONG_TREND
   exitOverrides?: {
     moderate_exhaustion_exit?: boolean; // false = disable for matching strategies
+    momentum_reversal_exit?: boolean;   // false = disable momentum reversal exit
   };
 }
 
