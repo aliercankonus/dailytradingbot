@@ -751,7 +751,6 @@ function checkProductionExits(
   adxSlope: number,
   primaryTrend: string,
   momentumScore: number,
-  exitOverrides?: BacktestConfig['exitOverrides'],
 ): { shouldExit: boolean; exitReason: string } {
   const side = position.side;
   const pnlPercent = side === 'LONG'
