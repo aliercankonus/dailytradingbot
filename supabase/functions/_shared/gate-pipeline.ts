@@ -279,6 +279,30 @@ export function evaluateProductionGates(
     }
   }
 
+  // GATE: SQUEEZE_BREAKOUT Directional Alignment
+  // Forensic evidence: SQUEEZE_BREAKOUT LONG = -23.36% PnL (52 trades), SHORT = +13.55%
+  // Counter-trend breakouts in bearish macro are predominantly fake breakouts.
+  if (strategyName === 'SQUEEZE_BREAKOUT') {
+    if (direction === 'LONG' && primaryTrend === 'bearish') {
+      return fail('SQUEEZE_BREAKOUT_COUNTER_TREND_LONG');
+    }
+    if (direction === 'SHORT' && primaryTrend === 'bullish') {
+      return fail('SQUEEZE_BREAKOUT_COUNTER_TREND_SHORT');
+    }
+  }
+
+  // GATE: MOMENTUM_ACCELERATION Directional Alignment
+  // Forensic evidence: 18 trades, net negative PnL. Breakout chase pattern.
+  // Counter-trend momentum entries have no edge.
+  if (strategyName === 'MOMENTUM_ACCELERATION') {
+    if (direction === 'LONG' && primaryTrend === 'bearish') {
+      return fail('MOMENTUM_ACCEL_COUNTER_TREND_LONG');
+    }
+    if (direction === 'SHORT' && primaryTrend === 'bullish') {
+      return fail('MOMENTUM_ACCEL_COUNTER_TREND_SHORT');
+    }
+  }
+
   // Apply regime-based multiplier from MFS
   if (mfs.regime === 'RANGE_COMPRESSION' && strategyName !== 'SQUEEZE_BREAKOUT') {
     return fail('REGIME_RANGE_COMPRESSION');
