@@ -339,9 +339,9 @@ export const BTC_PARAMS = {
     atrExpansionMultiplier: 1.05, // ATR must be 5% above previous (filters false breakouts)
     // Wider trailing for SQUEEZE_BREAKOUT (fast trend moves)
     squeezeBreakoutTrailing: {
-      activationPercent: 0.8,       // Activate trailing earlier (0.8% vs 1.5%)
-      trailDistanceAtr: 2.5,       // Wider trail distance (2.5x ATR)
-      minTrailFloor: 0.50,         // Minimum trail floor
+      activationPercent: 0.6,       // Earlier activation (0.6% vs 0.8%) — let trailing protect gains sooner
+      trailDistanceAtr: 2.7,       // Wider trail distance (2.7x ATR) — give squeeze moves room to breathe
+      minTrailFloor: 0.40,         // Lower minimum trail floor (0.40% vs 0.50%) — catch more of the move
     },
   },
   // ============= BTC LONG PRODUCTION STRATEGY ROUTING =============
