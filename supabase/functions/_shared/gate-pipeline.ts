@@ -138,6 +138,17 @@ export function evaluateProductionGates(
   }
   if (!direction) return fail('NO_DIRECTION');
 
+  // GATE 4.5: Global Macro Bias Layer
+  // Forensic evidence: LONG PF=0.34 vs SHORT PF=1.42 over 90-day bearish regime.
+  // ALL LONG strategies are net negative in bearish macro — no edge exists.
+  // Block all LONG trades when primaryTrend is bearish; block all SHORT when bullish.
+  if (direction === 'LONG' && primaryTrend === 'bearish') {
+    return fail('MACRO_BIAS_LONG_BLOCKED');
+  }
+  if (direction === 'SHORT' && primaryTrend === 'bullish') {
+    return fail('MACRO_BIAS_SHORT_BLOCKED');
+  }
+
   // GATE 5: Counter-Trend
   const ctMinAdx = shortOverrides?.counterTrendMinAdx ?? ADX_THRESHOLDS.EXCEPTIONAL;
   if (direction === 'LONG' && emaBearish && adx > ADX_THRESHOLDS.EXCEPTIONAL) return fail('COUNTER_TREND');
