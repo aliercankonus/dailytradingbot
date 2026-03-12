@@ -1392,6 +1392,8 @@ serve(async (req) => {
       barInterval: body.barInterval || '1h',
       strategyDirectionFilters: body.strategyDirectionFilters || undefined,
       sideFilter: body.sideFilter || undefined,
+      btcLongQualityMin: body.btcLongQualityMin ?? undefined,
+      btcLongDisabled: body.btcLongDisabled ?? undefined,
     };
 
     const parsedStart = new Date(config.startDate);
