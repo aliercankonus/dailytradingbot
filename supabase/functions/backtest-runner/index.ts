@@ -435,12 +435,13 @@ function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
   momentumResult: MomentumScoreResult,
   symbol?: string,
-  sideFilter?: 'LONG' | 'SHORT' | null,
   klines?: any[], // raw klines for candle body filter
 ): GateResult {
   const sp = getSymbolParams(symbol || mfs.symbol);
-  const isBtcShort = BTC_PARAMS.symbols.includes(symbol || mfs.symbol) && sideFilter === 'SHORT';
-  const shortOverrides = isBtcShort ? BTC_PARAMS.shortGateOverrides : null;
+  // Evaluate BTC SHORT based on actual direction, not a filter
+  const isBtcSymbol = BTC_PARAMS.symbols.includes(symbol || mfs.symbol);
+  // We'll determine isBtcShort after direction is known; initially false
+  let shortOverrides: typeof BTC_PARAMS.shortGateOverrides | null = null;
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
