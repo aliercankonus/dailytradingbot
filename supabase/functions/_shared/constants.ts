@@ -6189,7 +6189,7 @@ export const MEAN_REVERSION_CONFIG = {
     
     // ===== MOMENTUM GATING (Critical safety) =====
     // Prevents entries when momentum is still bearish/opposing
-    MIN_MOMENTUM_SCORE: 40,       // Must have positive momentum tilt
+    MIN_MOMENTUM_SCORE: 25,       // RELAXED: Was 40 — exhaustion momentum typically 20-40, floor lowered to capture probes
     REQUIRE_ALIGNED_MOMENTUM: true, // Momentum direction must match trade direction
     
     // ===== ADX CONDITIONS (Dual-path) =====
