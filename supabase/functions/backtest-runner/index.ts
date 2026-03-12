@@ -1037,59 +1037,21 @@ async function runBacktest(
           const mfs = buildBacktestMFS(symbol, wCloses, wHighs, wLows, wVolumes, wKlines, momResult, adxResult);
           
           // Run production gate pipeline
-          const gateResult = evaluateProductionGates(mfs, momResult, symbol, config.sideFilter, wKlines);
+          const gateResult = evaluateProductionGates(mfs, momResult, symbol, wKlines);
 
           if (gateResult.gate) {
             gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
           }
 
           if (gateResult.passed && gateResult.direction) {
-            // Side filter: skip if direction doesn't match requested side
-            if (config.sideFilter && gateResult.direction !== config.sideFilter) {
-              gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] || 0) + 1;
-              continue;
-            }
-            
-            // ============= BTC SHORT STRATEGY ROUTING (Production Pipeline) =============
-            // Apply symbol-specific strategy routing when no manual enabledStrategies override
+            // ============= PRODUCTION STRATEGY ROUTING =============
             const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) && 
               gateResult.direction === 'SHORT' && 
               BTC_PARAMS.shortStrategyRouting.enabled;
             
-            if (!config.enabledStrategies?.length && isBtcShortRouting) {
+            if (isBtcShortRouting) {
               if (!BTC_PARAMS.shortStrategyRouting.enabledStrategies.includes(gateResult.strategyName)) {
                 gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] = (gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] || 0) + 1;
-                continue;
-              }
-            }
-            
-            // Manual strategy filter: skip if strategy not in enabled list
-            if (config.enabledStrategies && config.enabledStrategies.length > 0 &&
-                !config.enabledStrategies.includes(gateResult.strategyName)) {
-              gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] = (gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] || 0) + 1;
-              continue;
-            }
-            
-            // STRONG_TREND filters: ATR expansion + momentum decay protection
-            if (config.strongTrendFilters && gateResult.strategyName === 'STRONG_TREND') {
-              const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
-              if (atr <= prevAtr) {
-                gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] = (gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] || 0) + 1;
-                continue;
-              }
-              if (adxResult.adxSlope < 0.1) {
-                gateStats['STRONG_TREND_ADX_NOT_RISING'] = (gateStats['STRONG_TREND_ADX_NOT_RISING'] || 0) + 1;
-                continue;
-              }
-            }
-            
-            // SQUEEZE_BREAKOUT ATR expansion validation (false breakout filter)
-            if (BTC_PARAMS.shortStrategyRouting.requireAtrExpansion && 
-                gateResult.strategyName === 'SQUEEZE_BREAKOUT' && 
-                gateResult.direction === 'SHORT') {
-              const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
-              if (atr <= prevAtr * (BTC_PARAMS.shortStrategyRouting.atrExpansionMultiplier ?? 1.05)) { // ATR must expand 5%+
-                gateStats['SQUEEZE_ATR_NOT_EXPANDING'] = (gateStats['SQUEEZE_ATR_NOT_EXPANDING'] || 0) + 1;
                 continue;
               }
             }
