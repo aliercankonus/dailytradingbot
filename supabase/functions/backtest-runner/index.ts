@@ -1050,7 +1050,20 @@ async function backtestSymbol(
           }
         }
 
-        const symP = getSymbolParams(symbol);
+        // Strategy Direction Filter (experiment support)
+        if (config.strategyDirectionFilters) {
+          const filter = config.strategyDirectionFilters.find(f => f.strategy === gateResult.strategyName);
+          if (filter) {
+            if (filter.blockedSide && gateResult.direction === filter.blockedSide) {
+              gateStats[`FILTER_${gateResult.strategyName}_${filter.blockedSide}_BLOCKED`] = (gateStats[`FILTER_${gateResult.strategyName}_${filter.blockedSide}_BLOCKED`] || 0) + 1;
+              continue;
+            }
+            if (filter.reducedSide && gateResult.direction === filter.reducedSide && filter.reducedMultiplier) {
+              gateResult.positionMultiplier = Math.min(gateResult.positionMultiplier, filter.reducedMultiplier);
+            }
+          }
+        }
+
         const slMultiplier = symP.stopLoss.atrMultiplier;
         const tpMultiplier = symP.takeProfit.atrMultiplier;
         const maxSlPercent = symP.stopLoss.maxCapPercent;
