@@ -304,17 +304,9 @@ export function evaluateProductionGates(
     }
   }
 
-  // GATE: MOMENTUM_ACCELERATION Directional Alignment
-  // Forensic evidence: 18 trades, net negative PnL. Breakout chase pattern.
-  // Counter-trend momentum entries have no edge.
-  if (strategyName === 'MOMENTUM_ACCELERATION') {
-    if (direction === 'LONG' && primaryTrend === 'bearish') {
-      return fail('MOMENTUM_ACCEL_COUNTER_TREND_LONG');
-    }
-    if (direction === 'SHORT' && primaryTrend === 'bullish') {
-      return fail('MOMENTUM_ACCEL_COUNTER_TREND_SHORT');
-    }
-  }
+  // GATE: MOMENTUM_ACCELERATION — DISABLED
+  // Strategy fully disabled (reclassified to base). Gate kept as comment for forensic history.
+  // Forensic evidence: 14 trades, -5.52% PnL. Breakout chase pattern with no edge.
 
   // Apply regime-based multiplier from MFS
   if (mfs.regime === 'RANGE_COMPRESSION' && strategyName !== 'SQUEEZE_BREAKOUT') {
