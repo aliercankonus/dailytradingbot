@@ -47,6 +47,8 @@ interface BacktestConfig {
   barInterval: string;
   strategyDirectionFilters?: StrategyDirectionFilter[];
   sideFilter?: 'LONG' | 'SHORT';
+  btcLongQualityMin?: number;       // Override BTC LONG quality threshold
+  btcLongDisabled?: boolean;         // Completely disable BTC LONGs
 }
 
 interface BacktestTrade {
