@@ -221,6 +221,18 @@ export function evaluateProductionGates(
   let strategyName = 'TREND_CONTINUATION';
   if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
   if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
+
+  // GATE: STRONG_TREND Directional Alignment
+  // Backtest-proven: counter-trend STRONG_TREND entries have 18.2% WR vs 51.8% aligned.
+  // Block LONG when macro trend is bearish, SHORT when bullish.
+  if (strategyName === 'STRONG_TREND') {
+    if (direction === 'LONG' && primaryTrend === 'bearish') {
+      return fail('STRONG_TREND_COUNTER_TREND_LONG');
+    }
+    if (direction === 'SHORT' && primaryTrend === 'bullish') {
+      return fail('STRONG_TREND_COUNTER_TREND_SHORT');
+    }
+  }
   if (mfs.isCompressed) {
     const macdHist = mfs.macdHistogram;
     const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
