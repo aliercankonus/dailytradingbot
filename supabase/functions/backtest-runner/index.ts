@@ -516,13 +516,18 @@ function evaluateProductionGates(
     else if (momentumResult.score < -5) direction = 'SHORT';
   }
   // BTC SHORT extra: DI-based direction at moderate ADX with weak negative momentum
-  if (!direction && isBtcShort && adx >= 20 && momentumResult.score < -3) {
+  const isBtcShort = isBtcSymbol && direction === 'SHORT';
+  if (!direction && isBtcSymbol && adx >= 20 && momentumResult.score < -3) {
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diMinus > diPlus + 3) {
       direction = 'SHORT';
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.35);
     }
+  }
+  // Re-evaluate after direction set
+  if (direction === 'SHORT' && isBtcSymbol) {
+    shortOverrides = BTC_PARAMS.shortGateOverrides;
   }
   
   if (!direction) {
