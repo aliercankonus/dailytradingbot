@@ -444,9 +444,26 @@ export function checkProductionExits(
   // 11. ADX collapse exit
   if (adx < 15 && adxSlope < -1.0 && hoursHeld > 4 && pnlPercent < 0.3) return { shouldExit: true, exitReason: 'adx_collapse_exit' };
 
-  // 12. Altcoin hard PnL floor
+  // 12. Universal hard PnL floor (strategy-aware + dynamic ATR tightening)
   const isBtc = position.symbol.startsWith('BTC');
-  if (!isBtc && pnlPercent < -symParams.stopLoss.maxCapPercent) return { shouldExit: true, exitReason: 'hard_pnl_floor_exit' };
+  let hardFloorPercent = symParams.stopLoss.maxCapPercent;
+  
+  // Strategy-specific override
+  const stratOverride = STRATEGY_SL_OVERRIDES[position.strategyName || ''];
+  if (stratOverride?.maxCapOverride) {
+    hardFloorPercent = Math.min(hardFloorPercent, stratOverride.maxCapOverride);
+  }
+  
+  // Dynamic tightening for high ATR
+  if (DYNAMIC_SL_PARAMS.ENABLED && position.atrPercentAtEntry) {
+    if (position.atrPercentAtEntry > DYNAMIC_SL_PARAMS.EXTREME_ATR_THRESHOLD_PERCENT) {
+      hardFloorPercent *= DYNAMIC_SL_PARAMS.EXTREME_ATR_CAP_MULTIPLIER;
+    } else if (position.atrPercentAtEntry > DYNAMIC_SL_PARAMS.HIGH_ATR_THRESHOLD_PERCENT) {
+      hardFloorPercent *= DYNAMIC_SL_PARAMS.HIGH_ATR_CAP_MULTIPLIER;
+    }
+  }
+  
+  if (pnlPercent < -hardFloorPercent) return { shouldExit: true, exitReason: 'hard_pnl_floor_exit' };
 
   // 13. Altcoin stale loss cut
   if (!isBtc && hoursHeld > 3 && pnlPercent < -0.5 && pnlPercent < position.peakPnl - 0.3) return { shouldExit: true, exitReason: 'stale_loss_exit' };
