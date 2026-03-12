@@ -1359,6 +1359,7 @@ serve(async (req) => {
       startDate, endDate,
       barInterval: body.barInterval || '1h',
       strategyDirectionFilters: body.strategyDirectionFilters || undefined,
+      sideFilter: body.sideFilter || undefined,
     };
 
     const parsedStart = new Date(config.startDate);
