@@ -37,13 +37,6 @@ interface BacktestConfig {
   startDate: string;
   endDate: string;
   barInterval: string; // '1h' or '4h'
-  sideFilter?: 'LONG' | 'SHORT' | null; // Filter to only take one side
-  enabledStrategies?: string[] | null; // Filter to specific strategies only
-  strongTrendFilters?: boolean; // Enable ATR expansion + momentum filters for STRONG_TREND
-  exitOverrides?: {
-    moderate_exhaustion_exit?: boolean; // false = disable for matching strategies
-    momentum_reversal_exit?: boolean;   // false = disable momentum reversal exit
-  };
 }
 
 interface BacktestTrade {
