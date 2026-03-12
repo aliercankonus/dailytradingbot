@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
 import { FlaskConical, Play, Loader2, TrendingUp, TrendingDown, Target, Shield, Clock, BarChart3, Layers, Activity } from "lucide-react";
+import { RegimePerformanceMatrix } from "@/components/RegimePerformanceMatrix";
 
 interface BacktestSummary {
   totalTrades: number;
@@ -670,6 +671,11 @@ const Backtest = () => {
                 </Card>
               )}
             </div>
+
+            {/* Regime × Strategy Performance Matrix */}
+            {trades.length > 0 && (
+              <RegimePerformanceMatrix trades={trades} />
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Gate Rejection Breakdown Chart */}
