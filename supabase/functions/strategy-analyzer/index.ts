@@ -19583,11 +19583,28 @@ serve(async (req) => {
           }
         }
 
-        // ===== BTC LONG STRATEGY ROUTING (Production) =====
-        // Block non-SQUEEZE_BREAKOUT strategies for BTC LONGs — unvalidated edge
-        if (BTC_PARAMS.longStrategyRouting?.enabled && 
-            BTC_PARAMS.symbols.includes(symbol) && 
-            signalType === 'long') {
+        // ===== BTC LONG HARD BLOCK (Production) =====
+        // Forensic evidence: BTC LONG PF=0.34, no edge exists. Backtest: disabled PF=1.48.
+        if (BTC_PARAMS.symbols.includes(symbol) && signalType === 'long') {
+          if (!BTC_PARAMS.longStrategyRouting?.enabled) {
+            // All BTC LONGs are blocked
+            logger.forSymbol(symbol).info(
+              `${LOG_CATEGORIES.REJECTION} 🚫 BTC_LONG_DISABLED: ALL BTC LONG trades blocked (no edge)`
+            );
+            rejectionBuffer.add({
+              user_id: userId,
+              symbol,
+              rejection_reason: `BTC_LONG_DISABLED: all strategies blocked`,
+              filters_status: { gate: 'BTC_LONG_DISABLED' },
+            });
+            perSymbolGateAttribution.set(symbol, { 
+              gate: 'BTC_LONG_DISABLED' as GateType, 
+              details: 'All BTC LONG trades disabled — no edge' 
+            });
+            continue;
+          }
+          // Strategy routing (when enabled)
+          if (BTC_PARAMS.longStrategyRouting?.enabled) {
           const routingConfig = BTC_PARAMS.longStrategyRouting;
           if (!routingConfig.enabledStrategies.includes(strategy.name)) {
             logger.forSymbol(symbol).info(
@@ -19644,7 +19661,8 @@ serve(async (req) => {
             }
             continue;
           }
-        }
+          } // close strategy routing when enabled
+        } // close BTC LONG block
 
         // ===== ALTCOIN STRATEGY ROUTING (Production) =====
         // Block non-safe strategies for all altcoins (both LONG and SHORT)
