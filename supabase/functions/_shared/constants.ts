@@ -7097,8 +7097,8 @@ export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   
   // ===== STOCHRSI THRESHOLDS =====
   // StochRSI 4h K thresholds for exhaustion detection
-  LONG_K_THRESHOLD: 10,           // K <= 10 for LONG override (deep oversold)
-  SHORT_K_THRESHOLD: 90,          // K >= 90 for SHORT override (deep overbought)
+  LONG_K_THRESHOLD: 12,           // RELAXED: Was 10 — expanded to capture K=10-12 bounce zone
+  SHORT_K_THRESHOLD: 88,          // RELAXED: Was 90 — symmetric with LONG expansion
   
   // ===== ABSOLUTE EXTREME STOCHRSI (K >= 98 or K <= 2) =====
   // When K is at absolute statistical extreme, allow exhaustion override in EARLY_TREND regime
