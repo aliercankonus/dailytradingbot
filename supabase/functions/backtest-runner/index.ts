@@ -1343,6 +1343,7 @@ serve(async (req) => {
       symbols: body.symbols || ['BTCUSDT'],
       startDate, endDate,
       barInterval: body.barInterval || '1h',
+      strategyDirectionFilters: body.strategyDirectionFilters || undefined,
     };
 
     const parsedStart = new Date(config.startDate);
