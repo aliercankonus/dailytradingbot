@@ -222,16 +222,16 @@ export function evaluateProductionGates(
   if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
   if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
 
-  // GATE: STRONG_TREND Asymmetric Directional Alignment
+  // GATE: STRONG_TREND Directional Alignment
   // Backtest-proven: counter-trend LONG has 18.2% WR (0 TP hits) → hard block.
-  // Counter-trend SHORT still profitable in pullbacks → reduce to 0.40x.
+  // Counter-trend SHORT also net negative at 0.40x → hard block both sides.
+  // Asymmetric 0.40x SHORT tested: PF 0.83 vs symmetric block PF 0.85.
   if (strategyName === 'STRONG_TREND') {
     if (direction === 'LONG' && primaryTrend === 'bearish') {
       return fail('STRONG_TREND_COUNTER_TREND_LONG');
     }
     if (direction === 'SHORT' && primaryTrend === 'bullish') {
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
-      logger.info(`STRONG_TREND counter-trend SHORT reduced to 0.40x (primaryTrend=bullish)`);
+      return fail('STRONG_TREND_COUNTER_TREND_SHORT');
     }
   }
   if (mfs.isCompressed) {
