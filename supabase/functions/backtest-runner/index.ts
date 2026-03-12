@@ -878,24 +878,18 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'time_stop_24h' };
   }
 
-  // 9. Moderate exhaustion exit — reverted to working threshold
-  // Skip if exitOverrides disables it (e.g., for SQUEEZE_BREAKOUT)
-  const exhaustionDisabled = exitOverrides?.moderate_exhaustion_exit === false;
-  if (!exhaustionDisabled && position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
+  // 9. Moderate exhaustion exit
+  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
   // 10. Momentum reversal exit — SYMBOL-ADAPTIVE thresholds
   const symParams = getSymbolParams(position.symbol);
-  // Skip if exitOverrides disables it
-  const momentumReversalDisabled = exitOverrides?.momentum_reversal_exit === false;
-  if (!momentumReversalDisabled) {
-    if (hoursHeld > symParams.exits.momentumReversalMinHours) {
-      if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
-          (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
-        if (pnlPercent < symParams.exits.momentumReversalThreshold) {
-          return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
-        }
+  if (hoursHeld > symParams.exits.momentumReversalMinHours) {
+    if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
+        (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
+      if (pnlPercent < symParams.exits.momentumReversalThreshold) {
+        return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
       }
     }
   }
