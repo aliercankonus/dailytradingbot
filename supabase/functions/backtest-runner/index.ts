@@ -844,273 +844,345 @@ function buildBacktestMFS(
   return mfs;
 }
 
-// ============= MAIN BACKTEST LOOP =============
+// ============= PER-SYMBOL BACKTEST (parallelizable) =============
 
-async function runBacktest(
-  config: BacktestConfig, userId: string, supabase: any, backtestId: string,
-): Promise<void> {
-  const startMs = Date.now();
+interface SymbolBacktestResult {
+  trades: BacktestTrade[];
+  equityCurve: EquityPoint[];
+  gateStats: Record<string, number>;
+  finalEquityDelta: number; // percentage change to apply to portfolio
+}
+
+async function backtestSymbol(
+  symbol: string, config: BacktestConfig,
+): Promise<SymbolBacktestResult> {
   const trades: BacktestTrade[] = [];
   const equityCurve: EquityPoint[] = [];
   const gateStats: Record<string, number> = {};
   let equity = 10000;
   let peakEquity = equity;
 
-  try {
-    const startTime = new Date(config.startDate).getTime();
-    const endTime = new Date(config.endDate).getTime();
-    const barMs = config.barInterval === '4h' ? 4 * 60 * 60 * 1000 : 60 * 60 * 1000;
-    const lookbackMs = 100 * barMs;
+  const startTime = new Date(config.startDate).getTime();
+  const endTime = new Date(config.endDate).getTime();
+  const barMs = config.barInterval === '4h' ? 4 * 60 * 60 * 1000 : 60 * 60 * 1000;
+  const lookbackMs = 100 * barMs;
 
-    for (const symbol of config.symbols) {
-      logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest: fetching multi-TF klines for ${symbol}`);
+  logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest: fetching multi-TF klines for ${symbol}`);
 
-      // ===== FETCH REAL MULTI-TF KLINES =====
-      const [allKlines1h, allKlines4h] = await Promise.all([
-        fetchHistoricalKlines(symbol, '1h', startTime - lookbackMs, endTime),
-        fetchHistoricalKlines(symbol, '4h', startTime - lookbackMs, endTime),
-      ]);
+  // ===== FETCH REAL MULTI-TF KLINES =====
+  const [allKlines1h, allKlines4h] = await Promise.all([
+    fetchHistoricalKlines(symbol, '1h', startTime - lookbackMs, endTime),
+    fetchHistoricalKlines(symbol, '4h', startTime - lookbackMs, endTime),
+  ]);
 
-      if (allKlines1h.length < 60) {
-        logger.warn(`Insufficient 1h klines for ${symbol}: ${allKlines1h.length}`);
-        continue;
+  if (allKlines1h.length < 60) {
+    logger.warn(`Insufficient 1h klines for ${symbol}: ${allKlines1h.length}`);
+    return { trades, equityCurve, gateStats, finalEquityDelta: 0 };
+  }
+  logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest: ${symbol} loaded ${allKlines1h.length} 1h bars, ${allKlines4h.length} 4h bars`);
+
+  // ===== PARSE ALL DATA ONCE =====
+  const parsed1h = parseKlinePrices(allKlines1h);
+  const parsed4h = parseKlinePrices(allKlines4h);
+
+  // ===== PRE-COMPUTE ALL INDICATORS (VECTORIZED) =====
+  const precompStart = Date.now();
+  const pre1h = precomputeAllIndicators(
+    parsed1h.closes, parsed1h.highs, parsed1h.lows, parsed1h.volumes, allKlines1h
+  );
+  const pre4h = precomputeAllIndicators(
+    parsed4h.closes, parsed4h.highs, parsed4h.lows, parsed4h.volumes, allKlines4h
+  );
+  logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest: ${symbol} pre-computed indicators in ${Date.now() - precompStart}ms`);
+
+  // Find start index for 1h bars
+  let startIdx = 0;
+  for (let i = 0; i < allKlines1h.length; i++) {
+    if (allKlines1h[i][0] >= startTime) { startIdx = i; break; }
+  }
+
+  const openPositions: (BacktestPosition & { entryRegime: string })[] = [];
+  let lastTradeTime = 0;
+  let cachedMomentumScore = 0;
+  let cachedMomentumDirection: "bullish" | "bearish" | "neutral" = "neutral";
+  let momentumCacheBar = -999;
+
+  // Pre-build 4h index lookup table for O(1) access instead of O(n) scan per bar
+  const idx4hLookup = new Int32Array(allKlines1h.length);
+  {
+    let j4h = 0;
+    for (let i = 0; i < allKlines1h.length; i++) {
+      const barTimeMs = allKlines1h[i][0];
+      while (j4h + 1 < allKlines4h.length && allKlines4h[j4h + 1][0] <= barTimeMs) {
+        j4h++;
       }
-      logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest: ${symbol} loaded ${allKlines1h.length} 1h bars, ${allKlines4h.length} 4h bars`);
+      idx4hLookup[i] = j4h;
+    }
+  }
 
-      // ===== PARSE ALL DATA ONCE =====
-      const parsed1h = parseKlinePrices(allKlines1h);
-      const parsed4h = parseKlinePrices(allKlines4h);
+  for (let i = startIdx; i < allKlines1h.length; i++) {
+    const barTime = new Date(allKlines1h[i][0]).toISOString();
+    const barTimeMs = allKlines1h[i][0];
+    const currentPrice = parsed1h.closes[i];
 
-      // ===== PRE-COMPUTE ALL INDICATORS (VECTORIZED) =====
-      const precompStart = Date.now();
-      const pre1h = precomputeAllIndicators(
-        parsed1h.closes, parsed1h.highs, parsed1h.lows, parsed1h.volumes, allKlines1h
+    // Read pre-computed 1h indicators at index i (O(1) lookup!)
+    const atr = isNaN(pre1h.atrArray[i]) ? currentPrice * 0.015 : pre1h.atrArray[i];
+    const atrPercent = (atr / currentPrice) * 100;
+    const adx = pre1h.adxAligned[i];
+    const adxSlope = pre1h.adxSlopeAligned[i];
+    const e9 = isNaN(pre1h.ema9[i]) ? currentPrice : pre1h.ema9[i];
+    const e21 = isNaN(pre1h.ema21[i]) ? currentPrice : pre1h.ema21[i];
+    const primaryTrend = currentPrice > e21 ? 'bullish' : 'bearish';
+
+    // O(1) 4h index lookup
+    const idx4h = idx4hLookup[i];
+
+    // Update cached momentum score every 4 bars (not every bar)
+    if (i - momentumCacheBar >= 4 && i > 50) {
+      const momSliceStart = Math.max(0, i - 99);
+      const momKlines = allKlines1h.slice(momSliceStart, i + 1);
+      const momCloses = parsed1h.closes.slice(momSliceStart, i + 1);
+      const momResult = calculateMomentumScore(
+        momKlines, momCloses, adx, pre1h.adxRisingAligned[i], atr, adxSlope
       );
-      const pre4h = precomputeAllIndicators(
-        parsed4h.closes, parsed4h.highs, parsed4h.lows, parsed4h.volumes, allKlines4h
+      cachedMomentumScore = momResult.score;
+      cachedMomentumDirection = momResult.direction;
+      momentumCacheBar = i;
+    }
+
+    // ===== CHECK EXITS ON OPEN POSITIONS =====
+    for (let p = openPositions.length - 1; p >= 0; p--) {
+      const pos = openPositions[p];
+
+      const exitResult = checkProductionExits(
+        pos, currentPrice, barTime, atr, atrPercent,
+        adx, adxSlope, primaryTrend, cachedMomentumScore,
       );
-      logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest: ${symbol} pre-computed indicators in ${Date.now() - precompStart}ms`);
 
-      // Find start index for 1h bars
-      let startIdx = 0;
-      for (let i = 0; i < allKlines1h.length; i++) {
-        if (allKlines1h[i][0] >= startTime) { startIdx = i; break; }
-      }
-
-      const openPositions: (BacktestPosition & { entryRegime: string })[] = [];
-      let lastTradeTime = 0;
-      let cachedMomentumScore = 0;
-      let cachedMomentumDirection: "bullish" | "bearish" | "neutral" = "neutral";
-      let momentumCacheBar = -999;
-
-      for (let i = startIdx; i < allKlines1h.length; i++) {
-        const barTime = new Date(allKlines1h[i][0]).toISOString();
-        const barTimeMs = allKlines1h[i][0];
-        const currentPrice = parsed1h.closes[i];
-
-        // Read pre-computed 1h indicators at index i (O(1) lookup!)
-        const atr = isNaN(pre1h.atrArray[i]) ? currentPrice * 0.015 : pre1h.atrArray[i];
-        const atrPercent = (atr / currentPrice) * 100;
-        const adx = pre1h.adxAligned[i];
-        const adxSlope = pre1h.adxSlopeAligned[i];
-        const e9 = isNaN(pre1h.ema9[i]) ? currentPrice : pre1h.ema9[i];
-        const e21 = isNaN(pre1h.ema21[i]) ? currentPrice : pre1h.ema21[i];
-        const primaryTrend = currentPrice > e21 ? 'bullish' : 'bearish';
-
-        // Find corresponding 4h index
-        let idx4h = 0;
-        for (let j = allKlines4h.length - 1; j >= 0; j--) {
-          if (allKlines4h[j][0] <= barTimeMs) { idx4h = j; break; }
-        }
-
-        // Update cached momentum score every 4 bars (not every bar)
-        if (i - momentumCacheBar >= 4 && i > 50) {
-          // Momentum still needs sliced arrays (expensive) but only runs every 4 bars
-          const momSliceStart = Math.max(0, i - 99);
-          const momKlines = allKlines1h.slice(momSliceStart, i + 1);
-          const momCloses = parsed1h.closes.slice(momSliceStart, i + 1);
-          const momResult = calculateMomentumScore(
-            momKlines, momCloses, adx, pre1h.adxRisingAligned[i], atr, adxSlope
-          );
-          cachedMomentumScore = momResult.score;
-          cachedMomentumDirection = momResult.direction;
-          momentumCacheBar = i;
-        }
-
-        // ===== CHECK EXITS ON OPEN POSITIONS =====
-        for (let p = openPositions.length - 1; p >= 0; p--) {
-          const pos = openPositions[p];
-
-          // ===== SHARED EXIT PIPELINE (uses pre-computed indicators) =====
-          const exitResult = checkProductionExits(
-            pos, currentPrice, barTime, atr, atrPercent,
-            adx, adxSlope, primaryTrend, cachedMomentumScore,
-          );
-
-          if (exitResult.shouldExit) {
-            const pnl = calculateFeeAwarePnL(
-              pos.side === 'LONG' ? 'BUY' : 'SELL',
-              pos.entryPrice, currentPrice, 1,
-              TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT,
-            );
-
-            trades.push({
-              symbol, side: pos.side,
-              entryPrice: pos.entryPrice, exitPrice: currentPrice,
-              entryTime: pos.entryTime, exitTime: barTime,
-              pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
-              exitReason: exitResult.exitReason, entryScore: pos.entryScore,
-              stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
-              qualityScore: pos.qualityScore, momentumScore: pos.entryMomentumScore,
-              adx: pos.entryAdx, stochK: pos.entryStochK,
-              strategyName: pos.strategyName,
-              regime: pos.entryRegime,
-            });
-
-            const positionSize = equity * 0.015 * 1.0;
-            equity += positionSize * (pnl.netPnlPercent / 100);
-            peakEquity = Math.max(peakEquity, equity);
-            openPositions.splice(p, 1);
-            lastTradeTime = barTimeMs;
-          }
-        }
-
-        // ===== SIGNAL GENERATION =====
-        const cooldownMs = 2 * 60 * 60 * 1000;
-        const hasOpenPos = openPositions.some(p => p.symbol === symbol);
-        const cooldownPassed = (barTimeMs - lastTradeTime) > cooldownMs;
-
-        if (!hasOpenPos && cooldownPassed && i > 50 && idx4h > 20) {
-          // Compute momentum for entry (fresh, not cached) - uses a window slice
-          const momSliceStart = Math.max(0, i - 99);
-          const momKlines = allKlines1h.slice(momSliceStart, i + 1);
-          const momCloses = parsed1h.closes.slice(momSliceStart, i + 1);
-          const momResult = calculateMomentumScore(
-            momKlines, momCloses, adx, pre1h.adxRisingAligned[i], atr, adxSlope
-          );
-
-          // Update momentum cache while we're at it
-          cachedMomentumScore = momResult.score;
-          cachedMomentumDirection = momResult.direction;
-          momentumCacheBar = i;
-
-          // Build production-parity MFS from PRE-COMPUTED indicators
-          const mfs = buildBacktestMFS(
-            symbol, i,
-            parsed1h.closes, parsed1h.highs, parsed1h.lows,
-            pre1h, pre4h, idx4h, parsed4h.closes,
-            momResult,
-          );
-
-          // Update volume in MFS (computed inline - fast)
-          const volInfo = computeVolumeAtBar(allKlines1h, i);
-          mfs.volume["1h"] = {
-            volumeRatio: volInfo.volumeRatio,
-            volumeTrend: volInfo.volumeTrend as any,
-            volumeSpike: volInfo.volumeSpike,
-            volumeDirection: "neutral",
-          };
-          mfs.volumeConfirms = volInfo.volumeRatio > 1.2;
-          mfs.volume.confirmsDirection = volInfo.volumeRatio > 1.2;
-          mfs.volume.hasRangeExpansion1h = volInfo.volumeRatio > 1.5;
-          mfs.volumeRatio = volInfo.volumeRatio;
-
-          // ===== SHARED GATE PIPELINE =====
-          const lastKlines = allKlines1h.slice(Math.max(0, i - 2), i + 1);
-          const gateResult = evaluateProductionGates(mfs, momResult, symbol, lastKlines);
-
-          if (gateResult.gate) {
-            gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
-          }
-
-          if (gateResult.passed && gateResult.direction) {
-            // Strategy routing
-            const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) &&
-              gateResult.direction === 'SHORT' &&
-              BTC_PARAMS.shortStrategyRouting.enabled;
-
-            if (isBtcShortRouting) {
-              if (!BTC_PARAMS.shortStrategyRouting.enabledStrategies.includes(gateResult.strategyName)) {
-                gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] = (gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] || 0) + 1;
-                continue;
-              }
-            }
-
-            // ATR-based SL/TP
-            const symP = getSymbolParams(symbol);
-            const slMultiplier = symP.stopLoss.atrMultiplier;
-            const tpMultiplier = symP.takeProfit.atrMultiplier;
-            const maxSlPercent = symP.stopLoss.maxCapPercent;
-            const dir = gateResult.direction;
-            const atrStop = atr * slMultiplier;
-            const maxStop = currentPrice * (maxSlPercent / 100);
-            const effectiveStop = Math.min(atrStop, maxStop);
-            let stopLoss: number, takeProfit: number;
-            if (dir === 'LONG') {
-              stopLoss = currentPrice - effectiveStop;
-              takeProfit = currentPrice + (atr * tpMultiplier);
-            } else {
-              stopLoss = currentPrice + effectiveStop;
-              takeProfit = currentPrice - (atr * tpMultiplier);
-            }
-
-            openPositions.push({
-              symbol, side: dir,
-              entryPrice: currentPrice, entryTime: barTime,
-              stopLoss, takeProfit,
-              peakPnl: 0, peakReachedAt: barTime,
-              trailingStop: null,
-              entryScore: gateResult.qualityScore,
-              qualityScore: gateResult.qualityScore,
-              atrAtEntry: atrPercent,
-              atrPercentAtEntry: atrPercent,
-              strategyName: gateResult.strategyName,
-              entryMomentumScore: gateResult.momentumScore,
-              entryStochK: pre1h.stochKAligned[i],
-              entryAdx: adx,
-              entryRegime: mfs.regime,
-            });
-
-            logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest ENTRY: ${symbol} ${dir} @ ${currentPrice} | regime=${mfs.regime} strategy=${gateResult.strategyName} ADX=${adx.toFixed(1)} mom=${gateResult.momentumScore}`);
-          }
-        }
-
-        // Equity curve (downsample: every 4th bar)
-        if (i % 4 === 0) {
-          const drawdown = peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0;
-          equityCurve.push({
-            time: barTime,
-            equity: Math.round(equity * 100) / 100,
-            drawdown: Math.round(drawdown * 100) / 100,
-          });
-        }
-      }
-
-      // Force-close remaining
-      const lastPrice = parsed1h.closes[parsed1h.closes.length - 1];
-      const lastTime = new Date(allKlines1h[allKlines1h.length - 1][0]).toISOString();
-      for (const pos of openPositions) {
+      if (exitResult.shouldExit) {
         const pnl = calculateFeeAwarePnL(
           pos.side === 'LONG' ? 'BUY' : 'SELL',
-          pos.entryPrice, lastPrice, 1,
+          pos.entryPrice, currentPrice, 1,
           TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT,
         );
+
         trades.push({
           symbol, side: pos.side,
-          entryPrice: pos.entryPrice, exitPrice: lastPrice,
-          entryTime: pos.entryTime, exitTime: lastTime,
+          entryPrice: pos.entryPrice, exitPrice: currentPrice,
+          entryTime: pos.entryTime, exitTime: barTime,
           pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
-          exitReason: 'backtest_end', entryScore: pos.entryScore,
+          exitReason: exitResult.exitReason, entryScore: pos.entryScore,
           stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
           qualityScore: pos.qualityScore, momentumScore: pos.entryMomentumScore,
           adx: pos.entryAdx, stochK: pos.entryStochK,
           strategyName: pos.strategyName,
           regime: pos.entryRegime,
         });
-        const positionSize = equity * 0.015;
+
+        const positionSize = equity * 0.015 * 1.0;
         equity += positionSize * (pnl.netPnlPercent / 100);
+        peakEquity = Math.max(peakEquity, equity);
+        openPositions.splice(p, 1);
+        lastTradeTime = barTimeMs;
       }
-      openPositions.length = 0;
+    }
+
+    // ===== SIGNAL GENERATION =====
+    const cooldownMs = 2 * 60 * 60 * 1000;
+    const hasOpenPos = openPositions.some(p => p.symbol === symbol);
+    const cooldownPassed = (barTimeMs - lastTradeTime) > cooldownMs;
+
+    if (!hasOpenPos && cooldownPassed && i > 50 && idx4h > 20) {
+      const momSliceStart = Math.max(0, i - 99);
+      const momKlines = allKlines1h.slice(momSliceStart, i + 1);
+      const momCloses = parsed1h.closes.slice(momSliceStart, i + 1);
+      const momResult = calculateMomentumScore(
+        momKlines, momCloses, adx, pre1h.adxRisingAligned[i], atr, adxSlope
+      );
+
+      cachedMomentumScore = momResult.score;
+      cachedMomentumDirection = momResult.direction;
+      momentumCacheBar = i;
+
+      const mfs = buildBacktestMFS(
+        symbol, i,
+        parsed1h.closes, parsed1h.highs, parsed1h.lows,
+        pre1h, pre4h, idx4h, parsed4h.closes,
+        momResult,
+      );
+
+      const volInfo = computeVolumeAtBar(allKlines1h, i);
+      mfs.volume["1h"] = {
+        volumeRatio: volInfo.volumeRatio,
+        volumeTrend: volInfo.volumeTrend as any,
+        volumeSpike: volInfo.volumeSpike,
+        volumeDirection: "neutral",
+      };
+      mfs.volumeConfirms = volInfo.volumeRatio > 1.2;
+      mfs.volume.confirmsDirection = volInfo.volumeRatio > 1.2;
+      mfs.volume.hasRangeExpansion1h = volInfo.volumeRatio > 1.5;
+      mfs.volumeRatio = volInfo.volumeRatio;
+
+      const lastKlines = allKlines1h.slice(Math.max(0, i - 2), i + 1);
+      const gateResult = evaluateProductionGates(mfs, momResult, symbol, lastKlines);
+
+      if (gateResult.gate) {
+        gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
+      }
+
+      if (gateResult.passed && gateResult.direction) {
+        const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) &&
+          gateResult.direction === 'SHORT' &&
+          BTC_PARAMS.shortStrategyRouting.enabled;
+
+        if (isBtcShortRouting) {
+          if (!BTC_PARAMS.shortStrategyRouting.enabledStrategies.includes(gateResult.strategyName)) {
+            gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] = (gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] || 0) + 1;
+            continue;
+          }
+        }
+
+        const symP = getSymbolParams(symbol);
+        const slMultiplier = symP.stopLoss.atrMultiplier;
+        const tpMultiplier = symP.takeProfit.atrMultiplier;
+        const maxSlPercent = symP.stopLoss.maxCapPercent;
+        const dir = gateResult.direction;
+        const atrStop = atr * slMultiplier;
+        const maxStop = currentPrice * (maxSlPercent / 100);
+        const effectiveStop = Math.min(atrStop, maxStop);
+        let stopLoss: number, takeProfit: number;
+        if (dir === 'LONG') {
+          stopLoss = currentPrice - effectiveStop;
+          takeProfit = currentPrice + (atr * tpMultiplier);
+        } else {
+          stopLoss = currentPrice + effectiveStop;
+          takeProfit = currentPrice - (atr * tpMultiplier);
+        }
+
+        openPositions.push({
+          symbol, side: dir,
+          entryPrice: currentPrice, entryTime: barTime,
+          stopLoss, takeProfit,
+          peakPnl: 0, peakReachedAt: barTime,
+          trailingStop: null,
+          entryScore: gateResult.qualityScore,
+          qualityScore: gateResult.qualityScore,
+          atrAtEntry: atrPercent,
+          atrPercentAtEntry: atrPercent,
+          strategyName: gateResult.strategyName,
+          entryMomentumScore: gateResult.momentumScore,
+          entryStochK: pre1h.stochKAligned[i],
+          entryAdx: adx,
+          entryRegime: mfs.regime,
+        });
+
+        logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest ENTRY: ${symbol} ${dir} @ ${currentPrice} | regime=${mfs.regime} strategy=${gateResult.strategyName} ADX=${adx.toFixed(1)} mom=${gateResult.momentumScore}`);
+      }
+    }
+
+    // Equity curve (downsample: every 4th bar)
+    if (i % 4 === 0) {
+      const drawdown = peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0;
+      equityCurve.push({
+        time: barTime,
+        equity: Math.round(equity * 100) / 100,
+        drawdown: Math.round(drawdown * 100) / 100,
+      });
+    }
+  }
+
+  // Force-close remaining
+  const lastPrice = parsed1h.closes[parsed1h.closes.length - 1];
+  const lastTime = new Date(allKlines1h[allKlines1h.length - 1][0]).toISOString();
+  for (const pos of openPositions) {
+    const pnl = calculateFeeAwarePnL(
+      pos.side === 'LONG' ? 'BUY' : 'SELL',
+      pos.entryPrice, lastPrice, 1,
+      TRADING_FEE_PARAMS.DEFAULT_FEE_RATE_PERCENT,
+    );
+    trades.push({
+      symbol, side: pos.side,
+      entryPrice: pos.entryPrice, exitPrice: lastPrice,
+      entryTime: pos.entryTime, exitTime: lastTime,
+      pnlPercent: pnl.grossPnlPercent, netPnlPercent: pnl.netPnlPercent,
+      exitReason: 'backtest_end', entryScore: pos.entryScore,
+      stopLoss: pos.stopLoss, takeProfit: pos.takeProfit,
+      qualityScore: pos.qualityScore, momentumScore: pos.entryMomentumScore,
+      adx: pos.entryAdx, stochK: pos.entryStochK,
+      strategyName: pos.strategyName,
+      regime: pos.entryRegime,
+    });
+    const positionSize = equity * 0.015;
+    equity += positionSize * (pnl.netPnlPercent / 100);
+  }
+
+  const finalEquityDelta = ((equity - 10000) / 10000) * 100;
+  return { trades, equityCurve, gateStats, finalEquityDelta };
+}
+
+// ============= MAIN BACKTEST ORCHESTRATOR =============
+
+async function runBacktest(
+  config: BacktestConfig, userId: string, supabase: any, backtestId: string,
+): Promise<void> {
+  const startMs = Date.now();
+
+  try {
+    // ===== PARALLEL MULTI-SYMBOL BACKTEST =====
+    const symbolResults = await Promise.all(
+      config.symbols.map(symbol => backtestSymbol(symbol, config))
+    );
+
+    // ===== MERGE RESULTS =====
+    const trades: BacktestTrade[] = [];
+    const gateStats: Record<string, number> = {};
+    let equity = 10000;
+
+    for (const result of symbolResults) {
+      trades.push(...result.trades);
+      // Merge gate stats
+      for (const [gate, count] of Object.entries(result.gateStats)) {
+        gateStats[gate] = (gateStats[gate] || 0) + count;
+      }
+      // Apply per-symbol equity delta (proportional allocation)
+      const allocation = 1 / config.symbols.length;
+      equity += 10000 * allocation * (result.finalEquityDelta / 100);
+    }
+
+    // Sort trades by entry time for proper timeline
+    trades.sort((a, b) => new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime());
+
+    // Merge & sort equity curves, then rebuild combined curve
+    const allEquityPoints: EquityPoint[] = [];
+    for (const result of symbolResults) {
+      allEquityPoints.push(...result.equityCurve);
+    }
+    allEquityPoints.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+    // Rebuild combined equity curve from merged trades
+    let combinedEquity = 10000;
+    let peakEquity = combinedEquity;
+    const equityCurve: EquityPoint[] = [];
+    const tradesByTime = [...trades].sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime());
+    let tradeIdx = 0;
+
+    // Use time points from all symbols
+    const timePoints = [...new Set(allEquityPoints.map(e => e.time))].sort();
+    for (const time of timePoints) {
+      const timeMs = new Date(time).getTime();
+      while (tradeIdx < tradesByTime.length && new Date(tradesByTime[tradeIdx].exitTime).getTime() <= timeMs) {
+        const t = tradesByTime[tradeIdx];
+        const positionSize = combinedEquity * 0.015 / config.symbols.length;
+        combinedEquity += positionSize * (t.netPnlPercent / 100);
+        peakEquity = Math.max(peakEquity, combinedEquity);
+        tradeIdx++;
+      }
+      const drawdown = peakEquity > 0 ? ((peakEquity - combinedEquity) / peakEquity) * 100 : 0;
+      equityCurve.push({
+        time,
+        equity: Math.round(combinedEquity * 100) / 100,
+        drawdown: Math.round(drawdown * 100) / 100,
+      });
     }
 
     // Summary
@@ -1121,14 +1193,14 @@ async function runBacktest(
     const avgLoss = losingTrades.length > 0 ? Math.abs(losingTrades.reduce((s, t) => s + t.netPnlPercent, 0) / losingTrades.length) : 0;
     const profitFactor = avgLoss > 0 ? (avgWin * winningTrades.length) / (avgLoss * losingTrades.length) : winningTrades.length > 0 ? Infinity : 0;
     const maxDrawdown = equityCurve.length > 0 ? Math.max(...equityCurve.map(e => e.drawdown)) : 0;
-    const totalReturn = ((equity - 10000) / 10000) * 100;
+    const totalReturn = ((combinedEquity - 10000) / 10000) * 100;
 
     const exitBreakdown: Record<string, number> = {};
     for (const t of trades) exitBreakdown[t.exitReason] = (exitBreakdown[t.exitReason] || 0) + 1;
 
-    // Strategy & regime breakdown
     const strategyBreakdown: Record<string, { count: number; wins: number; totalPnl: number }> = {};
     const regimeBreakdown: Record<string, { count: number; wins: number; totalPnl: number }> = {};
+    const symbolBreakdown: Record<string, { count: number; wins: number; totalPnl: number; winRate: number }> = {};
     for (const t of trades) {
       if (!strategyBreakdown[t.strategyName]) strategyBreakdown[t.strategyName] = { count: 0, wins: 0, totalPnl: 0 };
       strategyBreakdown[t.strategyName].count++;
@@ -1140,6 +1212,16 @@ async function runBacktest(
       regimeBreakdown[regime].count++;
       if (t.netPnlPercent > 0) regimeBreakdown[regime].wins++;
       regimeBreakdown[regime].totalPnl += t.netPnlPercent;
+
+      if (!symbolBreakdown[t.symbol]) symbolBreakdown[t.symbol] = { count: 0, wins: 0, totalPnl: 0, winRate: 0 };
+      symbolBreakdown[t.symbol].count++;
+      if (t.netPnlPercent > 0) symbolBreakdown[t.symbol].wins++;
+      symbolBreakdown[t.symbol].totalPnl += t.netPnlPercent;
+    }
+    // Calculate per-symbol win rates
+    for (const sym of Object.keys(symbolBreakdown)) {
+      const s = symbolBreakdown[sym];
+      s.winRate = s.count > 0 ? Math.round((s.wins / s.count) * 1000) / 10 : 0;
     }
 
     const summary = {
@@ -1152,10 +1234,12 @@ async function runBacktest(
       profitFactor: profitFactor === Infinity ? 999 : Math.round(profitFactor * 100) / 100,
       maxDrawdownPercent: Math.round(maxDrawdown * 100) / 100,
       totalReturnPercent: Math.round(totalReturn * 100) / 100,
-      finalEquity: Math.round(equity * 100) / 100,
+      finalEquity: Math.round(combinedEquity * 100) / 100,
       exitBreakdown,
       strategyBreakdown,
       regimeBreakdown,
+      symbolBreakdown,
+      symbolsParallel: config.symbols.length,
       expectancy: trades.length > 0
         ? Math.round(((winRate / 100) * avgWin - ((100 - winRate) / 100) * avgLoss) * 1000) / 1000
         : 0,
@@ -1175,7 +1259,7 @@ async function runBacktest(
       equity_curve: finalEquityCurve, gate_stats: gateStats, duration_ms: durationMs,
     }).eq('id', backtestId);
 
-    logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest completed: ${trades.length} trades, ${winRate.toFixed(1)}% WR, PF=${summary.profitFactor}, ${totalReturn.toFixed(2)}% return in ${durationMs}ms`);
+    logger.info(`${LOG_CATEGORIES.SUCCESS} Backtest completed: ${trades.length} trades across ${config.symbols.length} symbols (parallel), ${winRate.toFixed(1)}% WR, PF=${summary.profitFactor}, ${totalReturn.toFixed(2)}% return in ${durationMs}ms`);
 
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
