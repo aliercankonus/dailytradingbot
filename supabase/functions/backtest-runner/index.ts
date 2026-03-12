@@ -1040,6 +1040,12 @@ async function backtestSymbol(
       }
 
       if (gateResult.passed && gateResult.direction) {
+        // Global side filter
+        if (config.sideFilter && gateResult.direction !== config.sideFilter) {
+          gateStats[`SIDE_FILTER_${gateResult.direction}_BLOCKED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_BLOCKED`] || 0) + 1;
+          continue;
+        }
+
         const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) &&
           gateResult.direction === 'SHORT' &&
           BTC_PARAMS.shortStrategyRouting.enabled;
