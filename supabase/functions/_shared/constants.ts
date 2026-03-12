@@ -4860,7 +4860,7 @@ export const FOUR_STATE_REGIME = {
     // When regime is old AND ADX slope is declining, the move is exhausted — hard block new entries
     HARD_BLOCK_ENABLED: true,
     HARD_BLOCK_AGE_CANDLES: 45,        // RELAXED: Was 35 — crypto trends routinely last 12-18h (45 candles on 15m)
-    HARD_BLOCK_MAX_ADX_SLOPE: -0.30,   // RELAXED: Was -0.15 — allow more slope decay before hard-blocking
+    HARD_BLOCK_MAX_ADX_SLOPE: -0.50,   // RELAXED: Was -0.30 — exhaustion phase slope typically -0.3 to -0.6, allow more decay before blocking
     HARD_BLOCK_REASON: 'REGIME_AGE_EXHAUSTED',
     
     // ===== FRESH REGIME BONUS: Reward early entries =====
