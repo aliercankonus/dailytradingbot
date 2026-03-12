@@ -46,6 +46,7 @@ interface BacktestConfig {
   endDate: string;
   barInterval: string;
   strategyDirectionFilters?: StrategyDirectionFilter[];
+  sideFilter?: 'LONG' | 'SHORT';
 }
 
 interface BacktestTrade {
@@ -1039,6 +1040,12 @@ async function backtestSymbol(
       }
 
       if (gateResult.passed && gateResult.direction) {
+        // Global side filter
+        if (config.sideFilter && gateResult.direction !== config.sideFilter) {
+          gateStats[`SIDE_FILTER_${gateResult.direction}_BLOCKED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_BLOCKED`] || 0) + 1;
+          continue;
+        }
+
         const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) &&
           gateResult.direction === 'SHORT' &&
           BTC_PARAMS.shortStrategyRouting.enabled;
@@ -1358,6 +1365,7 @@ serve(async (req) => {
       startDate, endDate,
       barInterval: body.barInterval || '1h',
       strategyDirectionFilters: body.strategyDirectionFilters || undefined,
+      sideFilter: body.sideFilter || undefined,
     };
 
     const parsedStart = new Date(config.startDate);
