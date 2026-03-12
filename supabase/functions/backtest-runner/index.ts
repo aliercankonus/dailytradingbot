@@ -37,13 +37,6 @@ interface BacktestConfig {
   startDate: string;
   endDate: string;
   barInterval: string; // '1h' or '4h'
-  sideFilter?: 'LONG' | 'SHORT' | null; // Filter to only take one side
-  enabledStrategies?: string[] | null; // Filter to specific strategies only
-  strongTrendFilters?: boolean; // Enable ATR expansion + momentum filters for STRONG_TREND
-  exitOverrides?: {
-    moderate_exhaustion_exit?: boolean; // false = disable for matching strategies
-    momentum_reversal_exit?: boolean;   // false = disable momentum reversal exit
-  };
 }
 
 interface BacktestTrade {
@@ -442,12 +435,13 @@ function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
   momentumResult: MomentumScoreResult,
   symbol?: string,
-  sideFilter?: 'LONG' | 'SHORT' | null,
   klines?: any[], // raw klines for candle body filter
 ): GateResult {
   const sp = getSymbolParams(symbol || mfs.symbol);
-  const isBtcShort = BTC_PARAMS.symbols.includes(symbol || mfs.symbol) && sideFilter === 'SHORT';
-  const shortOverrides = isBtcShort ? BTC_PARAMS.shortGateOverrides : null;
+  // Evaluate BTC SHORT based on actual direction, not a filter
+  const isBtcSymbol = BTC_PARAMS.symbols.includes(symbol || mfs.symbol);
+  // We'll determine isBtcShort after direction is known; initially false
+  let shortOverrides: typeof BTC_PARAMS.shortGateOverrides | null = null;
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
@@ -522,13 +516,18 @@ function evaluateProductionGates(
     else if (momentumResult.score < -5) direction = 'SHORT';
   }
   // BTC SHORT extra: DI-based direction at moderate ADX with weak negative momentum
-  if (!direction && isBtcShort && adx >= 20 && momentumResult.score < -3) {
+  const isBtcShort = isBtcSymbol && direction === 'SHORT';
+  if (!direction && isBtcSymbol && adx >= 20 && momentumResult.score < -3) {
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diMinus > diPlus + 3) {
       direction = 'SHORT';
       adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.35);
     }
+  }
+  // Re-evaluate after direction set
+  if (direction === 'SHORT' && isBtcSymbol) {
+    shortOverrides = BTC_PARAMS.shortGateOverrides;
   }
   
   if (!direction) {
@@ -752,7 +751,6 @@ function checkProductionExits(
   adxSlope: number,
   primaryTrend: string,
   momentumScore: number,
-  exitOverrides?: BacktestConfig['exitOverrides'],
 ): { shouldExit: boolean; exitReason: string } {
   const side = position.side;
   const pnlPercent = side === 'LONG'
@@ -880,24 +878,18 @@ function checkProductionExits(
     return { shouldExit: true, exitReason: 'time_stop_24h' };
   }
 
-  // 9. Moderate exhaustion exit — reverted to working threshold
-  // Skip if exitOverrides disables it (e.g., for SQUEEZE_BREAKOUT)
-  const exhaustionDisabled = exitOverrides?.moderate_exhaustion_exit === false;
-  if (!exhaustionDisabled && position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
+  // 9. Moderate exhaustion exit
+  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) {
     return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
   }
 
   // 10. Momentum reversal exit — SYMBOL-ADAPTIVE thresholds
   const symParams = getSymbolParams(position.symbol);
-  // Skip if exitOverrides disables it
-  const momentumReversalDisabled = exitOverrides?.momentum_reversal_exit === false;
-  if (!momentumReversalDisabled) {
-    if (hoursHeld > symParams.exits.momentumReversalMinHours) {
-      if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
-          (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
-        if (pnlPercent < symParams.exits.momentumReversalThreshold) {
-          return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
-        }
+  if (hoursHeld > symParams.exits.momentumReversalMinHours) {
+    if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
+        (side === 'SHORT' && momentumScore > symParams.exits.momentumReversalScore && primaryTrend === 'bullish')) {
+      if (pnlPercent < symParams.exits.momentumReversalThreshold) {
+        return { shouldExit: true, exitReason: 'momentum_reversal_exit' };
       }
     }
   }
@@ -1003,7 +995,6 @@ async function runBacktest(
           const exitResult = checkProductionExits(
             pos, currentPrice, barTime, atr, atrPercent,
             adxResult.adx, adxResult.adxSlope ?? 0, primaryTrend, momResult.score,
-            config.exitOverrides,
           );
 
           if (exitResult.shouldExit) {
@@ -1045,59 +1036,21 @@ async function runBacktest(
           const mfs = buildBacktestMFS(symbol, wCloses, wHighs, wLows, wVolumes, wKlines, momResult, adxResult);
           
           // Run production gate pipeline
-          const gateResult = evaluateProductionGates(mfs, momResult, symbol, config.sideFilter, wKlines);
+          const gateResult = evaluateProductionGates(mfs, momResult, symbol, wKlines);
 
           if (gateResult.gate) {
             gateStats[gateResult.gate] = (gateStats[gateResult.gate] || 0) + 1;
           }
 
           if (gateResult.passed && gateResult.direction) {
-            // Side filter: skip if direction doesn't match requested side
-            if (config.sideFilter && gateResult.direction !== config.sideFilter) {
-              gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] = (gateStats[`SIDE_FILTER_${gateResult.direction}_SKIPPED`] || 0) + 1;
-              continue;
-            }
-            
-            // ============= BTC SHORT STRATEGY ROUTING (Production Pipeline) =============
-            // Apply symbol-specific strategy routing when no manual enabledStrategies override
+            // ============= PRODUCTION STRATEGY ROUTING =============
             const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) && 
               gateResult.direction === 'SHORT' && 
               BTC_PARAMS.shortStrategyRouting.enabled;
             
-            if (!config.enabledStrategies?.length && isBtcShortRouting) {
+            if (isBtcShortRouting) {
               if (!BTC_PARAMS.shortStrategyRouting.enabledStrategies.includes(gateResult.strategyName)) {
                 gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] = (gateStats[`BTC_SHORT_ROUTING_${gateResult.strategyName}_BLOCKED`] || 0) + 1;
-                continue;
-              }
-            }
-            
-            // Manual strategy filter: skip if strategy not in enabled list
-            if (config.enabledStrategies && config.enabledStrategies.length > 0 &&
-                !config.enabledStrategies.includes(gateResult.strategyName)) {
-              gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] = (gateStats[`STRATEGY_FILTER_${gateResult.strategyName}_SKIPPED`] || 0) + 1;
-              continue;
-            }
-            
-            // STRONG_TREND filters: ATR expansion + momentum decay protection
-            if (config.strongTrendFilters && gateResult.strategyName === 'STRONG_TREND') {
-              const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
-              if (atr <= prevAtr) {
-                gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] = (gateStats['STRONG_TREND_ATR_NOT_EXPANDING'] || 0) + 1;
-                continue;
-              }
-              if (adxResult.adxSlope < 0.1) {
-                gateStats['STRONG_TREND_ADX_NOT_RISING'] = (gateStats['STRONG_TREND_ADX_NOT_RISING'] || 0) + 1;
-                continue;
-              }
-            }
-            
-            // SQUEEZE_BREAKOUT ATR expansion validation (false breakout filter)
-            if (BTC_PARAMS.shortStrategyRouting.requireAtrExpansion && 
-                gateResult.strategyName === 'SQUEEZE_BREAKOUT' && 
-                gateResult.direction === 'SHORT') {
-              const prevAtr = wCloses.length > 15 ? calculateATR(wHighs.slice(0, -1), wLows.slice(0, -1), wCloses.slice(0, -1), 14) : atr;
-              if (atr <= prevAtr * (BTC_PARAMS.shortStrategyRouting.atrExpansionMultiplier ?? 1.05)) { // ATR must expand 5%+
-                gateStats['SQUEEZE_ATR_NOT_EXPANDING'] = (gateStats['SQUEEZE_ATR_NOT_EXPANDING'] || 0) + 1;
                 continue;
               }
             }
@@ -1298,10 +1251,6 @@ serve(async (req) => {
       startDate,
       endDate,
       barInterval: body.barInterval || '1h',
-      sideFilter: body.sideFilter || null,
-      enabledStrategies: body.enabledStrategies || null,
-      strongTrendFilters: body.strongTrendFilters || false,
-      exitOverrides: body.exitOverrides || undefined,
     };
 
     const parsedStart = new Date(config.startDate);

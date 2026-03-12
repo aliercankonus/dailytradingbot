@@ -5,14 +5,13 @@ import { AppFooter } from "@/components/AppFooter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSymbolsContext } from "@/contexts/SymbolsContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell } from "recharts";
-import { FlaskConical, Play, Loader2, TrendingUp, TrendingDown, Target, Shield, Clock, BarChart3 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Cell, PieChart, Pie } from "recharts";
+import { FlaskConical, Play, Loader2, TrendingUp, TrendingDown, Target, Shield, Clock, BarChart3, Layers, Activity } from "lucide-react";
 
 interface BacktestSummary {
   totalTrades: number;
@@ -26,6 +25,10 @@ interface BacktestSummary {
   totalReturnPercent: number;
   finalEquity: number;
   exitBreakdown: Record<string, number>;
+  expectancy?: number;
+  strategyBreakdown?: Record<string, { trades: number; winRate: number; avgPnl: number; totalPnl: number }>;
+  regimeBreakdown?: Record<string, { trades: number; winRate: number; avgPnl: number }>;
+  symbolBreakdown?: Record<string, { trades: number; winRate: number; avgPnl: number; totalPnl: number }>;
 }
 
 interface BacktestTrade {
@@ -39,6 +42,8 @@ interface BacktestTrade {
   netPnlPercent: number;
   exitReason: string;
   entryScore: number;
+  strategyName?: string;
+  regime?: string;
 }
 
 interface BacktestResult {
@@ -60,36 +65,25 @@ const Backtest = () => {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['BTCUSDT']);
   const [barInterval, setBarInterval] = useState('1h');
   const [period, setPeriod] = useState('7');
-  const [sideFilter, setSideFilter] = useState<string>('all');
-  const [enabledStrategies, setEnabledStrategies] = useState<string[]>([]);
-  const [disableExhaustionExit, setDisableExhaustionExit] = useState(false);
-  const [disableMomentumReversalExit, setDisableMomentumReversalExit] = useState(false);
   const [running, setRunning] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [activeResult, setActiveResult] = useState<BacktestResult | null>(null);
 
-  // Load past backtests
   const loadHistory = async () => {
     const { data } = await supabase
       .from('backtest_results')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(20);
-
-    if (data) {
-      setResults(data as any);
-    }
+    if (data) setResults(data as any);
   };
 
-  // Merge multiple backtest results into one combined view
   const mergeBacktestResults = (batchResults: BacktestResult[]): BacktestResult => {
     const allTrades: BacktestTrade[] = [];
-    const allEquity: { time: string; equity: number; drawdown: number }[] = [];
     const mergedGateStats: Record<string, number> = {};
     let totalDuration = 0;
 
-    // Collect trades and gate stats from all batches
     for (const batch of batchResults) {
       if (batch.trades) allTrades.push(...batch.trades);
       if (batch.gate_stats) {
@@ -100,12 +94,11 @@ const Backtest = () => {
       totalDuration += batch.duration_ms || 0;
     }
 
-    // Sort trades by entry time
     allTrades.sort((a, b) => new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime());
 
-    // Rebuild equity curve from merged trades
     let equity = 10000;
     let peak = equity;
+    const allEquity: { time: string; equity: number; drawdown: number }[] = [];
     for (const trade of allTrades) {
       const positionSize = equity * 0.015;
       equity += positionSize * (trade.netPnlPercent / 100);
@@ -114,7 +107,6 @@ const Backtest = () => {
       allEquity.push({ time: trade.exitTime, equity: Math.round(equity * 100) / 100, drawdown: Math.round(drawdown * 100) / 100 });
     }
 
-    // Compute merged summary
     const winningTrades = allTrades.filter(t => t.netPnlPercent > 0);
     const losingTrades = allTrades.filter(t => t.netPnlPercent <= 0);
     const winRate = allTrades.length > 0 ? (winningTrades.length / allTrades.length) * 100 : 0;
@@ -123,11 +115,14 @@ const Backtest = () => {
     const profitFactor = avgLoss > 0 ? (avgWin * winningTrades.length) / (avgLoss * losingTrades.length) : winningTrades.length > 0 ? 999 : 0;
     const maxDrawdown = allEquity.length > 0 ? Math.max(...allEquity.map(e => e.drawdown)) : 0;
     const totalReturn = ((equity - 10000) / 10000) * 100;
+    const wr = winRate / 100;
+    const expectancy = wr * avgWin - (1 - wr) * avgLoss;
 
     const exitBreakdown: Record<string, number> = {};
-    for (const t of allTrades) {
-      exitBreakdown[t.exitReason] = (exitBreakdown[t.exitReason] || 0) + 1;
-    }
+    for (const t of allTrades) exitBreakdown[t.exitReason] = (exitBreakdown[t.exitReason] || 0) + 1;
+
+    const strategyBreakdown = buildStrategyBreakdown(allTrades);
+    const symbolBreakdown = buildSymbolBreakdown(allTrades);
 
     const firstConfig = batchResults[0]?.config;
     const lastConfig = batchResults[batchResults.length - 1]?.config;
@@ -153,6 +148,9 @@ const Backtest = () => {
         totalReturnPercent: Math.round(totalReturn * 100) / 100,
         finalEquity: Math.round(equity * 100) / 100,
         exitBreakdown,
+        expectancy: Math.round(expectancy * 1000) / 1000,
+        strategyBreakdown,
+        symbolBreakdown,
       },
       trades: allTrades,
       equity_curve: allEquity,
@@ -163,7 +161,48 @@ const Backtest = () => {
     };
   };
 
-  // Run a single chunk backtest
+  const buildStrategyBreakdown = (trades: BacktestTrade[]) => {
+    const map: Record<string, { wins: number; total: number; pnlSum: number }> = {};
+    for (const t of trades) {
+      const s = t.strategyName || 'UNKNOWN';
+      if (!map[s]) map[s] = { wins: 0, total: 0, pnlSum: 0 };
+      map[s].total++;
+      map[s].pnlSum += t.netPnlPercent;
+      if (t.netPnlPercent > 0) map[s].wins++;
+    }
+    const result: Record<string, { trades: number; winRate: number; avgPnl: number; totalPnl: number }> = {};
+    for (const [k, v] of Object.entries(map)) {
+      result[k] = {
+        trades: v.total,
+        winRate: Math.round((v.wins / v.total) * 1000) / 10,
+        avgPnl: Math.round((v.pnlSum / v.total) * 1000) / 1000,
+        totalPnl: Math.round(v.pnlSum * 1000) / 1000,
+      };
+    }
+    return result;
+  };
+
+  const buildSymbolBreakdown = (trades: BacktestTrade[]) => {
+    const map: Record<string, { wins: number; total: number; pnlSum: number }> = {};
+    for (const t of trades) {
+      const s = t.symbol;
+      if (!map[s]) map[s] = { wins: 0, total: 0, pnlSum: 0 };
+      map[s].total++;
+      map[s].pnlSum += t.netPnlPercent;
+      if (t.netPnlPercent > 0) map[s].wins++;
+    }
+    const result: Record<string, { trades: number; winRate: number; avgPnl: number; totalPnl: number }> = {};
+    for (const [k, v] of Object.entries(map)) {
+      result[k] = {
+        trades: v.total,
+        winRate: Math.round((v.wins / v.total) * 1000) / 10,
+        avgPnl: Math.round((v.pnlSum / v.total) * 1000) / 1000,
+        totalPnl: Math.round(v.pnlSum * 1000) / 1000,
+      };
+    }
+    return result;
+  };
+
   const runSingleChunk = async (startDate: Date, endDate: Date): Promise<BacktestResult | null> => {
     const { data: { session } } = await supabase.auth.getSession();
     const body: any = {
@@ -173,15 +212,8 @@ const Backtest = () => {
       barInterval,
       user_id: session?.user?.id,
     };
-    if (sideFilter !== 'all') body.sideFilter = sideFilter.toUpperCase();
-    if (enabledStrategies.length > 0) body.enabledStrategies = enabledStrategies;
-    const exitOverrides: Record<string, boolean> = {};
-    if (disableExhaustionExit) exitOverrides.moderate_exhaustion_exit = false;
-    if (disableMomentumReversalExit) exitOverrides.momentum_reversal_exit = false;
-    if (Object.keys(exitOverrides).length > 0) body.exitOverrides = exitOverrides;
 
     const { data, error } = await supabase.functions.invoke('backtest-runner', { body });
-
     if (error) throw error;
 
     const { data: result } = await supabase
@@ -193,7 +225,6 @@ const Backtest = () => {
     return result ? (result as any as BacktestResult) : null;
   };
 
-  // Run backtest (batch for 60+ days)
   const runBacktest = async () => {
     if (!user) return;
     setRunning(true);
@@ -204,7 +235,6 @@ const Backtest = () => {
       const CHUNK_SIZE = 30;
 
       if (days > CHUNK_SIZE) {
-        // Batch mode: split into 30-day chunks
         const chunks: { start: Date; end: Date }[] = [];
         const now = new Date();
         let remaining = days;
@@ -224,7 +254,6 @@ const Backtest = () => {
           const startLabel = chunk.start.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
           const endLabel = chunk.end.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
           setBatchProgress({ current: i + 1, total: chunks.length, label: `${startLabel} → ${endLabel}` });
-
           toast.info(`Batch ${i + 1}/${chunks.length}: ${startLabel} → ${endLabel}`);
 
           const result = await runSingleChunk(chunk.start, chunk.end);
@@ -235,26 +264,28 @@ const Backtest = () => {
           }
         }
 
-        if (batchResults.length === 0) {
-          throw new Error('Hiçbir batch başarılı olamadı');
-        }
+        if (batchResults.length === 0) throw new Error('Hiçbir batch başarılı olamadı');
 
-        // Merge results
         const merged = mergeBacktestResults(batchResults);
         setActiveResult(merged);
         toast.success(`${days} gün batch backtest tamamlandı: ${batchResults.length}/${chunks.length} batch, ${merged.summary?.totalTrades} trade`);
-
-        // Reload history to show individual chunks
         await loadHistory();
       } else {
-        // Single run mode
         const endDate = new Date();
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
 
         const result = await runSingleChunk(startDate, endDate);
-
         if (result) {
+          // Enrich with client-side strategy breakdown
+          if (result.trades?.length > 0 && result.summary) {
+            (result.summary as any).strategyBreakdown = buildStrategyBreakdown(result.trades);
+            (result.summary as any).symbolBreakdown = buildSymbolBreakdown(result.trades);
+            const wr = (result.summary.winRate || 0) / 100;
+            (result.summary as any).expectancy = Math.round(
+              (wr * result.summary.avgWinPercent - (1 - wr) * result.summary.avgLossPercent) * 1000
+            ) / 1000;
+          }
           setActiveResult(result);
           setResults(prev => [result, ...prev]);
           toast.success(`Backtest tamamlandı: ${result.id?.substring(0, 8)}`);
@@ -268,29 +299,30 @@ const Backtest = () => {
     }
   };
 
-  // Toggle symbol selection
   const toggleSymbol = (symbol: string) => {
     setSelectedSymbols(prev =>
-      prev.includes(symbol)
-        ? prev.filter(s => s !== symbol)
-        : [...prev, symbol]
+      prev.includes(symbol) ? prev.filter(s => s !== symbol) : [...prev, symbol]
     );
   };
 
-  // Auto-load history on mount
   useEffect(() => {
-    if (user) {
-      loadHistory();
-    }
+    if (user) loadHistory();
   }, [user]);
 
   const summary = activeResult?.summary;
   const equityCurve = activeResult?.equity_curve || [];
   const gateStats = activeResult?.gate_stats || {};
   const trades = activeResult?.trades || [];
-
-  // Format gate stats for display
   const sortedGates = Object.entries(gateStats).sort(([, a], [, b]) => (b as number) - (a as number));
+  const strategyBreakdown = summary?.strategyBreakdown || {};
+  const symbolBreakdown = summary?.symbolBreakdown || {};
+
+  const COLORS = [
+    'hsl(var(--primary))', 'hsl(var(--destructive))', 'hsl(210 80% 55%)',
+    'hsl(45 90% 55%)', 'hsl(160 60% 45%)', 'hsl(280 60% 55%)',
+    'hsl(30 80% 55%)', 'hsl(350 70% 50%)', 'hsl(190 70% 45%)',
+    'hsl(120 50% 45%)', 'hsl(260 50% 55%)', 'hsl(15 70% 50%)',
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -301,7 +333,7 @@ const Backtest = () => {
           <FlaskConical className="h-6 w-6 text-primary" />
           <div>
             <h1 className="text-xl font-bold text-foreground">Backtest Engine</h1>
-            <p className="text-xs text-muted-foreground">Production kodları ile tarihsel veri replay</p>
+            <p className="text-xs text-muted-foreground">Event-driven candle replay — production pipeline ile tarihsel simülasyon</p>
           </div>
         </div>
 
@@ -334,7 +366,7 @@ const Backtest = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {/* Period */}
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Süre</label>
@@ -365,65 +397,6 @@ const Backtest = () => {
                     <SelectItem value="4h">4 Saat</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              {/* Side Filter */}
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Yön Filtresi</label>
-                <Select value={sideFilter} onValueChange={setSideFilter}>
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tümü</SelectItem>
-                    <SelectItem value="long">Sadece LONG</SelectItem>
-                    <SelectItem value="short">Sadece SHORT</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Strategy Filter */}
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Strateji Filtresi</label>
-                <Select
-                  value={enabledStrategies.length === 0 ? 'all' : enabledStrategies[0]}
-                  onValueChange={(v) => setEnabledStrategies(v === 'all' ? [] : [v])}
-                >
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tüm Stratejiler</SelectItem>
-                    <SelectItem value="SQUEEZE_BREAKOUT">Squeeze Breakout</SelectItem>
-                    <SelectItem value="MOMENTUM_ACCELERATION">Momentum Accel.</SelectItem>
-                    <SelectItem value="STRONG_TREND">Strong Trend</SelectItem>
-                    <SelectItem value="TREND_CONTINUATION">Trend Continuation</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Exit Override: Disable Exhaustion */}
-              <div className="flex items-center justify-between col-span-2 sm:col-span-4 p-2 rounded-md border border-border bg-muted/30">
-                <div>
-                  <label className="text-xs font-medium text-foreground">Exhaustion Exit Devre Dışı</label>
-                  <p className="text-[10px] text-muted-foreground">moderate_exhaustion_exit kapanır — squeeze trade'ler daha uzun tutulur</p>
-                </div>
-                <Switch
-                  checked={disableExhaustionExit}
-                  onCheckedChange={setDisableExhaustionExit}
-                />
-              </div>
-
-              {/* Exit Override: Disable Momentum Reversal */}
-              <div className="flex items-center justify-between col-span-2 sm:col-span-4 p-2 rounded-md border border-border bg-muted/30">
-                <div>
-                  <label className="text-xs font-medium text-foreground">Momentum Reversal Exit Devre Dışı</label>
-                  <p className="text-[10px] text-muted-foreground">momentum_reversal_exit kapanır — momentum dönüşlerinde erken çıkış engellenir</p>
-                </div>
-                <Switch
-                  checked={disableMomentumReversalExit}
-                  onCheckedChange={setDisableMomentumReversalExit}
-                />
               </div>
 
               {/* Run Button */}
@@ -487,8 +460,8 @@ const Backtest = () => {
         {/* Results */}
         {activeResult && summary && (
           <>
-            {/* Summary Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* Summary Metrics - 5 cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               <Card className="border-border bg-card">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-2 mb-1">
@@ -532,6 +505,19 @@ const Backtest = () => {
                   </div>
                   <p className="text-xl font-bold text-danger">-{summary.maxDrawdownPercent}%</p>
                   <p className="text-[10px] text-muted-foreground">{summary.totalTrades} toplam trade</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-border bg-card">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Activity className="h-3.5 w-3.5 text-primary" />
+                    <span className="text-xs text-muted-foreground">Expectancy</span>
+                  </div>
+                  <p className={`text-xl font-bold ${(summary.expectancy || 0) >= 0 ? 'text-success' : 'text-danger'}`}>
+                    {(summary.expectancy || 0) >= 0 ? '+' : ''}{summary.expectancy || 0}%
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">WR×AvgW − (1-WR)×AvgL</p>
                 </CardContent>
               </Card>
             </div>
@@ -591,6 +577,100 @@ const Backtest = () => {
               </Card>
             )}
 
+            {/* Strategy Breakdown + Symbol Breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Strategy Performance */}
+              {Object.keys(strategyBreakdown).length > 0 && (
+                <Card className="border-border bg-card">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-primary" />
+                      <CardTitle className="text-sm font-medium">Strateji Performansı</CardTitle>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {Object.entries(strategyBreakdown)
+                        .sort(([, a], [, b]) => b.trades - a.trades)
+                        .map(([strategy, data], i) => (
+                          <div key={strategy} className="p-2.5 rounded-md border border-border/50 bg-muted/20">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                                <span className="text-xs font-medium text-foreground font-mono">{strategy}</span>
+                              </div>
+                              <Badge variant="outline" className="text-[9px]">{data.trades} trade</Badge>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-[10px]">
+                              <div>
+                                <span className="text-muted-foreground">WR</span>
+                                <p className={`font-medium ${data.winRate >= 50 ? 'text-success' : 'text-danger'}`}>{data.winRate}%</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Avg PnL</span>
+                                <p className={`font-medium ${data.avgPnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                  {data.avgPnl >= 0 ? '+' : ''}{data.avgPnl}%
+                                </p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Total PnL</span>
+                                <p className={`font-medium ${data.totalPnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                  {data.totalPnl >= 0 ? '+' : ''}{data.totalPnl}%
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Symbol Performance */}
+              {Object.keys(symbolBreakdown).length > 0 && (
+                <Card className="border-border bg-card">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4 text-primary" />
+                      <CardTitle className="text-sm font-medium">Sembol Performansı</CardTitle>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {Object.entries(symbolBreakdown)
+                        .sort(([, a], [, b]) => b.totalPnl - a.totalPnl)
+                        .map(([symbol, data], i) => (
+                          <div key={symbol} className="p-2.5 rounded-md border border-border/50 bg-muted/20">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-medium text-foreground font-mono">{symbol.replace('USDT', '')}</span>
+                              <Badge variant="outline" className="text-[9px]">{data.trades} trade</Badge>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-[10px]">
+                              <div>
+                                <span className="text-muted-foreground">WR</span>
+                                <p className={`font-medium ${data.winRate >= 50 ? 'text-success' : 'text-danger'}`}>{data.winRate}%</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Avg PnL</span>
+                                <p className={`font-medium ${data.avgPnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                  {data.avgPnl >= 0 ? '+' : ''}{data.avgPnl}%
+                                </p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Total PnL</span>
+                                <p className={`font-medium ${data.totalPnl >= 0 ? 'text-success' : 'text-danger'}`}>
+                                  {data.totalPnl >= 0 ? '+' : ''}{data.totalPnl}%
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Gate Rejection Breakdown Chart */}
               {sortedGates.length > 0 && (
@@ -613,20 +693,6 @@ const Backtest = () => {
                         count: count as number,
                         pct: total > 0 ? Math.round((count as number) / total * 1000) / 10 : 0,
                       }));
-                      const COLORS = [
-                        'hsl(var(--primary))',
-                        'hsl(var(--destructive))',
-                        'hsl(210 80% 55%)',
-                        'hsl(45 90% 55%)',
-                        'hsl(160 60% 45%)',
-                        'hsl(280 60% 55%)',
-                        'hsl(30 80% 55%)',
-                        'hsl(350 70% 50%)',
-                        'hsl(190 70% 45%)',
-                        'hsl(120 50% 45%)',
-                        'hsl(260 50% 55%)',
-                        'hsl(15 70% 50%)',
-                      ];
                       return (
                         <div>
                           <div style={{ height: Math.max(200, chartData.length * 32) }}>
@@ -714,6 +780,7 @@ const Backtest = () => {
                         <tr className="border-b border-border">
                           <th className="text-left py-2 px-2 text-muted-foreground font-medium">Sembol</th>
                           <th className="text-left py-2 px-2 text-muted-foreground font-medium">Yön</th>
+                          <th className="text-left py-2 px-2 text-muted-foreground font-medium">Strateji</th>
                           <th className="text-right py-2 px-2 text-muted-foreground font-medium">Giriş</th>
                           <th className="text-right py-2 px-2 text-muted-foreground font-medium">Çıkış</th>
                           <th className="text-right py-2 px-2 text-muted-foreground font-medium">Net P&L</th>
@@ -729,6 +796,9 @@ const Backtest = () => {
                               <Badge variant={trade.side === 'LONG' ? 'default' : 'destructive'} className="text-[9px] px-1.5">
                                 {trade.side}
                               </Badge>
+                            </td>
+                            <td className="py-1.5 px-2">
+                              <span className="text-[9px] text-muted-foreground font-mono">{trade.strategyName || '-'}</span>
                             </td>
                             <td className="py-1.5 px-2 text-right font-mono">${trade.entryPrice.toFixed(2)}</td>
                             <td className="py-1.5 px-2 text-right font-mono">${trade.exitPrice.toFixed(2)}</td>
@@ -781,9 +851,6 @@ const Backtest = () => {
                       <span className="text-xs text-muted-foreground">
                         {(r.config as any)?.symbols?.join(', ')}
                       </span>
-                      {(r.config as any)?.sideFilter && (
-                        <Badge variant="outline" className="text-[9px]">{(r.config as any).sideFilter}</Badge>
-                      )}
                     </div>
                     <div className="flex items-center gap-3 text-xs">
                       {r.summary && (
@@ -816,7 +883,7 @@ const Backtest = () => {
                 Henüz backtest çalıştırılmadı. Yukarıdan sembol ve süre seçerek başlayın.
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Production gate mantığı ve exit stratejileri ile tarihsel replay
+                Event-driven candle replay — production pipeline ile tarihsel simülasyon
               </p>
             </CardContent>
           </Card>
