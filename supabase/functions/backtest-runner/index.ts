@@ -47,6 +47,8 @@ interface BacktestConfig {
   barInterval: string;
   strategyDirectionFilters?: StrategyDirectionFilter[];
   sideFilter?: 'LONG' | 'SHORT';
+  btcLongQualityMin?: number;       // Override BTC LONG quality threshold
+  btcLongDisabled?: boolean;         // Completely disable BTC LONGs
 }
 
 interface BacktestTrade {
@@ -1046,6 +1048,30 @@ async function backtestSymbol(
           continue;
         }
 
+        // ===== BTC LONG ROUTING (Production Parity) =====
+        const isBtcLong = BTC_PARAMS.symbols.includes(symbol) && gateResult.direction === 'LONG';
+        if (isBtcLong) {
+          // Scenario B: BTC LONG completely disabled
+          if (config.btcLongDisabled) {
+            gateStats['BTC_LONG_DISABLED'] = (gateStats['BTC_LONG_DISABLED'] || 0) + 1;
+            continue;
+          }
+          // Scenario A: BTC LONG quality threshold override
+          const btcLongQualityMin = config.btcLongQualityMin ?? BTC_PARAMS.longStrategyRouting?.qualityScoreMin ?? 45;
+          if (gateResult.qualityScore < btcLongQualityMin) {
+            gateStats[`BTC_LONG_QUALITY_BLOCKED_Q${gateResult.qualityScore}`] = (gateStats[`BTC_LONG_QUALITY_BLOCKED_Q${gateResult.qualityScore}`] || 0) + 1;
+            gateStats['BTC_LONG_QUALITY_BLOCKED_TOTAL'] = (gateStats['BTC_LONG_QUALITY_BLOCKED_TOTAL'] || 0) + 1;
+            continue;
+          }
+          // Strategy routing check
+          if (BTC_PARAMS.longStrategyRouting?.enabled && 
+              !BTC_PARAMS.longStrategyRouting.enabledStrategies.includes(gateResult.strategyName)) {
+            gateStats[`BTC_LONG_ROUTING_${gateResult.strategyName}_BLOCKED`] = (gateStats[`BTC_LONG_ROUTING_${gateResult.strategyName}_BLOCKED`] || 0) + 1;
+            continue;
+          }
+        }
+
+        // ===== BTC SHORT ROUTING =====
         const isBtcShortRouting = BTC_PARAMS.symbols.includes(symbol) &&
           gateResult.direction === 'SHORT' &&
           BTC_PARAMS.shortStrategyRouting.enabled;
@@ -1366,6 +1392,8 @@ serve(async (req) => {
       barInterval: body.barInterval || '1h',
       strategyDirectionFilters: body.strategyDirectionFilters || undefined,
       sideFilter: body.sideFilter || undefined,
+      btcLongQualityMin: body.btcLongQualityMin ?? undefined,
+      btcLongDisabled: body.btcLongDisabled ?? undefined,
     };
 
     const parsedStart = new Date(config.startDate);
