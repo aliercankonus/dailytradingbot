@@ -368,12 +368,12 @@ export const BTC_PARAMS = {
   // bandwidth < 2 = very tight, bandwidth 3-4 = marginal squeeze
   squeezeDepthFilter: {
     enabled: true,
-    maxBandwidth: 3.5,              // Block if bandwidth > 3.5% (too shallow for breakout)
+    maxBandwidth: 3.0,              // Tightened 3.5→3.0: shallow squeezes have no edge (stop_loss drag)
     // Position sizing based on squeeze quality
     deepSqueezeBonusBandwidth: 2.0, // bandwidth < 2.0 = very tight = bonus
-    deepSqueezeBonusMultiplier: 1.15, // 15% bigger position for deep squeezes
-    shallowPenaltyBandwidth: 3.0,   // 3.0-3.5 range = penalized
-    shallowPenaltyMultiplier: 0.60, // 40% smaller position for shallow squeezes
+    deepSqueezeBonusMultiplier: 1.20, // 20% bigger position for deep squeezes (was 15%)
+    shallowPenaltyBandwidth: 2.5,   // Tightened 3.0→2.5: penalize earlier
+    shallowPenaltyMultiplier: 0.50, // 50% smaller position for shallow squeezes (was 60%)
   },
   // ============= VOLUME EXPANSION FILTER =============
   // DISABLED for calibration — re-enable after squeeze depth tuning
