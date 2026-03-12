@@ -1251,10 +1251,6 @@ serve(async (req) => {
       startDate,
       endDate,
       barInterval: body.barInterval || '1h',
-      sideFilter: body.sideFilter || null,
-      enabledStrategies: body.enabledStrategies || null,
-      strongTrendFilters: body.strongTrendFilters || false,
-      exitOverrides: body.exitOverrides || undefined,
     };
 
     const parsedStart = new Date(config.startDate);
