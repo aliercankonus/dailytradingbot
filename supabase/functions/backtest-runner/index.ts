@@ -10,6 +10,7 @@ import { createLogger, LOG_CATEGORIES } from "../_shared/logging.ts";
 import {
   ADX_THRESHOLDS, TRADING_FEE_PARAMS,
   getSymbolParams, BTC_PARAMS, ALTCOIN_PARAMS,
+  DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES,
 } from "../_shared/constants.ts";
 import { calculateFeeAwarePnL } from "../_shared/exit-strategies.ts";
 import { calculateMomentumScore, type MomentumScoreResult } from "../_shared/smart-momentum.ts";
