@@ -8,6 +8,7 @@ import {
   ADX_THRESHOLDS, ADX_GATE, STOCHRSI_THRESHOLDS,
   QUALITY_THRESHOLDS, TRADING_FEE_PARAMS,
   getSymbolParams, BTC_PARAMS,
+  DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES,
 } from "./constants.ts";
 import { calculateQualityScore } from "./scoring.ts";
 import {
