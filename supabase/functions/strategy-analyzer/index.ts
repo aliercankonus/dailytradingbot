@@ -19661,7 +19661,8 @@ serve(async (req) => {
             }
             continue;
           }
-        }
+          } // close strategy routing when enabled
+        } // close BTC LONG block
 
         // ===== ALTCOIN STRATEGY ROUTING (Production) =====
         // Block non-safe strategies for all altcoins (both LONG and SHORT)
