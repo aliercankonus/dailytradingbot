@@ -1,7 +1,9 @@
-# STRONG_TREND Directional Alignment Gate
+# STRONG_TREND Asymmetric Directional Alignment Gate
 
 ## Purpose
-Block counter-trend entries in the STRONG_TREND strategy where trade direction opposes the macro (primaryTrend) direction.
+Asymmetric directional filter for STRONG_TREND strategy:
+- **Counter-trend LONG → Hard block** (18.2% WR, 0 TP hits)
+- **Counter-trend SHORT → 0.40x size reduction** (profitable in pullback scalps)
 
 ## Problem Solved
 90-day backtest revealed a critical directional asymmetry:
