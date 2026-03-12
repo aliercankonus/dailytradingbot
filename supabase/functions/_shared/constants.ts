@@ -4860,7 +4860,7 @@ export const FOUR_STATE_REGIME = {
     // When regime is old AND ADX slope is declining, the move is exhausted — hard block new entries
     HARD_BLOCK_ENABLED: true,
     HARD_BLOCK_AGE_CANDLES: 45,        // RELAXED: Was 35 — crypto trends routinely last 12-18h (45 candles on 15m)
-    HARD_BLOCK_MAX_ADX_SLOPE: -0.30,   // RELAXED: Was -0.15 — allow more slope decay before hard-blocking
+    HARD_BLOCK_MAX_ADX_SLOPE: -0.50,   // RELAXED: Was -0.30 — exhaustion phase slope typically -0.3 to -0.6, allow more decay before blocking
     HARD_BLOCK_REASON: 'REGIME_AGE_EXHAUSTED',
     
     // ===== FRESH REGIME BONUS: Reward early entries =====
@@ -6183,13 +6183,13 @@ export const MEAN_REVERSION_CONFIG = {
     
     // ===== K RANGE (Non-overlapping with Extreme tier) =====
     LONG_K_MIN: 10,               // Must be > Extreme tier threshold
-    LONG_K_MAX: 15,               // Upper bound before noise zone
-    SHORT_K_MIN: 85,              // Symmetric for shorts
+    LONG_K_MAX: 18,               // RELAXED: Was 15 — crypto bounce zone typically K=8-18, expanded to capture more setups
+    SHORT_K_MIN: 82,              // RELAXED: Was 85 — symmetric with LONG_K_MAX expansion
     SHORT_K_MAX: 90,              // Must be < Extreme tier threshold
     
     // ===== MOMENTUM GATING (Critical safety) =====
     // Prevents entries when momentum is still bearish/opposing
-    MIN_MOMENTUM_SCORE: 40,       // Must have positive momentum tilt
+    MIN_MOMENTUM_SCORE: 25,       // RELAXED: Was 40 — exhaustion momentum typically 20-40, floor lowered to capture probes
     REQUIRE_ALIGNED_MOMENTUM: true, // Momentum direction must match trade direction
     
     // ===== ADX CONDITIONS (Dual-path) =====
@@ -7097,8 +7097,8 @@ export const EXHAUSTION_REVERSAL_OVERRIDE_PARAMS = {
   
   // ===== STOCHRSI THRESHOLDS =====
   // StochRSI 4h K thresholds for exhaustion detection
-  LONG_K_THRESHOLD: 10,           // K <= 10 for LONG override (deep oversold)
-  SHORT_K_THRESHOLD: 90,          // K >= 90 for SHORT override (deep overbought)
+  LONG_K_THRESHOLD: 12,           // RELAXED: Was 10 — expanded to capture K=10-12 bounce zone
+  SHORT_K_THRESHOLD: 88,          // RELAXED: Was 90 — symmetric with LONG expansion
   
   // ===== ABSOLUTE EXTREME STOCHRSI (K >= 98 or K <= 2) =====
   // When K is at absolute statistical extreme, allow exhaustion override in EARLY_TREND regime
