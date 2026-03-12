@@ -420,8 +420,8 @@ export function checkProductionExits(
   const hoursHeld = (currentTimestamp - entryTime) / (1000 * 60 * 60);
   if (hoursHeld > 24) return { shouldExit: true, exitReason: 'time_stop_24h' };
 
-  // 9. Moderate exhaustion exit (exempt SQUEEZE_BREAKOUT — forensic: cuts winners short)
-  if (position.strategyName !== 'SQUEEZE_BREAKOUT' && position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
+  // 9. Moderate exhaustion exit
+  if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
 
   // 10. Momentum reversal exit
   const symParams = getSymbolParams(position.symbol);
