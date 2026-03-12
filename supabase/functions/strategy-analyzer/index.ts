@@ -19608,6 +19608,40 @@ serve(async (req) => {
               gate: 'BTC_LONG_STRATEGY_ROUTING' as GateType, 
               details: `${strategy.name} blocked for BTC LONG` 
             });
+            // ===== SHADOW LOG: Track routing-blocked strategies =====
+            try {
+              const _dedupSkipRoute = await isShadowSignalDuplicate(supabase as any, userId, symbol, signalType, `ROUTING_BLOCKED_${strategy.name}`);
+              if (!_dedupSkipRoute) {
+                const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, signalType as 'long' | 'short');
+                await supabase.from('shadow_mode_signals').insert({
+                  user_id: userId, symbol, signal_type: signalType,
+                  strategy_name: strategy.name,
+                  old_gate_result: 'WOULD_EXECUTE',
+                  new_gate_result: 'ROUTING_BLOCKED',
+                  gate_blocked_by: `ROUTING_BLOCKED_${strategy.name}`,
+                  confidence_score: adjustedConfidence,
+                  entry_price: _shadowSLTP.entry,
+                  stop_loss: _shadowSLTP.sl,
+                  take_profit: _shadowSLTP.tp,
+                  old_position_multiplier: 1.0,
+                  new_position_multiplier: signal.indicators?.positionSizePercent || strategyPositionSize,
+                  trend: trendData?.primaryTrend || null,
+                  gate_details: {
+                    gate: 'BTC_LONG_STRATEGY_ROUTING',
+                    blockedStrategy: strategy.name,
+                    regime: fourStateRegime?.regime,
+                    adx: adx,
+                    adxSlope: fullAdxResult?.adxSlope,
+                    momentumScore: momentumScore,
+                    stochK: stochRsi4h?.k,
+                  },
+                  indicators: signal.indicators,
+                });
+                logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 ROUTING_SHADOW: ${strategy.name} logged to shadow for BTC LONG`);
+              }
+            } catch (shadowErr) {
+              logger.forSymbol(symbol).warn(`Shadow insert failed for routing block: ${shadowErr}`);
+            }
             continue;
           }
         }
