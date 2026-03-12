@@ -339,9 +339,9 @@ export const BTC_PARAMS = {
     atrExpansionMultiplier: 1.05, // ATR must be 5% above previous (filters false breakouts)
     // Wider trailing for SQUEEZE_BREAKOUT (fast trend moves)
     squeezeBreakoutTrailing: {
-      activationPercent: 0.8,       // Activate trailing earlier (0.8% vs 1.5%)
-      trailDistanceAtr: 2.5,       // Wider trail distance (2.5x ATR)
-      minTrailFloor: 0.50,         // Minimum trail floor
+      activationPercent: 0.6,       // Earlier activation (0.6% vs 0.8%) — let trailing protect gains sooner
+      trailDistanceAtr: 2.7,       // Wider trail distance (2.7x ATR) — give squeeze moves room to breathe
+      minTrailFloor: 0.40,         // Lower minimum trail floor (0.40% vs 0.50%) — catch more of the move
     },
   },
   // ============= BTC LONG PRODUCTION STRATEGY ROUTING =============
@@ -368,12 +368,12 @@ export const BTC_PARAMS = {
   // bandwidth < 2 = very tight, bandwidth 3-4 = marginal squeeze
   squeezeDepthFilter: {
     enabled: true,
-    maxBandwidth: 3.5,              // Block if bandwidth > 3.5% (too shallow for breakout)
+    maxBandwidth: 3.0,              // Tightened 3.5→3.0: shallow squeezes have no edge (stop_loss drag)
     // Position sizing based on squeeze quality
     deepSqueezeBonusBandwidth: 2.0, // bandwidth < 2.0 = very tight = bonus
-    deepSqueezeBonusMultiplier: 1.15, // 15% bigger position for deep squeezes
-    shallowPenaltyBandwidth: 3.0,   // 3.0-3.5 range = penalized
-    shallowPenaltyMultiplier: 0.60, // 40% smaller position for shallow squeezes
+    deepSqueezeBonusMultiplier: 1.20, // 20% bigger position for deep squeezes (was 15%)
+    shallowPenaltyBandwidth: 2.5,   // Tightened 3.0→2.5: penalize earlier
+    shallowPenaltyMultiplier: 0.50, // 50% smaller position for shallow squeezes (was 60%)
   },
   // ============= VOLUME EXPANSION FILTER =============
   // DISABLED for calibration — re-enable after squeeze depth tuning

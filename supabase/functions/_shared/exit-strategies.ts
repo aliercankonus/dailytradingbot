@@ -199,6 +199,10 @@ export function evaluateMicroProfitLock(
   const noLock: ProfitLockResult = { applied: false, newStopLoss: null, lockType: "none", tierLabel: "" };
 
   if (!MICRO_PROFIT_LOCK_PARAMS.ENABLED) return noLock;
+  // SQUEEZE_BREAKOUT exemption: micro profit locks cut squeeze winners short.
+  // Forensic evidence: 7 micro_profit_lock exits averaged -0.04% PnL, while
+  // take_profit exits averaged +1.95%. Let squeeze trades run to TP/trailing.
+  if (position.strategy_name === 'SQUEEZE_BREAKOUT') return noLock;
   if (newPeakPnl <= 0 || newPeakPnl >= MICRO_PROFIT_LOCK_PARAMS.HANDOFF_THRESHOLD) return noLock;
   if (position.stop_loss === null) return noLock;
 
