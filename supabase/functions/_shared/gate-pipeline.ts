@@ -231,7 +231,9 @@ export function evaluateProductionGates(
   // Strategy classification
   let strategyName = 'TREND_CONTINUATION';
   if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
-  if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
+  // MOMENTUM_ACCELERATION disabled: 14 trades, -5.52% PnL, breakout chase pattern.
+  // Accelerating momentum is reclassified into its base strategy (STRONG_TREND or TREND_CONTINUATION).
+  // if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
 
   // GATE: STRONG_TREND Directional Alignment
   // Backtest-proven: counter-trend LONG has 18.2% WR (0 TP hits) → hard block.
