@@ -6183,7 +6183,7 @@ export const MEAN_REVERSION_CONFIG = {
     
     // ===== K RANGE (Non-overlapping with Extreme tier) =====
     LONG_K_MIN: 10,               // Must be > Extreme tier threshold
-    LONG_K_MAX: 15,               // Upper bound before noise zone
+    LONG_K_MAX: 18,               // RELAXED: Was 15 — crypto bounce zone typically K=8-18, expanded to capture more setups
     SHORT_K_MIN: 85,              // Symmetric for shorts
     SHORT_K_MAX: 90,              // Must be < Extreme tier threshold
     
