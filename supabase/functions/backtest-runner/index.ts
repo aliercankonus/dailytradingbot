@@ -33,11 +33,19 @@ const corsHeaders = {
 
 // ============= TYPES =============
 
+interface StrategyDirectionFilter {
+  strategy: string;
+  blockedSide?: 'LONG' | 'SHORT';
+  reducedSide?: 'LONG' | 'SHORT';
+  reducedMultiplier?: number;
+}
+
 interface BacktestConfig {
   symbols: string[];
   startDate: string;
   endDate: string;
   barInterval: string;
+  strategyDirectionFilters?: StrategyDirectionFilter[];
 }
 
 interface BacktestTrade {
