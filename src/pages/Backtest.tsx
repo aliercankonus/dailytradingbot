@@ -672,6 +672,11 @@ const Backtest = () => {
               )}
             </div>
 
+            {/* Regime × Strategy Performance Matrix */}
+            {trades.length > 0 && (
+              <RegimePerformanceMatrix trades={trades} />
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Gate Rejection Breakdown Chart */}
               {sortedGates.length > 0 && (
