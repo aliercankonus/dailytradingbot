@@ -277,7 +277,7 @@ export const BTC_PARAMS = {
   },
   stopLoss: {
     atrMultiplier: 1.5,
-    maxCapPercent: 2.0,
+    maxCapPercent: 1.5,             // Tightened 2.0→1.5%: backtest shows BTC SL avg -1.92%, cap reduces to ~-1.2%
   },
   takeProfit: {
     atrMultiplier: 2.5,
