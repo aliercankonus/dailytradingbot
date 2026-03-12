@@ -10,6 +10,7 @@ import { createLogger, LOG_CATEGORIES } from "../_shared/logging.ts";
 import {
   ADX_THRESHOLDS, TRADING_FEE_PARAMS,
   getSymbolParams, BTC_PARAMS, ALTCOIN_PARAMS,
+  DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES,
 } from "../_shared/constants.ts";
 import { calculateFeeAwarePnL } from "../_shared/exit-strategies.ts";
 import { calculateMomentumScore, type MomentumScoreResult } from "../_shared/smart-momentum.ts";
@@ -1098,9 +1099,21 @@ async function backtestSymbol(
         }
 
         const symP = getSymbolParams(symbol);
-        const slMultiplier = symP.stopLoss.atrMultiplier;
+        // Strategy-specific SL override
+        const stratOverride = STRATEGY_SL_OVERRIDES[gateResult.strategyName];
+        const slMultiplier = stratOverride?.atrMultiplier ?? symP.stopLoss.atrMultiplier;
         const tpMultiplier = symP.takeProfit.atrMultiplier;
-        const maxSlPercent = symP.stopLoss.maxCapPercent;
+        let maxSlPercent = stratOverride?.maxCapOverride ?? symP.stopLoss.maxCapPercent;
+        
+        // Dynamic SL tightening for high ATR regimes
+        if (DYNAMIC_SL_PARAMS.ENABLED) {
+          if (atrPercent > DYNAMIC_SL_PARAMS.EXTREME_ATR_THRESHOLD_PERCENT) {
+            maxSlPercent *= DYNAMIC_SL_PARAMS.EXTREME_ATR_CAP_MULTIPLIER;
+          } else if (atrPercent > DYNAMIC_SL_PARAMS.HIGH_ATR_THRESHOLD_PERCENT) {
+            maxSlPercent *= DYNAMIC_SL_PARAMS.HIGH_ATR_CAP_MULTIPLIER;
+          }
+        }
+        
         const dir = gateResult.direction;
         const atrStop = atr * slMultiplier;
         const maxStop = currentPrice * (maxSlPercent / 100);

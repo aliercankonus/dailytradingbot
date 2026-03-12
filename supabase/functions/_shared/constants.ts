@@ -277,7 +277,7 @@ export const BTC_PARAMS = {
   },
   stopLoss: {
     atrMultiplier: 1.5,
-    maxCapPercent: 2.0,
+    maxCapPercent: 1.5,             // Tightened 2.0→1.5%: backtest shows BTC SL avg -1.92%, cap reduces to ~-1.2%
   },
   takeProfit: {
     atrMultiplier: 2.5,
@@ -405,7 +405,7 @@ export const ALTCOIN_PARAMS = {
   },
   stopLoss: {
     atrMultiplier: 1.0,             // Much tighter for altcoin volatility
-    maxCapPercent: 1.2,             // Hard cap at 1.2%
+    maxCapPercent: 1.0,             // Tightened 1.2→1.0%: ETH SL losses exceeded cap due to gaps, -4.27% worst case
   },
   takeProfit: {
     atrMultiplier: 1.8,             // Narrower TP — take profits faster
@@ -459,6 +459,36 @@ export function getSymbolParams(symbol: string) {
   if (BTC_PARAMS.symbols.includes(symbol)) return BTC_PARAMS;
   return ALTCOIN_PARAMS;
 }
+
+// ============= DYNAMIC STOP LOSS TIGHTENING =============
+// When ATR% is elevated (>2%), gaps and slippage cause SL hits to exceed maxCapPercent.
+// This dynamically tightens the cap during high-volatility regimes.
+// Forensic basis: 90-day backtest showed -4.27% ETH loss at 1.2% cap, -2.04% avg STRONG_TREND loss.
+export const DYNAMIC_SL_PARAMS = {
+  ENABLED: true,
+  // ATR% threshold above which dynamic tightening activates
+  HIGH_ATR_THRESHOLD_PERCENT: 2.0,
+  // Multiplier applied to maxCapPercent when ATR% > threshold
+  HIGH_ATR_CAP_MULTIPLIER: 0.75,   // maxCap * 0.75 in high-vol regimes
+  // Very high ATR (extreme vol) — even tighter
+  EXTREME_ATR_THRESHOLD_PERCENT: 3.5,
+  EXTREME_ATR_CAP_MULTIPLIER: 0.60, // maxCap * 0.60 in extreme-vol regimes
+} as const;
+
+// ============= STRATEGY-SPECIFIC STOP LOSS OVERRIDES =============
+// Some strategies need tighter/wider SL than the symbol default.
+// Key finding: STRONG_TREND had 8 SL hits = -16.3% PnL (avg -2.04%).
+// Tighter ATR multiplier reduces avg loss without affecting winners.
+export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; maxCapOverride?: number }> = {
+  'STRONG_TREND': {
+    atrMultiplier: 0.8,             // 0.8x ATR (vs 1.0-1.5x default) — tighter invalidation
+    maxCapOverride: 1.2,            // Hard cap at 1.2% regardless of symbol
+  },
+  'TREND_CONTINUATION': {
+    atrMultiplier: 0.9,             // 0.9x ATR — moderate tightening
+  },
+  // SQUEEZE_BREAKOUT keeps symbol defaults — breakouts need room to breathe
+} as const;
 
 // ============= TRADING FEE PARAMETERS =============
 // Exchange trading fees for accurate P&L calculation
