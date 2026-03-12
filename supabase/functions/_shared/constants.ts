@@ -405,7 +405,7 @@ export const ALTCOIN_PARAMS = {
   },
   stopLoss: {
     atrMultiplier: 1.0,             // Much tighter for altcoin volatility
-    maxCapPercent: 1.2,             // Hard cap at 1.2%
+    maxCapPercent: 1.0,             // Tightened 1.2→1.0%: ETH SL losses exceeded cap due to gaps, -4.27% worst case
   },
   takeProfit: {
     atrMultiplier: 1.8,             // Narrower TP — take profits faster
