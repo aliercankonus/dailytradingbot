@@ -1064,6 +1064,7 @@ async function backtestSymbol(
           }
         }
 
+        const symP = getSymbolParams(symbol);
         const slMultiplier = symP.stopLoss.atrMultiplier;
         const tpMultiplier = symP.takeProfit.atrMultiplier;
         const maxSlPercent = symP.stopLoss.maxCapPercent;
