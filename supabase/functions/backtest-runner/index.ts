@@ -46,6 +46,7 @@ interface BacktestConfig {
   endDate: string;
   barInterval: string;
   strategyDirectionFilters?: StrategyDirectionFilter[];
+  sideFilter?: 'LONG' | 'SHORT';
 }
 
 interface BacktestTrade {
