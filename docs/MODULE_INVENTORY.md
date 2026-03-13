@@ -94,6 +94,17 @@ The trading bot operates through a modular architecture with strict regime-level
 | Momentum Exit Guard | Exit on momentum decay | `momentum_exit_guard_enabled` |
 | Decay Velocity Exit | Exit on rapid score decay | `decay_velocity_exit_enabled` |
 | Stale Peak Protection | Exit if peak unrevisited | `stale_peak_protection_enabled` |
+| MR Trailing TP | TP1=1.2% then trailing at 0.35% distance | `MR_TRAILING_TP` in `constants.ts` |
+
+---
+
+## Strategy Routing
+
+### OVEREXTENSION_REGIME_ADAPTIVE Symbol Routing
+- **Production**: BTCUSDT, SOLUSDT, BNBUSDT (shadow-validated: +9.67% combined)
+- **Shadow-only**: ETHUSDT, XRPUSDT, AVAXUSDT (negative edge: -6.55% combined)
+- **Config**: `OVEREXTENSION_SYMBOL_ROUTING` in `constants.ts`
+- **Sizing**: 50% position for production entries
 
 ---
 
