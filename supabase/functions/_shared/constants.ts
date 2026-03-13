@@ -2239,44 +2239,56 @@ export const REVERSAL_OVERRIDE_SAFETY = {
 export const EXHAUSTION_BOUNCE_RECOVERY = {
   ENABLED: true,
   
-  // ===== EXHAUSTION DETECTION =====
-  // ADX slope must be strongly negative (trend losing energy fast)
+  // ===== EXHAUSTION DETECTION (3-filter confluence) =====
+  // 1. ADX must still show meaningful trend energy (not just any slope)
+  MIN_ADX_FOR_EXHAUSTION: 25,
+  // 2. ADX slope must be strongly negative (trend losing energy fast)
   MAX_ADX_SLOPE_FOR_EXHAUSTION: -1.0,
+  // 3. Price must be overextended from EMA (real exhaustion, not just pullback)
+  MIN_OVEREXTENSION_ATR: 1.5,       // distance from EMA20 > 1.5x ATR
   // Regime should be TREND_EXHAUSTION (validates structural exhaustion)
   REQUIRE_EXHAUSTION_REGIME: true,
   // Valid regimes for bounce (exhaustion = most common, breakout_setup = transitioning)
   VALID_REGIMES: ['TREND_EXHAUSTION', 'BREAKOUT_SETUP'] as readonly string[],
   
-  // ===== OVERSOLD BOUNCE DETECTION =====
+  // ===== OVERSOLD BOUNCE CONFIRMATION =====
   // StochRSI K must be below this to qualify (deeply oversold)
   MAX_STOCHRSI_K_FOR_BOUNCE: 20,
-  // K must be above D (momentum turning up) — optional but strengthens signal
-  PREFER_K_ABOVE_D: true,
-  // If K < D still allowed when K is very deep (< this threshold)
-  DEEP_OVERSOLD_SKIP_K_ABOVE_D: 10,
+  // K MUST be above D (momentum turning up) — REQUIRED for bounce confirmation
+  // oversold ≠ bounce; recovery = bounce (K crossing up = momentum shift)
+  REQUIRE_K_ABOVE_D: true,
+  // Only skip K>D requirement when K is extremely deep (capitulation)
+  DEEP_OVERSOLD_SKIP_K_ABOVE_D: 8,
   
-  // ===== POSITION SIZING =====
-  // Conservative probe sizing — this is a counter-trend entry
-  POSITION_MULTIPLIER: 0.35,       // 35% of normal position
-  // Higher quality bounce = larger position
-  HIGH_QUALITY_MULTIPLIER: 0.50,   // When regime confidence is high
+  // ===== POSITION SIZING (conservative counter-trend) =====
+  POSITION_MULTIPLIER: 0.25,        // 25% of normal — counter-trend scalp
+  HIGH_QUALITY_MULTIPLIER: 0.35,    // 35% when reversal score confirms
   HIGH_QUALITY_MIN_REVERSAL_SCORE: 60,
   
   // ===== STOP LOSS =====
-  // Tight SL: use recent low as reference
-  STOP_LOSS_ATR_MULTIPLIER: 0.8,   // 0.8x ATR below entry
-  // Hard cap on SL distance
-  MAX_SL_PERCENT: 1.5,
+  STOP_LOSS_ATR_MULTIPLIER: 0.8,    // 0.8x ATR below entry
+  MAX_SL_PERCENT: 1.2,              // Hard cap tighter for counter-trend
   
-  // ===== TAKE PROFIT =====
-  // TP1 at EMA20, TP2 at EMA50 (mean reversion target)
-  TP_ATR_MULTIPLIER: 1.5,          // 1.5x ATR for TP
+  // ===== TAKE PROFIT (scalp bounce — short TP) =====
+  TP_ATR_MULTIPLIER: 1.0,           // 1.0x ATR — scalp target, not swing
+  MAX_TP_PERCENT: 1.5,              // Hard cap on TP — don't overshoot bounce
   
   // ===== STRATEGY NAME =====
   STRATEGY_NAME: 'EXHAUSTION_BOUNCE' as const,
   
   // ===== LOGGING =====
   LOG_DETECTIONS: true,
+} as const;
+
+// ============= GATE CONFLICT DETECTOR =============
+// Monitors gate deadlock: when BOTH long AND short are blocked simultaneously
+// Tracks frequency to detect systematic rule conflicts
+export const GATE_CONFLICT_DETECTOR = {
+  ENABLED: true,
+  // If both_blocked rate exceeds this %, log WARNING
+  DEADLOCK_WARNING_THRESHOLD_PERCENT: 50,
+  // Log every N cycles regardless
+  LOG_EVERY_N_CYCLES: 10,
 } as const;
 
 // ============= PHASE 1 FIX: BREAKOUT DEFINITION THRESHOLDS =============
