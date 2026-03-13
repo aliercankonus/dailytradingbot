@@ -409,3 +409,70 @@ export function getStalePeakBonus(minutesSincePeak: number, enabled: boolean): n
   }
   return 0;
 }
+
+// ──────────────────────────────────────────────
+// 6) MEAN REVERSION TRAILING TP
+// ──────────────────────────────────────────────
+// Shadow data: MR avg win 1.19%, R/R 1.09 → trailing TP captures extended moves
+// TP1 = 1.2% → activate trailing stop at 0.35% distance from peak
+
+export interface MRTrailingTPResult {
+  shouldActivateTrailing: boolean;
+  suggestedStopLoss: number | null;
+  trailingActive: boolean;
+  lockPercent: number;
+}
+
+export function evaluateMRTrailingTP(
+  position: PositionContext,
+  market: MarketContext,
+): MRTrailingTPResult {
+  const noResult: MRTrailingTPResult = {
+    shouldActivateTrailing: false,
+    suggestedStopLoss: null,
+    trailingActive: false,
+    lockPercent: 0,
+  };
+
+  if (!MR_TRAILING_TP.ENABLED) return noResult;
+  
+  // Only apply to MR strategies
+  const strategyName = position.strategy_name || '';
+  const isApplicable = (MR_TRAILING_TP.APPLICABLE_STRATEGIES as readonly string[]).some(
+    s => strategyName.includes(s)
+  );
+  if (!isApplicable) return noResult;
+
+  // Check if PnL has reached TP1 threshold
+  if (market.pnlPercent < MR_TRAILING_TP.TP1_PERCENT) return noResult;
+
+  // TP1 reached — activate trailing stop
+  const peakPnl = Math.max(position.peak_pnl_percent, market.pnlPercent);
+  const trailingDistance = MR_TRAILING_TP.TRAILING_DISTANCE_PERCENT;
+  const lockLevel = Math.max(MR_TRAILING_TP.MIN_LOCK_PERCENT, peakPnl - trailingDistance);
+
+  // Calculate stop loss price from lock level
+  const lockPriceOffset = position.entry_price * (lockLevel / 100);
+  let suggestedStopLoss: number;
+
+  if (position.side === "BUY") {
+    suggestedStopLoss = position.entry_price + lockPriceOffset;
+  } else {
+    suggestedStopLoss = position.entry_price - lockPriceOffset;
+  }
+
+  // Only apply if it's tighter than current stop
+  const currentSL = position.stop_loss || (position.side === "BUY" ? 0 : Infinity);
+  const isTighter = position.side === "BUY"
+    ? suggestedStopLoss > currentSL
+    : suggestedStopLoss < currentSL;
+
+  if (!isTighter) return noResult;
+
+  return {
+    shouldActivateTrailing: true,
+    suggestedStopLoss,
+    trailingActive: true,
+    lockPercent: lockLevel,
+  };
+}
