@@ -12158,8 +12158,12 @@ serve(async (req) => {
           }
           
           // SAFETY GATE 2: Check unified reversal score (must be high enough to justify reversal)
-          if (unifiedReversal.score < REVERSAL_OVERRIDE_SAFETY.MIN_REVERSAL_SCORE) {
-            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: Reversal score ${unifiedReversal.score} < ${REVERSAL_OVERRIDE_SAFETY.MIN_REVERSAL_SCORE}`);
+          // EXCEPTION: Exhaustion bounce candidates get relaxed reversal score requirement
+          const effectiveMinReversalScore = isExhaustionBounceCandidate 
+            ? Math.max(REVERSAL_OVERRIDE_SAFETY.MIN_REVERSAL_SCORE - 25, 30)
+            : REVERSAL_OVERRIDE_SAFETY.MIN_REVERSAL_SCORE;
+          if (unifiedReversal.score < effectiveMinReversalScore) {
+            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: Reversal score ${unifiedReversal.score} < ${effectiveMinReversalScore}${isExhaustionBounceCandidate ? ' (exhaustion-relaxed)' : ''}`);
             return false;
           }
           
