@@ -12137,9 +12137,23 @@ serve(async (req) => {
         // Block reversal overrides in strong trends or when HTF is strongly aligned against
         const isSafeForReversal = (() => {
           // SAFETY GATE 1: No reversals in strong trends (ADX >= 30)
+          // EXCEPTION: Allow reversal when trend is EXHAUSTING (high ADX but slope strongly negative)
+          // This catches bounce opportunities when bearish/bullish trends are dying
+          const currentAdxSlope = fullAdxResult?.adxSlope ?? 0;
+          const isExhaustionBounceCandidate = 
+            currentAdxSlope < EXHAUSTION_BOUNCE_RECOVERY.MAX_ADX_SLOPE_FOR_EXHAUSTION &&
+            EXHAUSTION_BOUNCE_RECOVERY.ENABLED &&
+            stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.MAX_STOCHRSI_K_FOR_BOUNCE &&
+            (!EXHAUSTION_BOUNCE_RECOVERY.REQUIRE_EXHAUSTION_REGIME || 
+              EXHAUSTION_BOUNCE_RECOVERY.VALID_REGIMES.includes(fourStateRegime?.regime || ''));
+          
           if (adx >= REVERSAL_OVERRIDE_SAFETY.MAX_ADX_FOR_REVERSAL) {
-            logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: ADX=${adx.toFixed(1)} >= ${REVERSAL_OVERRIDE_SAFETY.MAX_ADX_FOR_REVERSAL} (strong trend)`);
-            return false;
+            if (isExhaustionBounceCandidate) {
+              logger.forSymbol(symbol).info(`[REVERSAL_SAFETY] 🔄 EXHAUSTION BOUNCE EXEMPTION: ADX=${adx.toFixed(1)} >= ${REVERSAL_OVERRIDE_SAFETY.MAX_ADX_FOR_REVERSAL} BUT slope=${currentAdxSlope.toFixed(2)}, K=${stochRsiK4h.toFixed(1)}, regime=${fourStateRegime?.regime} → allowing reversal`);
+            } else {
+              logger.forSymbol(symbol).debug(`[REVERSAL_SAFETY] Blocked: ADX=${adx.toFixed(1)} >= ${REVERSAL_OVERRIDE_SAFETY.MAX_ADX_FOR_REVERSAL} (strong trend, slope=${currentAdxSlope.toFixed(2)})`);
+              return false;
+            }
           }
           
           // SAFETY GATE 2: Check unified reversal score (must be high enough to justify reversal)

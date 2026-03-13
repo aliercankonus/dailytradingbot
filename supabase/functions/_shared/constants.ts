@@ -2227,6 +2227,58 @@ export const REVERSAL_OVERRIDE_SAFETY = {
   MIN_REQUIRED_RR: 2.2,
 } as const;
 
+// ============= EXHAUSTION BOUNCE RECOVERY =============
+// When bearish trend is EXHAUSTING (ADX high but slope strongly negative) AND price is deeply
+// oversold, the bounce IS the trade. This exempts bounce LONGs from the MACRO_BIAS gate and
+// the reversal safety ADX gate.
+// Forensic evidence: 5+ days of zero trades during 3-4% bounce because:
+//   1. MACRO_BIAS blocks LONG (bearish trend)
+//   2. StochRSI oversold blocks SHORT (K < 15)
+//   3. Reversal safety blocks reversal (ADX >= 30)
+// Result: DEADLOCK — bot does nothing while market moves
+export const EXHAUSTION_BOUNCE_RECOVERY = {
+  ENABLED: true,
+  
+  // ===== EXHAUSTION DETECTION =====
+  // ADX slope must be strongly negative (trend losing energy fast)
+  MAX_ADX_SLOPE_FOR_EXHAUSTION: -1.0,
+  // Regime should be TREND_EXHAUSTION (validates structural exhaustion)
+  REQUIRE_EXHAUSTION_REGIME: true,
+  // Valid regimes for bounce (exhaustion = most common, breakout_setup = transitioning)
+  VALID_REGIMES: ['TREND_EXHAUSTION', 'BREAKOUT_SETUP'] as readonly string[],
+  
+  // ===== OVERSOLD BOUNCE DETECTION =====
+  // StochRSI K must be below this to qualify (deeply oversold)
+  MAX_STOCHRSI_K_FOR_BOUNCE: 20,
+  // K must be above D (momentum turning up) — optional but strengthens signal
+  PREFER_K_ABOVE_D: true,
+  // If K < D still allowed when K is very deep (< this threshold)
+  DEEP_OVERSOLD_SKIP_K_ABOVE_D: 10,
+  
+  // ===== POSITION SIZING =====
+  // Conservative probe sizing — this is a counter-trend entry
+  POSITION_MULTIPLIER: 0.35,       // 35% of normal position
+  // Higher quality bounce = larger position
+  HIGH_QUALITY_MULTIPLIER: 0.50,   // When regime confidence is high
+  HIGH_QUALITY_MIN_REVERSAL_SCORE: 60,
+  
+  // ===== STOP LOSS =====
+  // Tight SL: use recent low as reference
+  STOP_LOSS_ATR_MULTIPLIER: 0.8,   // 0.8x ATR below entry
+  // Hard cap on SL distance
+  MAX_SL_PERCENT: 1.5,
+  
+  // ===== TAKE PROFIT =====
+  // TP1 at EMA20, TP2 at EMA50 (mean reversion target)
+  TP_ATR_MULTIPLIER: 1.5,          // 1.5x ATR for TP
+  
+  // ===== STRATEGY NAME =====
+  STRATEGY_NAME: 'EXHAUSTION_BOUNCE' as const,
+  
+  // ===== LOGGING =====
+  LOG_DETECTIONS: true,
+} as const;
+
 // ============= PHASE 1 FIX: BREAKOUT DEFINITION THRESHOLDS =============
 // Tighter breakout definition to prevent late entries
 export const BREAKOUT_THRESHOLDS = {

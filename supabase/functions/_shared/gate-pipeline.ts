@@ -145,8 +145,21 @@ export function evaluateProductionGates(
   // Forensic evidence: LONG PF=0.34 vs SHORT PF=1.42 over 90-day bearish regime.
   // ALL LONG strategies are net negative in bearish macro — no edge exists.
   // Block all LONG trades when primaryTrend is bearish; block all SHORT when bullish.
+  // EXCEPTION: Exhaustion Bounce Recovery — when bearish trend is exhausting from deep oversold,
+  // the bounce IS the trade. Allow LONG with reduced sizing.
   if (direction === 'LONG' && primaryTrend === 'bearish') {
-    return fail('MACRO_BIAS_LONG_BLOCKED');
+    const ebr = EXHAUSTION_BOUNCE_RECOVERY;
+    const isExhaustionBounce = ebr.ENABLED &&
+      stochK < ebr.MAX_STOCHRSI_K_FOR_BOUNCE &&
+      adxSlope < ebr.MAX_ADX_SLOPE_FOR_EXHAUSTION &&
+      (!ebr.REQUIRE_EXHAUSTION_REGIME || ebr.VALID_REGIMES.includes(mfs.regime || ''));
+    
+    if (isExhaustionBounce) {
+      adxPositionMultiplier = Math.min(adxPositionMultiplier, ebr.POSITION_MULTIPLIER);
+      logger.info(`🔄 EXHAUSTION_BOUNCE_RECOVERY: LONG allowed in bearish — K=${stochK.toFixed(1)}, ADX_slope=${adxSlope.toFixed(2)}, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
+    } else {
+      return fail('MACRO_BIAS_LONG_BLOCKED');
+    }
   }
   if (direction === 'SHORT' && primaryTrend === 'bullish') {
     return fail('MACRO_BIAS_SHORT_BLOCKED');
