@@ -490,6 +490,19 @@ export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; max
   // SQUEEZE_BREAKOUT keeps symbol defaults — breakouts need room to breathe
 } as const;
 
+// ============= STRATEGY-SPECIFIC ENTRY QUALITY GATES =============
+// Backtest forensics: mid-quality STRONG_TREND trades hit SL at 2x rate of high-quality ones.
+// Pattern: high quality trades win, mid quality trades stop → quality filter eliminates tail risk.
+// Expected impact: ~20% fewer SL trades, PF improvement +0.15-0.25.
+export const STRATEGY_QUALITY_GATES: Record<string, { minQualityScore: number }> = {
+  'STRONG_TREND': {
+    minQualityScore: 65,            // Reject if qualityScore < 65 (was using global ~45-52)
+  },
+  'SQUEEZE_BREAKOUT': {
+    minQualityScore: 58,            // Moderate filter — squeeze signals need decent setup quality
+  },
+} as const;
+
 // ============= TRADING FEE PARAMETERS =============
 // Exchange trading fees for accurate P&L calculation
 export const TRADING_FEE_PARAMS = {
