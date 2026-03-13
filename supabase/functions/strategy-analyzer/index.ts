@@ -11090,7 +11090,7 @@ serve(async (req) => {
               logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔬 OVEREXTENSION ATR BYPASS: trendAcceleration confirmed (ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, momentum=${smartMomentum.score.toFixed(0)}) — allowing 20% probe despite ${currentOverextensionAtr.toFixed(2)} ATR overextension`);
             }
           } else if (!isMRDirection) {
-            // Still log shadow for regime-adaptive tracking
+            // Regime-adaptive overextension thresholds
             const regimeAdaptiveThresholds: Record<string, number> = {
               'RANGE_COMPRESSION': 2.5,
               'BREAKOUT_SETUP': 3.2,
@@ -11100,7 +11100,22 @@ serve(async (req) => {
             const shadowThreshold = regimeAdaptiveThresholds[fourStateRegime.regime] ?? 3.0;
             const wouldPassWithAdaptive = currentOverextensionAtr <= shadowThreshold;
             
-            if (wouldPassWithAdaptive && shadowModeEnabled) {
+            // ===== OVEREXTENSION SYMBOL ROUTING (Shadow-validated) =====
+            // 130-day shadow data: BTC +5.17%, SOL +2.45%, BNB +2.05% → production
+            // ETH -3.49%, XRP -2.22%, AVAX -0.84% → shadow-only
+            const isProductionWhitelisted = (OVEREXTENSION_SYMBOL_ROUTING.PRODUCTION_WHITELIST as readonly string[]).includes(symbol);
+            
+            if (wouldPassWithAdaptive && isProductionWhitelisted && fourStateRegime.confidence >= OVEREXTENSION_SYMBOL_ROUTING.MIN_REGIME_CONFIDENCE) {
+              // PRODUCTION PATH: Allow trade for whitelisted symbols
+              moveExhaustionPositionMultiplier = Math.min(
+                moveExhaustionPositionMultiplier, 
+                OVEREXTENSION_SYMBOL_ROUTING.PRODUCTION_POSITION_MULTIPLIER
+              );
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🎯 OVEREXTENSION_REGIME_ADAPTIVE PRODUCTION: ${symbol} whitelisted, regime=${fourStateRegime.regime} conf=${fourStateRegime.confidence}, ATR=${currentOverextensionAtr.toFixed(2)}/${shadowThreshold} — allowing at ${(OVEREXTENSION_SYMBOL_ROUTING.PRODUCTION_POSITION_MULTIPLIER * 100).toFixed(0)}% position`);
+              // Override strategy name for tracking
+              (globalThis as any).__overextensionStrategyOverride = 'OVEREXTENSION_REGIME_ADAPTIVE';
+            } else if (wouldPassWithAdaptive && shadowModeEnabled) {
+              // SHADOW PATH: Log for non-whitelisted symbols
               try {
                 const _dedupSkipOE = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'OVEREXTENSION_ATR_BLOCK');
                 if (!_dedupSkipOE) {
@@ -11129,41 +11144,66 @@ serve(async (req) => {
                       adxSlope: parseFloat(adxSlope.toFixed(3)),
                       momentumScore: parseFloat(smartMomentum.score.toFixed(1)),
                       regimeConfidence: fourStateRegime.confidence,
+                      routingDecision: isProductionWhitelisted ? 'LOW_REGIME_CONFIDENCE' : 'SHADOW_ONLY_SYMBOL',
                     },
                     trend: trendData?.trend || null,
                   });
-                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 OVEREXTENSION SHADOW: Would PASS with regime-adaptive threshold ${shadowThreshold}x (regime=${fourStateRegime.regime}, current=${currentOverextensionAtr.toFixed(2)} ATR, blocked at ${maxOverextensionAtr}x)`);
+                  logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} 🔮 OVEREXTENSION SHADOW: ${symbol} ${isProductionWhitelisted ? '(low confidence)' : '(shadow-only symbol)'} — regime=${fourStateRegime.regime}, ATR=${currentOverextensionAtr.toFixed(2)}/${shadowThreshold}`);
                 }
               } catch (shadowErr) {
                 logger.forSymbol(symbol).warn(`Shadow overextension log failed: ${shadowErr}`);
               }
+              
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'OVEREXTENSION_ATR_BLOCK', 
+                details: `overextATR=${currentOverextensionAtr.toFixed(2)} > ${maxOverextensionAtr}, ADX=${adx.toFixed(1)} (shadow: ${isProductionWhitelisted ? 'low_conf' : 'shadow_only'})` 
+              });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ OVEREXTENSION ATR BLOCK: ${currentOverextensionAtr.toFixed(2)} ATR > ${maxOverextensionAtr} — ${isProductionWhitelisted ? 'low regime confidence' : 'shadow-only symbol'}`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `OVEREXTENSION ATR: ${currentOverextensionAtr.toFixed(2)} ATR exceeds ${maxOverextensionAtr} — ${isProductionWhitelisted ? 'low regime conf' : 'shadow-only'}`,
+                {
+                  gate: "OVEREXTENSION_ATR_BLOCK",
+                  derivedDirection,
+                  overextensionATR: currentOverextensionAtr,
+                  maxOverextensionATR: maxOverextensionAtr,
+                  regime: fourStateRegime.regime,
+                  routingDecision: isProductionWhitelisted ? 'LOW_REGIME_CONFIDENCE' : 'SHADOW_ONLY_SYMBOL',
+                  adx: adx.toFixed(1),
+                  momentumScore: smartMomentum.score,
+                },
+                mfs,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
+            } else {
+              // Standard block (no adaptive pass)
+              rejectedByHardGates++;
+              perSymbolGateAttribution.set(symbol, { 
+                gate: 'OVEREXTENSION_ATR_BLOCK', 
+                details: `overextATR=${currentOverextensionAtr.toFixed(2)} > ${maxOverextensionAtr}, ADX=${adx.toFixed(1)}` 
+              });
+              logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ OVEREXTENSION ATR STRICT BLOCK: ${currentOverextensionAtr.toFixed(2)} ATR > ${maxOverextensionAtr} ATR`);
+              await logRejectionWithAI(
+                supabase, userId, symbol,
+                `OVEREXTENSION ATR: ${currentOverextensionAtr.toFixed(2)} ATR from EMA exceeds strict block ${maxOverextensionAtr} ATR — chasing blocked`,
+                {
+                  gate: "OVEREXTENSION_ATR_BLOCK",
+                  derivedDirection,
+                  overextensionATR: currentOverextensionAtr,
+                  maxOverextensionATR: maxOverextensionAtr,
+                  regime: fourStateRegime.regime,
+                  adx: adx.toFixed(1),
+                  momentumScore: smartMomentum.score,
+                },
+                mfs,
+                riskParams.ai_analysis_enabled !== false,
+                earlyOrderFlowAnalysis
+              );
+              continue;
             }
-            
-            rejectedByHardGates++;
-            perSymbolGateAttribution.set(symbol, { 
-              gate: 'OVEREXTENSION_ATR_BLOCK', 
-              details: `overextATR=${currentOverextensionAtr.toFixed(2)} > ${maxOverextensionAtr}, ADX=${adx.toFixed(1)}` 
-            });
-            logger.forSymbol(symbol).info(`${LOG_CATEGORIES.GATE} ⛔ OVEREXTENSION ATR STRICT BLOCK: ${currentOverextensionAtr.toFixed(2)} ATR > ${maxOverextensionAtr} ATR — shadow audit confirmed 0% win rate in this zone`);
-            await logRejectionWithAI(
-              supabase, userId, symbol,
-              `OVEREXTENSION ATR: ${currentOverextensionAtr.toFixed(2)} ATR from EMA exceeds strict block ${maxOverextensionAtr} ATR — chasing blocked`,
-              {
-                gate: "OVEREXTENSION_ATR_BLOCK",
-                derivedDirection,
-                overextensionATR: currentOverextensionAtr,
-                maxOverextensionATR: maxOverextensionAtr,
-                regime: fourStateRegime.regime,
-                atrLimitSource: 'strict_block_shadow_audit_validated',
-                adx: adx.toFixed(1),
-                momentumScore: smartMomentum.score,
-                architecture: "Strict block — shadow audit 48h: 392 signals, 0% win rate, all SL_HIT",
-              },
-              mfs,
-              riskParams.ai_analysis_enabled !== false,
-              earlyOrderFlowAnalysis
-            );
-            continue;
           }
         }
         
