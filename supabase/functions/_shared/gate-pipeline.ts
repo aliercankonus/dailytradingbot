@@ -9,6 +9,7 @@ import {
   QUALITY_THRESHOLDS, TRADING_FEE_PARAMS,
   getSymbolParams, BTC_PARAMS,
   DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES, STRATEGY_QUALITY_GATES,
+  EXHAUSTION_BOUNCE_RECOVERY,
 } from "./constants.ts";
 import { calculateQualityScore } from "./scoring.ts";
 import {
