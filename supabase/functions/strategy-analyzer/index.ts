@@ -12141,10 +12141,15 @@ serve(async (req) => {
           // EXCEPTION: Allow reversal when trend is EXHAUSTING (high ADX but slope strongly negative)
           // This catches bounce opportunities when bearish/bullish trends are dying
           const currentAdxSlope = fullAdxResult?.adxSlope ?? 0;
+          const overextATR = marketFeatures?.momentum?.overextensionATR ?? 0;
+          const stochD4h = marketFeatures?.stochRsi?.['4h']?.d ?? 50;
           const isExhaustionBounceCandidate = 
-            currentAdxSlope < EXHAUSTION_BOUNCE_RECOVERY.MAX_ADX_SLOPE_FOR_EXHAUSTION &&
             EXHAUSTION_BOUNCE_RECOVERY.ENABLED &&
+            adx >= EXHAUSTION_BOUNCE_RECOVERY.MIN_ADX_FOR_EXHAUSTION &&
+            currentAdxSlope < EXHAUSTION_BOUNCE_RECOVERY.MAX_ADX_SLOPE_FOR_EXHAUSTION &&
+            overextATR >= EXHAUSTION_BOUNCE_RECOVERY.MIN_OVEREXTENSION_ATR &&
             stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.MAX_STOCHRSI_K_FOR_BOUNCE &&
+            (!EXHAUSTION_BOUNCE_RECOVERY.REQUIRE_K_ABOVE_D || stochRsiK4h > stochD4h || stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.DEEP_OVERSOLD_SKIP_K_ABOVE_D) &&
             (!EXHAUSTION_BOUNCE_RECOVERY.REQUIRE_EXHAUSTION_REGIME || 
               EXHAUSTION_BOUNCE_RECOVERY.VALID_REGIMES.includes(fourStateRegime?.regime || ''));
           

@@ -149,14 +149,27 @@ export function evaluateProductionGates(
   // the bounce IS the trade. Allow LONG with reduced sizing.
   if (direction === 'LONG' && primaryTrend === 'bearish') {
     const ebr = EXHAUSTION_BOUNCE_RECOVERY;
-    const isExhaustionBounce = ebr.ENABLED &&
-      stochK < ebr.MAX_STOCHRSI_K_FOR_BOUNCE &&
-      adxSlope < ebr.MAX_ADX_SLOPE_FOR_EXHAUSTION &&
+    const stochD = mfs.stochRsi["1h"].d;
+    const overextATR = mfs.momentum?.overextensionATR ?? 0;
+    
+    // 3-filter confluence: ADX energy + slope decay + overextension + K>D bounce confirmation
+    const hasExhaustionStructure = ebr.ENABLED &&
+      adx >= ebr.MIN_ADX_FOR_EXHAUSTION &&                                    // trend still has energy
+      adxSlope < ebr.MAX_ADX_SLOPE_FOR_EXHAUSTION &&                          // but losing it fast
+      overextATR >= ebr.MIN_OVEREXTENSION_ATR &&                              // price truly overextended
+      stochK < ebr.MAX_STOCHRSI_K_FOR_BOUNCE &&                              // deeply oversold
       (!ebr.REQUIRE_EXHAUSTION_REGIME || ebr.VALID_REGIMES.includes(mfs.regime || ''));
+    
+    // K > D = momentum turning up (bounce confirmation), except at extreme capitulation
+    const hasBounceConfirmation = !ebr.REQUIRE_K_ABOVE_D || 
+      stochK > stochD || 
+      stochK < ebr.DEEP_OVERSOLD_SKIP_K_ABOVE_D;
+    
+    const isExhaustionBounce = hasExhaustionStructure && hasBounceConfirmation;
     
     if (isExhaustionBounce) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, ebr.POSITION_MULTIPLIER);
-      logger.info(`🔄 EXHAUSTION_BOUNCE_RECOVERY: LONG allowed in bearish — K=${stochK.toFixed(1)}, ADX_slope=${adxSlope.toFixed(2)}, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
+      logger.info(`🔄 EXHAUSTION_BOUNCE: LONG in bearish — K=${stochK.toFixed(1)}, D=${stochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, overext=${overextATR.toFixed(2)}ATR, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
     } else {
       return fail('MACRO_BIAS_LONG_BLOCKED');
     }
