@@ -17,6 +17,7 @@ import {
   PROGRESSIVE_LOCK_PERCENT_PARAMS,
   STALE_PEAK_BONUS_PARAMS,
   MODERATE_EXHAUSTION_EXIT_PARAMS,
+  MR_TRAILING_TP,
 } from "./constants.ts";
 // MFS migration: extractADX/extractADXSlope removed — MarketContext now carries pre-extracted fields
 
