@@ -361,6 +361,35 @@ export function evaluateProductionGates(
   };
 }
 
+// ============= GATE CONFLICT DETECTOR =============
+// Diagnoses when BOTH long AND short are blocked — deadlock state
+// Called externally per-symbol to track conflict rates
+
+export function detectGateConflict(
+  mfs: MarketFeatureSnapshot,
+  momentumResult: MomentumScoreResult,
+  symbol: string,
+): { longBlocked: boolean; shortBlocked: boolean; deadlocked: boolean; reason: string } {
+  const longResult = evaluateProductionGates({ ...mfs, primaryTrend: mfs.primaryTrend } as any, momentumResult, symbol);
+  // Simulate short direction check
+  const shortResult = evaluateProductionGates({ ...mfs, primaryTrend: mfs.primaryTrend } as any, { ...momentumResult, score: -momentumResult.score } as any, symbol);
+  
+  const longBlocked = !longResult.passed;
+  const shortBlocked = !shortResult.passed;
+  const deadlocked = longBlocked && shortBlocked;
+  
+  if (deadlocked && GATE_CONFLICT_DETECTOR.ENABLED) {
+    logger.warn(`⚠️ GATE DEADLOCK: ${symbol} — LONG blocked by ${longResult.gate}, SHORT blocked by ${shortResult.gate} | ADX=${mfs.adx.toFixed(1)}, K=${mfs.stochRsi["1h"].k.toFixed(1)}, trend=${mfs.primaryTrend}, regime=${mfs.regime}`);
+  }
+  
+  return {
+    longBlocked,
+    shortBlocked,
+    deadlocked,
+    reason: deadlocked ? `LONG:${longResult.gate} + SHORT:${shortResult.gate}` : 'OK',
+  };
+}
+
 // ============= PRODUCTION EXIT LOGIC =============
 
 export function checkProductionExits(
