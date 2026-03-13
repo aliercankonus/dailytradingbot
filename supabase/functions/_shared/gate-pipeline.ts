@@ -14,6 +14,7 @@ import { calculateQualityScore } from "./scoring.ts";
 import {
   evaluateDecayVelocity, evaluateProgressiveProfitLock,
   evaluateMicroProfitLock, calculateFeeAwarePnL,
+  evaluateMRTrailingTP,
   type PositionContext, type MarketContext, type UserExitSettings,
 } from "./exit-strategies.ts";
 import { createLogger } from "./logging.ts";
