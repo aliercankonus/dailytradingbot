@@ -98,6 +98,20 @@ The trading bot operates through a modular architecture with strict regime-level
 
 ---
 
+## Exhaustion Bounce Recovery
+
+### 6. Exhaustion Bounce Recovery (NEW)
+- **Regime**: `TREND_EXHAUSTION`, `BREAKOUT_SETUP`
+- **Purpose**: Catch bounce LONGs when bearish trend is dying + price deeply oversold
+- **Problem Solved**: DEADLOCK where MACRO_BIAS blocks LONG (bearish) AND StochRSI blocks SHORT (oversold) = 0 trades
+- **Activation**: ADX slope < -1.0, StochRSI K < 20, regime = TREND_EXHAUSTION
+- **Exemptions**: Bypasses MACRO_BIAS_LONG_BLOCKED gate, relaxes reversal safety ADX gate
+- **Sizing**: 0.35x base (probe entry)
+- **SL**: 0.8x ATR, max 1.5%
+- **Config**: `EXHAUSTION_BOUNCE_RECOVERY` in `constants.ts`
+
+---
+
 ## Strategy Routing
 
 ### OVEREXTENSION_REGIME_ADAPTIVE Symbol Routing
