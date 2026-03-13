@@ -191,7 +191,9 @@ import {
   LTF_MICRO_TIMING_GATE,
   // Production strategy routing per symbol
   BTC_PARAMS,
-  ALTCOIN_PARAMS
+  ALTCOIN_PARAMS,
+  OVEREXTENSION_SYMBOL_ROUTING,
+  MR_TRAILING_TP,
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
