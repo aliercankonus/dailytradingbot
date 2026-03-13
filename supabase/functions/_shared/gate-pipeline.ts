@@ -425,6 +425,13 @@ export function checkProductionExits(
     }
   }
 
+  // 7b. Mean Reversion Trailing TP (TP1=1.2% → trailing)
+  const mrTrailing = evaluateMRTrailingTP(posCtx, mktCtx);
+  if (mrTrailing.shouldActivateTrailing && mrTrailing.suggestedStopLoss !== null) {
+    const shouldExit = side === 'LONG' ? currentPrice <= mrTrailing.suggestedStopLoss : currentPrice >= mrTrailing.suggestedStopLoss;
+    if (shouldExit) return { shouldExit: true, exitReason: 'mr_trailing_tp_exit' };
+  }
+
   // 8. Time stop
   const entryTime = new Date(position.entryTime).getTime();
   const currentTimestamp = new Date(currentTime).getTime();
