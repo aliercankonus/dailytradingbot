@@ -14,6 +14,7 @@ import { calculateQualityScore } from "./scoring.ts";
 import {
   evaluateDecayVelocity, evaluateProgressiveProfitLock,
   evaluateMicroProfitLock, calculateFeeAwarePnL,
+  evaluateMRTrailingTP,
   type PositionContext, type MarketContext, type UserExitSettings,
 } from "./exit-strategies.ts";
 import { createLogger } from "./logging.ts";
@@ -422,6 +423,13 @@ export function checkProductionExits(
       const shouldExit = side === 'LONG' ? currentPrice <= progResult.newStopLoss : currentPrice >= progResult.newStopLoss;
       if (shouldExit) return { shouldExit: true, exitReason: 'progressive_profit_lock' };
     }
+  }
+
+  // 7b. Mean Reversion Trailing TP (TP1=1.2% → trailing)
+  const mrTrailing = evaluateMRTrailingTP(posCtx, mktCtx);
+  if (mrTrailing.shouldActivateTrailing && mrTrailing.suggestedStopLoss !== null) {
+    const shouldExit = side === 'LONG' ? currentPrice <= mrTrailing.suggestedStopLoss : currentPrice >= mrTrailing.suggestedStopLoss;
+    if (shouldExit) return { shouldExit: true, exitReason: 'mr_trailing_tp_exit' };
   }
 
   // 8. Time stop

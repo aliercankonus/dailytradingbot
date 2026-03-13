@@ -9309,6 +9309,47 @@ export const DYNAMIC_ENTRY_WINDOW = {
   
   LOG_ADAPTIVE_THRESHOLDS: true,
 } as const;
+// ============= OVEREXTENSION REGIME ADAPTIVE: SYMBOL ROUTING =============
+// Shadow mode data (130 days, 16 trades) confirms strong edge on majors,
+// structural failure on high-beta altcoins.
+// BTC +5.17%, SOL +2.45%, BNB +2.05% | ETH -3.49%, XRP -2.22%, AVAX -0.84%
+export const OVEREXTENSION_SYMBOL_ROUTING = {
+  // Symbols allowed in production (execute real trades)
+  PRODUCTION_WHITELIST: ['BTCUSDT', 'SOLUSDT', 'BNBUSDT'] as readonly string[],
+  
+  // Symbols that stay shadow-only (log but don't execute)
+  SHADOW_ONLY: ['ETHUSDT', 'XRPUSDT', 'AVAXUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT', 'MATICUSDT'] as readonly string[],
+  
+  // Position sizing for production entries
+  PRODUCTION_POSITION_MULTIPLIER: 0.50,  // 50% of normal position (probe sizing)
+  
+  // Minimum regime confidence for production entry
+  MIN_REGIME_CONFIDENCE: 40,
+} as const;
+
+// ============= MEAN REVERSION TRAILING TP =============
+// Shadow data shows MR avg win 1.19% but R/R only 1.09. Instead of widening TP,
+// use trailing TP: lock profit at TP1 then trail for extended moves.
+export const MR_TRAILING_TP = {
+  ENABLED: true,
+  
+  // TP1: Initial profit lock target (triggers trailing)
+  TP1_PERCENT: 1.2,
+  
+  // After TP1 hit: trailing stop distance from peak
+  TRAILING_DISTANCE_PERCENT: 0.35,
+  
+  // Minimum profit to keep when trailing activates
+  MIN_LOCK_PERCENT: 0.8,
+  
+  // Only apply to mean-reversion strategies
+  APPLICABLE_STRATEGIES: [
+    'OVEREXTENSION_REGIME_ADAPTIVE',
+    'MR_MODERATE_EXHAUSTION',
+    'MR_EXTREME_EXHAUSTION',
+    'MEAN_REVERSION',
+  ] as readonly string[],
+} as const;
 
 // ============= LIQUIDITY SWEEP REVERSAL DETECTION (LSRD) =============
 // Professional-grade pattern: Detects when price sweeps below 24h low (or above 24h high)
