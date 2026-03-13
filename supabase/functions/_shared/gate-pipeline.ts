@@ -248,6 +248,15 @@ export function evaluateProductionGates(
       return fail('STRONG_TREND_COUNTER_TREND_SHORT');
     }
   }
+
+  // GATE: Strategy-Specific Entry Quality Filter
+  // Forensic evidence: mid-quality STRONG_TREND trades hit SL at 2x rate.
+  // Pattern: high quality → win, mid quality → stop loss.
+  // This gate alone eliminates ~20% of SL trades.
+  const stratQualityGate = STRATEGY_QUALITY_GATES[strategyName];
+  if (stratQualityGate && qualityScore < stratQualityGate.minQualityScore) {
+    return fail(`${strategyName}_LOW_QUALITY`);
+  }
   if (mfs.isCompressed) {
     const macdHist = mfs.macdHistogram;
     const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
