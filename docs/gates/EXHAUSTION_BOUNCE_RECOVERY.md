@@ -1,4 +1,4 @@
-# Exhaustion Bounce Recovery
+# Exhaustion Bounce Recovery (v2.0)
 
 ## Problem
 DEADLOCK: When bearish trend is exhausting + price deeply oversold, the bot has ZERO possible trades:
@@ -8,36 +8,39 @@ DEADLOCK: When bearish trend is exhausting + price deeply oversold, the bot has 
 
 Evidence: 5+ days of zero trades while market bounced 3-4%.
 
-## Solution
-Three-level exemption for exhaustion bounces:
+## Solution (v2.0 — Tightened)
+Three-filter confluence + bounce confirmation:
 
-### Level 1: Reversal Safety Gate (strategy-analyzer)
-When ADX >= 30 BUT adxSlope < -1.0 AND regime = TREND_EXHAUSTION:
-- Allow reversal override (bypass ADX >= 30 block)
-- Relax reversal score requirement (65 → 40)
+### Exhaustion Structure (ALL required)
+1. **ADX >= 25** — trend must have meaningful energy (not just noise)
+2. **ADX slope < -1.0** — trend losing energy fast
+3. **Price distance from EMA20 > 1.5x ATR** — truly overextended, not just pullback
+4. **Regime = TREND_EXHAUSTION or BREAKOUT_SETUP**
 
-### Level 2: MACRO_BIAS Gate (gate-pipeline)
-When direction = LONG AND primaryTrend = bearish:
-- If StochRSI K < 20 AND adxSlope < -1.0 AND regime ∈ [TREND_EXHAUSTION, BREAKOUT_SETUP]:
-  - Allow LONG with 0.35x position multiplier
-  - Log as EXHAUSTION_BOUNCE_RECOVERY
+### Bounce Confirmation (REQUIRED)
+- **K > D** — momentum turning up (oversold ≠ bounce, recovery = bounce)
+- Exception: K < 8 (extreme capitulation skips K>D check)
 
-### Level 3: Direction Derivation (strategy-analyzer)
-Existing oversold reversal candidate detection (K < 20, K > D, 1h bullish turn)
-now passes through safety gates due to Level 1 exemption.
+### v1 → v2 Changes
+| Parameter | v1 | v2 | Reason |
+|---|---|---|---|
+| ADX minimum | none | >= 25 | Filters noise; ensures real trend exists |
+| Overextension | none | >= 1.5 ATR | Confirms actual exhaustion, not just pullback |
+| K > D | optional (prefer) | required | Prevents catching falling knives |
+| Position multiplier | 0.35 / 0.50 | 0.25 / 0.35 | Counter-trend = smaller size |
+| Max SL | 1.5% | 1.2% | Tighter risk for counter-trend |
+| TP multiplier | 1.5 ATR | 1.0 ATR | Scalp bounce, don't overshoot |
+| Max TP | none | 1.5% | Cap profit target for realism |
 
-## Detection Criteria
-- ADX slope < -1.0 (trend losing energy)
-- StochRSI K < 20 (deeply oversold)
-- Regime = TREND_EXHAUSTION or BREAKOUT_SETUP
-- K > D preferred (momentum turning up)
+## Gate Pipeline Location
+Gate 4.5 (after Direction, before Counter-Trend).
 
 ## Position Sizing
-- Base: 0.35x (probe entry)
-- High quality (reversal score >= 60): 0.50x
+- Base: 0.25x (probe entry)
+- High quality (reversal score >= 60): 0.35x
 
 ## Config
 `EXHAUSTION_BOUNCE_RECOVERY` in `constants.ts`
 
 ## Date Added
-2026-03-13
+2026-03-13 (v2.0 tightened)
