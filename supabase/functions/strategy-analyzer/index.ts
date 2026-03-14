@@ -12141,8 +12141,8 @@ serve(async (req) => {
           // EXCEPTION: Allow reversal when trend is EXHAUSTING (high ADX but slope strongly negative)
           // This catches bounce opportunities when bearish/bullish trends are dying
           const currentAdxSlope = fullAdxResult?.adxSlope ?? 0;
-          const overextATR = marketFeatures?.momentum?.overextensionATR ?? 0;
-          const stochD4h = marketFeatures?.stochRsi?.['4h']?.d ?? 50;
+          const overextATR = mfs?.momentum?.overextensionATR ?? 0;
+          const stochD4h = mfs?.stochRsi?.['4h']?.d ?? 50;
           const isExhaustionBounceCandidate = 
             EXHAUSTION_BOUNCE_RECOVERY.ENABLED &&
             adx >= EXHAUSTION_BOUNCE_RECOVERY.MIN_ADX_FOR_EXHAUSTION &&
@@ -12224,6 +12224,35 @@ serve(async (req) => {
           }
         } else if (isOversoldReversalCandidate && trend === "bearish" && !overrideToLongReversal) {
           logger.forSymbol(symbol).debug(`Oversold but NO reversal override - K=${stochRsiK4h.toFixed(1)} rising:${stochRsiTurningUpCheck} 1hBullish:${has1hBullishTurnCheck} divergence:${has1hBullishDivergenceCheck} BBLower:${bollingerAtLowerCheck}`);
+        }
+        
+        // ===== EXHAUSTION BOUNCE RECOVERY: Independent direction override =====
+        // When regular reversal logic fails (K < D, no 1h bullish turn yet), but structural
+        // exhaustion is confirmed (ADX decaying, regime exhaustion, deeply oversold), force LONG.
+        // This breaks the deadlock where SHORT is blocked by oversold AND LONG is blocked by bearish trend.
+        if (!isReversalEntry && trend === "bearish" && intendedTradeDirection === "short" && EXHAUSTION_BOUNCE_RECOVERY.ENABLED) {
+          const ebrOverext = mfs?.momentum?.overextensionATR ?? 0;
+          const ebrStochD = mfs?.stochRsi?.['4h']?.d ?? 50;
+          const ebrAdxSlope = fullAdxResult?.adxSlope ?? 0;
+          const ebrRegime = fourStateRegime?.regime || '';
+          
+          const isExhaustionBounceForceFlip = 
+            stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.MAX_STOCHRSI_K_FOR_BOUNCE &&
+            adx >= EXHAUSTION_BOUNCE_RECOVERY.MIN_ADX_FOR_EXHAUSTION &&
+            ebrAdxSlope < EXHAUSTION_BOUNCE_RECOVERY.MAX_ADX_SLOPE_FOR_EXHAUSTION &&
+            ebrOverext >= EXHAUSTION_BOUNCE_RECOVERY.MIN_OVEREXTENSION_ATR &&
+            (!EXHAUSTION_BOUNCE_RECOVERY.REQUIRE_EXHAUSTION_REGIME || 
+              EXHAUSTION_BOUNCE_RECOVERY.VALID_REGIMES.includes(ebrRegime));
+          
+          if (isExhaustionBounceForceFlip) {
+            // K > D not required here — the structural exhaustion IS the signal
+            intendedTradeDirection = "long";
+            isReversalEntry = true;
+            reversalPositionSizeOverride = EXHAUSTION_BOUNCE_RECOVERY.POSITION_MULTIPLIER;
+            logger.forSymbol(symbol).info(`🔄 EXHAUSTION_BOUNCE_DIRECTION_FLIP: SHORT→LONG | K=${stochRsiK4h.toFixed(1)}, D=${ebrStochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${ebrAdxSlope.toFixed(2)}, overext=${ebrOverext.toFixed(2)}ATR, regime=${ebrRegime}, pos=${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+          } else if (stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.MAX_STOCHRSI_K_FOR_BOUNCE) {
+            logger.forSymbol(symbol).info(`🔍 EXHAUSTION_BOUNCE_MISS: K=${stochRsiK4h.toFixed(1)}, ADX=${adx.toFixed(1)}(need≥${EXHAUSTION_BOUNCE_RECOVERY.MIN_ADX_FOR_EXHAUSTION}), slope=${ebrAdxSlope.toFixed(2)}(need<${EXHAUSTION_BOUNCE_RECOVERY.MAX_ADX_SLOPE_FOR_EXHAUSTION}), overext=${ebrOverext.toFixed(2)}(need≥${EXHAUSTION_BOUNCE_RECOVERY.MIN_OVEREXTENSION_ATR}), regime=${ebrRegime}(need=${EXHAUSTION_BOUNCE_RECOVERY.VALID_REGIMES.join('|')})`);
+          }
         }
         
         // Apply reversal position size override if direction was overridden

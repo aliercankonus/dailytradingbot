@@ -167,6 +167,20 @@ export function evaluateProductionGates(
     
     const isExhaustionBounce = hasExhaustionStructure && hasBounceConfirmation;
     
+    // Diagnostic: always log why exhaustion bounce passes or fails
+    if (ebr.LOG_DETECTIONS) {
+      const checks = {
+        enabled: ebr.ENABLED,
+        adxOk: adx >= ebr.MIN_ADX_FOR_EXHAUSTION,
+        slopeOk: adxSlope < ebr.MAX_ADX_SLOPE_FOR_EXHAUSTION,
+        overextOk: overextATR >= ebr.MIN_OVEREXTENSION_ATR,
+        stochOk: stochK < ebr.MAX_STOCHRSI_K_FOR_BOUNCE,
+        regimeOk: !ebr.REQUIRE_EXHAUSTION_REGIME || ebr.VALID_REGIMES.includes(mfs.regime || ''),
+        kAboveDOk: !ebr.REQUIRE_K_ABOVE_D || stochK > stochD || stochK < ebr.DEEP_OVERSOLD_SKIP_K_ABOVE_D,
+      };
+      logger.info(`🔍 EXHAUSTION_BOUNCE_CHECK: K=${stochK.toFixed(1)}, D=${stochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, overextATR=${overextATR.toFixed(2)}, regime=${mfs.regime} | pass=${isExhaustionBounce} | ${JSON.stringify(checks)}`);
+    }
+    
     if (isExhaustionBounce) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, ebr.POSITION_MULTIPLIER);
       logger.info(`🔄 EXHAUSTION_BOUNCE: LONG in bearish — K=${stochK.toFixed(1)}, D=${stochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, overext=${overextATR.toFixed(2)}ATR, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
