@@ -2245,7 +2245,7 @@ export const EXHAUSTION_BOUNCE_RECOVERY = {
   // 2. ADX slope must be strongly negative (trend losing energy fast)
   MAX_ADX_SLOPE_FOR_EXHAUSTION: -1.0,
   // 3. Price must be overextended from EMA (real exhaustion, not just pullback)
-  MIN_OVEREXTENSION_ATR: 1.5,       // distance from EMA20 > 1.5x ATR
+  MIN_OVEREXTENSION_ATR: 0.3,       // distance from EMA20 > 0.3x ATR (relaxed: exhaustion often pulls price back to EMA)
   // Regime should be TREND_EXHAUSTION (validates structural exhaustion)
   REQUIRE_EXHAUSTION_REGIME: true,
   // Valid regimes for bounce (exhaustion = most common, breakout_setup = transitioning)
