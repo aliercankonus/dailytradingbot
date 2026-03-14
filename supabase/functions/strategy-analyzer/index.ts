@@ -195,6 +195,7 @@ import {
   OVEREXTENSION_SYMBOL_ROUTING,
   MR_TRAILING_TP,
   EXHAUSTION_BOUNCE_RECOVERY,
+  DEEP_OVERSOLD_BOUNCE,
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
@@ -12250,8 +12251,19 @@ serve(async (req) => {
             isReversalEntry = true;
             reversalPositionSizeOverride = EXHAUSTION_BOUNCE_RECOVERY.POSITION_MULTIPLIER;
             logger.forSymbol(symbol).info(`🔄 EXHAUSTION_BOUNCE_DIRECTION_FLIP: SHORT→LONG | K=${stochRsiK4h.toFixed(1)}, D=${ebrStochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${ebrAdxSlope.toFixed(2)}, overext=${ebrOverext.toFixed(2)}ATR, regime=${ebrRegime}, pos=${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
-          } else if (stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.MAX_STOCHRSI_K_FOR_BOUNCE) {
+           } else if (stochRsiK4h < EXHAUSTION_BOUNCE_RECOVERY.MAX_STOCHRSI_K_FOR_BOUNCE) {
             logger.forSymbol(symbol).info(`🔍 EXHAUSTION_BOUNCE_MISS: K=${stochRsiK4h.toFixed(1)}, ADX=${adx.toFixed(1)}(need≥${EXHAUSTION_BOUNCE_RECOVERY.MIN_ADX_FOR_EXHAUSTION}), slope=${ebrAdxSlope.toFixed(2)}(need<${EXHAUSTION_BOUNCE_RECOVERY.MAX_ADX_SLOPE_FOR_EXHAUSTION}), overext=${ebrOverext.toFixed(2)}(need≥${EXHAUSTION_BOUNCE_RECOVERY.MIN_OVEREXTENSION_ATR}), regime=${ebrRegime}(need=${EXHAUSTION_BOUNCE_RECOVERY.VALID_REGIMES.join('|')})`);
+            
+            // DEEP_OVERSOLD_BOUNCE fallback: no slope/overextension required
+            if (DEEP_OVERSOLD_BOUNCE.ENABLED && 
+                stochRsiK4h < DEEP_OVERSOLD_BOUNCE.MAX_K && 
+                adx >= DEEP_OVERSOLD_BOUNCE.MIN_ADX && 
+                DEEP_OVERSOLD_BOUNCE.VALID_REGIMES.includes(ebrRegime)) {
+              intendedTradeDirection = "long";
+              isReversalEntry = true;
+              reversalPositionSizeOverride = DEEP_OVERSOLD_BOUNCE.POSITION_MULTIPLIER;
+              logger.forSymbol(symbol).info(`🎯 DEEP_OVERSOLD_BOUNCE_FLIP: SHORT→LONG | K=${stochRsiK4h.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${ebrAdxSlope.toFixed(2)}, regime=${ebrRegime}, pos=${(reversalPositionSizeOverride * 100).toFixed(0)}%`);
+            }
           }
         }
         

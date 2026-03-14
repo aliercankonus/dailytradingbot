@@ -2280,6 +2280,39 @@ export const EXHAUSTION_BOUNCE_RECOVERY = {
   LOG_DETECTIONS: true,
 } as const;
 
+// ============= DEEP OVERSOLD BOUNCE =============
+// Separate mechanism from EXHAUSTION_BOUNCE_RECOVERY:
+// Does NOT require ADX slope decay or overextension — only requires deeply oversold + exhaustion regime.
+// Designed to break deadlocks where trend is strong (ADX slope ≥ 0) but K is deeply oversold.
+// Opens micro probe (0.20x) LONG to capture bounce without requiring trend exhaustion structure.
+export const DEEP_OVERSOLD_BOUNCE = {
+  ENABLED: true,
+  
+  // ===== ENTRY CRITERIA (ALL required) =====
+  // StochRSI K must be below this (deeply oversold)
+  MAX_K: 15,
+  // ADX must show meaningful trend (not ranging noise)
+  MIN_ADX: 25,
+  // Regime must be TREND_EXHAUSTION (structural confirmation)
+  VALID_REGIMES: ['TREND_EXHAUSTION'] as readonly string[],
+  // Trend must be bearish (this is a counter-trend bounce)
+  REQUIRE_BEARISH_TREND: true,
+  
+  // ===== POSITION SIZING (ultra-conservative) =====
+  POSITION_MULTIPLIER: 0.20,        // 20% of normal — micro probe
+  
+  // ===== STOP LOSS =====
+  STOP_LOSS_ATR_MULTIPLIER: 0.6,    // 0.6x ATR — tight
+  MAX_SL_PERCENT: 1.0,              // 1% hard cap
+  
+  // ===== TAKE PROFIT (quick scalp) =====
+  TP_ATR_MULTIPLIER: 0.8,           // 0.8x ATR — quick scalp
+  MAX_TP_PERCENT: 1.0,              // 1% hard cap
+  
+  // ===== STRATEGY NAME =====
+  STRATEGY_NAME: 'DEEP_OVERSOLD_BOUNCE' as const,
+} as const;
+
 // ============= GATE CONFLICT DETECTOR =============
 // Monitors gate deadlock: when BOTH long AND short are blocked simultaneously
 // Tracks frequency to detect systematic rule conflicts

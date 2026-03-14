@@ -9,7 +9,7 @@ import {
   QUALITY_THRESHOLDS, TRADING_FEE_PARAMS,
   getSymbolParams, BTC_PARAMS,
   DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES, STRATEGY_QUALITY_GATES,
-  EXHAUSTION_BOUNCE_RECOVERY, GATE_CONFLICT_DETECTOR,
+  EXHAUSTION_BOUNCE_RECOVERY, DEEP_OVERSOLD_BOUNCE, GATE_CONFLICT_DETECTOR,
 } from "./constants.ts";
 import { calculateQualityScore } from "./scoring.ts";
 import {
@@ -184,6 +184,20 @@ export function evaluateProductionGates(
     if (isExhaustionBounce) {
       adxPositionMultiplier = Math.min(adxPositionMultiplier, ebr.POSITION_MULTIPLIER);
       logger.info(`🔄 EXHAUSTION_BOUNCE: LONG in bearish — K=${stochK.toFixed(1)}, D=${stochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, overext=${overextATR.toFixed(2)}ATR, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
+    } else if (DEEP_OVERSOLD_BOUNCE.ENABLED) {
+      // DEEP_OVERSOLD_BOUNCE: No slope/overextension required — just deeply oversold + exhaustion regime
+      const dob = DEEP_OVERSOLD_BOUNCE;
+      const isDeepOversoldBounce = 
+        stochK < dob.MAX_K &&
+        adx >= dob.MIN_ADX &&
+        dob.VALID_REGIMES.includes(mfs.regime || '');
+      
+      if (isDeepOversoldBounce) {
+        adxPositionMultiplier = Math.min(adxPositionMultiplier, dob.POSITION_MULTIPLIER);
+        logger.info(`🎯 DEEP_OVERSOLD_BOUNCE: LONG in bearish — K=${stochK.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
+      } else {
+        return fail('MACRO_BIAS_LONG_BLOCKED');
+      }
     } else {
       return fail('MACRO_BIAS_LONG_BLOCKED');
     }
