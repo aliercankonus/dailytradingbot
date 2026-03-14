@@ -6,8 +6,6 @@ verify_jwt = false
 [functions.realtime-prices]
 verify_jwt = false
 
-[functions.realtime-market-data]
-verify_jwt = false
 
 [functions.calculate-trend]
 verify_jwt = false
