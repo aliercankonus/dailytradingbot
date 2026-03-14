@@ -12231,8 +12231,8 @@ serve(async (req) => {
         // exhaustion is confirmed (ADX decaying, regime exhaustion, deeply oversold), force LONG.
         // This breaks the deadlock where SHORT is blocked by oversold AND LONG is blocked by bearish trend.
         if (!isReversalEntry && trend === "bearish" && intendedTradeDirection === "short" && EXHAUSTION_BOUNCE_RECOVERY.ENABLED) {
-          const ebrOverext = marketFeatures?.momentum?.overextensionATR ?? 0;
-          const ebrStochD = marketFeatures?.stochRsi?.['4h']?.d ?? 50;
+          const ebrOverext = mfs?.momentum?.overextensionATR ?? 0;
+          const ebrStochD = mfs?.stochRsi?.['4h']?.d ?? 50;
           const ebrAdxSlope = fullAdxResult?.adxSlope ?? 0;
           const ebrRegime = fourStateRegime?.regime || '';
           
