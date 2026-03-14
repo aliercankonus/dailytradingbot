@@ -50,7 +50,7 @@ const ALERT_CONFIG = {
   // TIER 4: WebSocket health check
   WEBSOCKET_CHECK_ENABLED: true,
   WEBSOCKET_STALE_THRESHOLD_SECONDS: 120, // 2 minutes without messages = stale
-  WEBSOCKET_FUNCTIONS: ['realtime-market-data', 'realtime-prices'] as string[],
+  WEBSOCKET_FUNCTIONS: ['realtime-prices'] as string[],
   
   // Alert cooldown (prevent spam)
   COOLDOWN_MINUTES: 120, // Increased from 60 to reduce noise
