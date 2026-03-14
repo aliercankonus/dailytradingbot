@@ -195,6 +195,7 @@ import {
   OVEREXTENSION_SYMBOL_ROUTING,
   MR_TRAILING_TP,
   EXHAUSTION_BOUNCE_RECOVERY,
+  DEEP_OVERSOLD_BOUNCE,
 } from "../_shared/constants.ts";
 // NEW: Compression Engine for RANGE_COMPRESSION scalps
 import {
