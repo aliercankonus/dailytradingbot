@@ -19388,6 +19388,9 @@ serve(async (req) => {
         // Map "neutral" to "ranging" for database enum compatibility
         const dbTrend = trend === "neutral" ? "ranging" : trend;
         
+        // Alias for signal indicators (unified position size after all gates)
+        const strategyPositionSize = unifiedPositionSize;
+        
         const signal: SignalData = {
           user_id: userId,
           symbol,
