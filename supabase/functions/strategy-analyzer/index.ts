@@ -19769,7 +19769,7 @@ serve(async (req) => {
                     adx: adx,
                     adxSlope: fullAdxResult?.adxSlope,
                     momentumScore: smartMomentum?.score ?? 0,
-                    stochK: stochRsi4h?.k,
+                    stochK: signal.indicators?.stochRsi4h_k ?? null,
                   },
                   indicators: signal.indicators,
                 });
