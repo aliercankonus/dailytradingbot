@@ -19862,7 +19862,7 @@ serve(async (req) => {
               old_gate_result: 'WOULD_EXECUTE',
               new_gate_result: 'SHADOW_ONLY_MICRO_PROBE',
               gate_blocked_by: 'MICRO_PROBE_SHADOW_ONLY',
-              confidence_score: adjustedConfidence,
+              confidence_score: Math.round(Math.min(confidence, 100)),
               entry_price: shadowSLTP.entry,
               stop_loss: shadowSLTP.sl,
               take_profit: shadowSLTP.tp,
