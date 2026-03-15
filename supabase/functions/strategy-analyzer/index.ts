@@ -19819,7 +19819,7 @@ serve(async (req) => {
                   old_gate_result: 'WOULD_EXECUTE',
                   new_gate_result: 'ROUTING_BLOCKED',
                   gate_blocked_by: `ROUTING_BLOCKED_${strategy.name}`,
-                  confidence_score: adjustedConfidence,
+                  confidence_score: Math.round(Math.min(confidence, 100)),
                   entry_price: _shadowSLTP.entry,
                   stop_loss: _shadowSLTP.sl,
                   take_profit: _shadowSLTP.tp,
