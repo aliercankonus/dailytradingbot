@@ -19768,7 +19768,7 @@ serve(async (req) => {
                     regime: fourStateRegime?.regime,
                     adx: adx,
                     adxSlope: fullAdxResult?.adxSlope,
-                    momentumScore: momentumScore,
+                    momentumScore: smartMomentum?.score ?? 0,
                     stochK: stochRsi4h?.k,
                   },
                   indicators: signal.indicators,
