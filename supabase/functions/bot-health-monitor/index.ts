@@ -129,6 +129,7 @@ async function sendHealthAlert(
     const notificationPayload = {
       type: alert.alertType === 'heartbeat_missing' ? 'bot_health_critical' : 
             alert.alertType === 'operational_concern' ? 'bot_health_critical' : 
+            alert.alertType === 'websocket_failure' ? 'websocket_failure' :
             'bot_health_warning',
       userId,
       email,
