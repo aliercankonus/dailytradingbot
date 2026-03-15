@@ -19812,7 +19812,7 @@ serve(async (req) => {
             try {
               const _dedupSkipRoute = await isShadowSignalDuplicate(supabase as any, userId, symbol, signalType, `ROUTING_BLOCKED_${strategy.name}`);
               if (!_dedupSkipRoute) {
-                const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, signalType as 'long' | 'short');
+                const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, mfs.atr, signalType as 'long' | 'short');
                 await supabase.from('shadow_mode_signals').insert({
                   user_id: userId, symbol, signal_type: signalType,
                   strategy_name: strategy.name,
