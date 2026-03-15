@@ -19853,7 +19853,7 @@ serve(async (req) => {
           try {
             const _dedupSkipMP = await isShadowSignalDuplicate(supabase as any, userId, symbol, signalType, 'MICRO_PROBE_SHADOW_ONLY');
             if (!_dedupSkipMP) {
-            const shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, signalType as 'long' | 'short');
+            const shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, mfs.atr, signalType as 'long' | 'short');
             await supabase.from('shadow_mode_signals').insert({
               user_id: userId,
               symbol,
