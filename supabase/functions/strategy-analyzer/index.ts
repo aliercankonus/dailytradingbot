@@ -9634,7 +9634,7 @@ serve(async (req) => {
                     try {
                       const _dedupSkipNL1 = await isShadowSignalDuplicate(supabase as any, userId, symbol, derivedDirection, 'NEAR_24H_LOW_HARD');
                       if (!_dedupSkipNL1) {
-                        const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, trendData?.volatility?.atr, derivedDirection as 'long' | 'short');
+                        const _shadowSLTP = deriveShadowSLTP(trendData?.currentPrice, mfs.atr, derivedDirection as 'long' | 'short');
                         await supabase.from('shadow_mode_signals').insert({
                           user_id: userId,
                           symbol,
