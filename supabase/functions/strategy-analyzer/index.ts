@@ -19231,6 +19231,15 @@ serve(async (req) => {
           logger.forSymbol(symbol).info(`${LOG_CATEGORIES.RISK} ⚡ MOMENTUM EXHAUSTION OVERRIDE - tighter stop applied: ${stopLossPercent.toFixed(2)}%`);
         }
         
+        // Calculate take profit based on stop loss and TP multiplier
+        let takeProfitPercent = stopLossPercent * baseTpMultiplier;
+        
+        // Cap DEEP_OVERSOLD_BOUNCE TP at 1% as defined in strategy constants
+        if (strategy.name === 'DEEP_OVERSOLD_BOUNCE') {
+          takeProfitPercent = Math.min(takeProfitPercent, 1.0);
+          stopLossPercent = Math.min(stopLossPercent, 1.0);
+        }
+        
         // Apply position reduction for move exhaustion (soft gate entries at 35%)
         if (moveExhaustionPositionMultiplier < 1.0) {
           unifiedPositionSize *= moveExhaustionPositionMultiplier;
