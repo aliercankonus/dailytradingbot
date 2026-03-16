@@ -3064,6 +3064,70 @@ export const STRATEGY_TYPES = {
     ],
   },
 } as const;
+// ═══════════════════════════════════════════════════════════════
+// STRATEGY NAME MAPPING: Internal (gate-pipeline) ↔ DB (positions table)
+// Used for forensic analysis to unify old human-readable names with new internal names
+// ═══════════════════════════════════════════════════════════════
+export const STRATEGY_NAME_MAP = {
+  // Internal name → all DB variants that map to this strategy
+  internal_to_db: {
+    'STRONG_TREND': ['Strong Trend Continuation', 'STRONG_TREND'],
+    'TREND_CONTINUATION': ['Adaptive Trend Entry', 'TREND_CONTINUATION', /^Adaptive Trend Entry \(Q=\d+/],
+    'SQUEEZE_BREAKOUT': ['Neutral Breakout', 'HTF Neutral Breakout', 'SQUEEZE_BREAKOUT'],
+    'EXHAUSTION_BOUNCE': ['EXHAUSTION_BOUNCE'],
+    'DEEP_OVERSOLD_BOUNCE': ['DEEP_OVERSOLD_BOUNCE'],
+    'COMPRESSION_SCALP': ['Compression Scalp', 'COMPRESSION_SCALP'],
+    'LSRD_BOUNCE_PROBE': ['LSRD_BOUNCE_PROBE'],
+  },
+  // DB name → internal name (reverse lookup)
+  db_to_internal: {
+    'Strong Trend Continuation': 'STRONG_TREND',
+    'Adaptive Trend Entry': 'TREND_CONTINUATION',
+    'Neutral Breakout': 'SQUEEZE_BREAKOUT',
+    'HTF Neutral Breakout': 'SQUEEZE_BREAKOUT',
+    'Compression Scalp': 'COMPRESSION_SCALP',
+    'MACD Bearish Cross': 'TREND_FOLLOWING',
+    'MACD Crossover': 'TREND_FOLLOWING',
+    'MACD Signal Cross': 'TREND_FOLLOWING',
+    'Trend Following': 'TREND_FOLLOWING',
+    'Multi-Timeframe Trend': 'TREND_FOLLOWING',
+    'Grid Trading': 'OTHER',
+  },
+} as const;
+
+/**
+ * Normalize a DB strategy_name to its internal gate-pipeline name.
+ * Handles both old human-readable names and new internal names.
+ */
+export function normalizeStrategyName(dbName: string | null | undefined): string {
+  if (!dbName) return 'UNKNOWN';
+  // Already an internal name?
+  if (STRATEGY_NAME_MAP.internal_to_db[dbName as keyof typeof STRATEGY_NAME_MAP.internal_to_db]) {
+    return dbName;
+  }
+  // Check direct mapping
+  const mapped = STRATEGY_NAME_MAP.db_to_internal[dbName as keyof typeof STRATEGY_NAME_MAP.db_to_internal];
+  if (mapped) return mapped;
+  // Pattern matching for parameterized names like "Adaptive Trend Entry (Q=64, dir=short)"
+  if (/^Adaptive Trend Entry/i.test(dbName)) return 'TREND_CONTINUATION';
+  if (/^Quality\+Momentum Fallback/i.test(dbName)) return 'TREND_CONTINUATION';
+  if (/^Near-Quality Fallback/i.test(dbName)) return 'TREND_CONTINUATION';
+  if (/^Strong Trend/i.test(dbName)) return 'STRONG_TREND';
+  if (/neutral.*breakout/i.test(dbName)) return 'SQUEEZE_BREAKOUT';
+  if (/macd/i.test(dbName)) return 'TREND_FOLLOWING';
+  if (/hedge/i.test(dbName)) return 'HEDGE';
+  return 'OTHER';
+}
+
+/**
+ * Get all DB strategy_name variants for an internal strategy name.
+ * Useful for SQL WHERE IN clauses in forensic queries.
+ */
+export function getDbNamesForStrategy(internalName: string): string[] {
+  const entry = STRATEGY_NAME_MAP.internal_to_db[internalName as keyof typeof STRATEGY_NAME_MAP.internal_to_db];
+  if (!entry) return [internalName];
+  return entry.filter((v): v is string => typeof v === 'string');
+}
 
 // Strategy type detection function
 export function detectStrategyType(strategyId: string | undefined, strategyName: string): keyof typeof STRATEGY_TYPES | 'UNKNOWN' {
