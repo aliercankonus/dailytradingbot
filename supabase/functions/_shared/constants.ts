@@ -485,6 +485,7 @@ export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; max
   },
   'TREND_CONTINUATION': {
     atrMultiplier: 0.9,             // 0.9x ATR — moderate tightening
+    maxCapOverride: 1.0,            // Hard cap at 1.0% — forensic: avg SL was -1.38/-1.41%, cap saves ~+15 PnL
   },
   // SQUEEZE_BREAKOUT keeps symbol defaults — breakouts need room to breathe
 } as const;
