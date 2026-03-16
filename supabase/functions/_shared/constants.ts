@@ -422,8 +422,8 @@ export const ALTCOIN_PARAMS = {
   // UNVALIDATED — restricting all altcoins to safe strategies
   // Altcoin volatility makes STRONG_TREND/TREND_CONTINUATION high-risk
   strategyRouting: {
-    enabled: true,
-    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    enabled: false, // DISABLED: All strategies allowed for altcoins — routing was killing valid signals
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION', 'STRONG_TREND', 'TREND_CONTINUATION'] as string[],
     disabledStrategies: {
       STRONG_TREND: { enabled: false, reason: 'Violent bounces cause premature stops on altcoins' },
       TREND_CONTINUATION: { enabled: false, reason: 'Short squeezes invalidate trend-following on altcoins' },
