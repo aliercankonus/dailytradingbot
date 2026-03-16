@@ -284,29 +284,51 @@ export function evaluateProductionGates(
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // TREND_CONTINUATION Surgical Fixes (Forensic-driven)
-  // Problem: RANGE_COMPRESSION LONG -13.09 PnL, TREND_EXPANSION SHORT low quality losses
+  // TREND_CONTINUATION Surgical Fixes v2 (Forensic 2026-03-16)
+  // v1: RANGE_COMPRESSION LONG block, TREND_EXPANSION SHORT quality
+  // v2: volume_relaxation_timeout bleeding (-1.212%), SELL partial_loss (-4.48$)
+  //     trailing_stop avg +0.161% too low — progressive lock not capturing
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'TREND_CONTINUATION') {
-    // Fix 1: Block LONG in RANGE_COMPRESSION — 30 trades, 30% WR, -13.09 PnL
+    // Fix 1 (v1): Block LONG in RANGE_COMPRESSION — 30 trades, 30% WR, -13.09 PnL
     if (mfs.regime === 'RANGE_COMPRESSION' && direction === 'LONG') {
       logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION: regime=${mfs.regime}`);
       return fail('TC_RANGE_COMPRESSION_LONG_BLOCKED');
     }
-    // Fix 2: TREND_EXPANSION SHORT requires quality >= 55
+    // Fix 2 (v1): TREND_EXPANSION SHORT requires quality >= 55
     if (mfs.regime === 'TREND_EXPANSION' && direction === 'SHORT' && qualityScore < 55) {
       logger.info(`🚫 TREND_CONTINUATION SHORT low quality in TREND_EXPANSION: quality=${qualityScore} < 55`);
       return fail('TC_EXPANSION_SHORT_LOW_QUALITY');
     }
+    // Fix 3 (v2): SELL side with declining ADX → halve position
+    // Forensic: 4 partial_loss trades all SELL, avg -0.85%, all with peak_pct near 0
+    if (direction === 'SHORT' && adxSlope < -0.3) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ TC SHORT ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
+    }
+    // Fix 4 (v2): Block SELL entry when StochK < 20 (oversold = bad SHORT timing)
+    // Forensic: XRPUSDT SELL -1.226% entered at oversold levels
+    if (direction === 'SHORT' && stochK < 20) {
+      logger.info(`🚫 TC SHORT blocked: StochK=${stochK.toFixed(1)} < 20 (oversold entry)`);
+      return fail('TC_SHORT_OVERSOLD_ENTRY');
+    }
+    // Fix 5 (v2): Require momentum alignment for BUY
+    // Forensic: DOTUSDT BUY -0.692% with weak momentum
+    if (direction === 'LONG' && momentumResult.score < 3 && adx < 25) {
+      positionMultiplier *= 0.40;
+      logger.info(`⚠️ TC LONG weak momentum: score=${momentumResult.score}, adx=${adx.toFixed(1)}, pos reduced`);
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // STRONG_TREND Surgical Fixes (Forensic-driven)
-  // Problem: SL bleeding (-232 PnL), bad entry timing, micro-lock drag
+  // STRONG_TREND Surgical Fixes v2 (Forensic 2026-03-16)
+  // v1: StochRSI overbought/oversold entry blocks
+  // v2: ALL top 11 worst losses are SELL side. BUY 11T 27.3% WR.
+  //     SL bleeding: 8 SL + 10 partial_loss = -$25.67 total
+  //     partial_loss trades avg -1.514% with peak_pct=0 (instant loss)
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'STRONG_TREND') {
-    // Fix 1: StochRSI entry filter — block overbought LONG / oversold SHORT
-    // Forensic finding: avg StochK at SL exit was 74.6 (LONG) / 25.6 (SHORT)
+    // Fix 1 (v1): StochRSI entry filter — block overbought LONG / oversold SHORT
     if (direction === 'LONG' && stochK > 70) {
       logger.info(`🚫 STRONG_TREND LONG blocked: StochK=${stochK.toFixed(1)} > 70 (overbought entry)`);
       return fail('STRONG_TREND_STOCH_OVERBOUGHT');
@@ -314,6 +336,24 @@ export function evaluateProductionGates(
     if (direction === 'SHORT' && stochK < 30) {
       logger.info(`🚫 STRONG_TREND SHORT blocked: StochK=${stochK.toFixed(1)} < 30 (oversold entry)`);
       return fail('STRONG_TREND_STOCH_OVERSOLD');
+    }
+    // Fix 2 (v2): SELL with declining ADX slope → reduce position
+    // Forensic: 10 partial_loss SELL trades with peak_pct=0, avg -1.514%
+    if (direction === 'SHORT' && adxSlope < 0) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ ST SHORT declining ADX: slope=${adxSlope.toFixed(2)}, pos halved`);
+    }
+    // Fix 3 (v2): BUY side quality gate — BUY WR 27.3% (3/11)
+    // Only allow BUY with strong momentum confirmation
+    if (direction === 'LONG' && momentumResult.score < 8) {
+      positionMultiplier *= 0.40;
+      logger.info(`⚠️ ST LONG weak momentum: score=${momentumResult.score}, pos reduced to 40%`);
+    }
+    // Fix 4 (v2): High-ATR SELL guard — DOTUSDT (ATR 2.5%) losses were most severe
+    const atrPct = mfs.atrPercent || 0;
+    if (direction === 'SHORT' && atrPct > 1.5 && qualityScore < 65) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ ST SHORT high-ATR guard: atr=${atrPct.toFixed(2)}%, quality=${qualityScore}, pos halved`);
     }
   }
 

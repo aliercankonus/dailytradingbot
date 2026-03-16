@@ -476,20 +476,31 @@ export const DYNAMIC_SL_PARAMS = {
 
 // ============= STRATEGY-SPECIFIC STOP LOSS OVERRIDES =============
 // Some strategies need tighter/wider SL than the symbol default.
-// Key finding: STRONG_TREND had 8 SL hits = -16.3% PnL (avg -2.04%).
-// Tighter ATR multiplier reduces avg loss without affecting winners.
+// ============= STRATEGY-SPECIFIC SL OVERRIDES =============
+// Forensic v2 (2026-03-16): Trade-by-trade analysis across all strategies
+// STRONG_TREND: 8 SL trades avg -1.746%, worst -2.351% (ALL SELL side). Cap 1.2% breached.
+// TREND_CONTINUATION: SL cap 1.0% breached (XRPUSDT -1.226%), volume_relaxation_timeout -1.212%
+// SQUEEZE_BREAKOUT: DOTUSDT -3.08% SL wiped all gains (fixed in v1)
 export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; maxCapOverride?: number }> = {
   'STRONG_TREND': {
-    atrMultiplier: 0.8,             // 0.8x ATR (vs 1.0-1.5x default) — tighter invalidation
-    maxCapOverride: 1.2,            // Hard cap at 1.2% regardless of symbol
+    atrMultiplier: 0.7,             // Tightened from 0.8 → 0.7x ATR. Forensic: SELL SL avg -1.746%
+    maxCapOverride: 1.0,            // Tightened from 1.2% → 1.0%. Forensic: 8 losses > 1.2% = -$11.89
+  },
+  'Strong Trend Continuation': {    // Legacy DB name alias
+    atrMultiplier: 0.7,
+    maxCapOverride: 1.0,
   },
   'TREND_CONTINUATION': {
-    atrMultiplier: 0.9,             // 0.9x ATR — moderate tightening
-    maxCapOverride: 1.0,            // Hard cap at 1.0% — forensic: avg SL was -1.38/-1.41%, cap saves ~+15 PnL
+    atrMultiplier: 0.8,             // Tightened from 0.9 → 0.8x ATR
+    maxCapOverride: 0.85,           // Tightened from 1.0% → 0.85%. Forensic: XRPUSDT breached at -1.226%
+  },
+  'Adaptive Trend Entry': {         // Legacy DB name alias
+    atrMultiplier: 0.8,
+    maxCapOverride: 0.85,
   },
   'SQUEEZE_BREAKOUT': {
     atrMultiplier: 1.0,             // Standard ATR — breakouts need room
-    maxCapOverride: 1.5,            // Hard cap at 1.5% — forensic: DOTUSDT -3.08% SL wiped all gains
+    maxCapOverride: 1.5,            // Hard cap at 1.5% — forensic v1: DOTUSDT -3.08% fixed
   },
 } as const;
 
