@@ -186,6 +186,29 @@ export function evaluateProductionGates(
   // Only hard block at very low quality (< 35)
   if (qualityScore < 35) return fail('VERY_LOW_QUALITY');
 
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 5b: BTC SHORT Stricter Filter
+  // BTC SHORT WR %25 → require higher quality + ADX slope confirmation
+  // ═══════════════════════════════════════════════════════════════
+  const isBtcShort = (symbol || mfs.symbol) === 'BTCUSDT' && direction === 'SHORT';
+  if (isBtcShort) {
+    // Higher quality floor for BTC SHORT (55 vs 35 default)
+    if (qualityScore < 55) {
+      logger.info(`🚫 BTC SHORT quality filter: quality=${qualityScore} < 55, blocking`);
+      return fail('BTC_SHORT_LOW_QUALITY');
+    }
+    // ADX slope must not be strongly decaying for BTC SHORT
+    if (adxSlope < -0.5) {
+      logger.info(`🚫 BTC SHORT ADX slope filter: slope=${adxSlope.toFixed(2)} < -0.5, blocking`);
+      return fail('BTC_SHORT_ADX_DECAY');
+    }
+    // Require minimum momentum strength for BTC SHORT
+    if (Math.abs(momentumResult.score) < 8) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ BTC SHORT weak momentum: score=${momentumResult.score}, pos reduced to ${(positionMultiplier * 100).toFixed(0)}%`);
+    }
+  }
+
   // Graduated quality sizing
   if (qualityScore < 50) {
     positionMultiplier *= 0.50;
