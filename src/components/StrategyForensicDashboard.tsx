@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, AlertTriangle, TrendingUp, TrendingDown, Shield, Target } from "lucide-react";
+import { Loader2, AlertTriangle, Shield, Target, BarChart3 } from "lucide-react";
 
 interface StrategyRow {
   normalized_strategy: string;
@@ -35,6 +35,18 @@ interface CloseReasonRow {
   trades: number;
   total_pnl: number;
   avg_pnl_pct: number;
+}
+
+interface SymbolRow {
+  normalized_strategy: string;
+  symbol: string;
+  side: string;
+  trades: number;
+  win_rate: number;
+  total_pnl: number;
+  avg_pnl_pct: number;
+  worst_trade_pct: number;
+  avg_peak_pct: number;
 }
 
 export function StrategyForensicDashboard() {
@@ -74,6 +86,7 @@ export function StrategyForensicDashboard() {
   const strategies: StrategyRow[] = data.by_normalized_strategy || [];
   const bySide: SideRow[] = data.by_strategy_and_side || [];
   const byCloseReason: CloseReasonRow[] = data.by_strategy_and_close_reason || [];
+  const bySymbol: SymbolRow[] = data.by_strategy_side_symbol || [];
 
   return (
     <div className="space-y-4">
@@ -107,7 +120,6 @@ export function StrategyForensicDashboard() {
                   {pnlPositive ? '+' : ''}{s.total_pnl.toFixed(2)}$
                 </Badge>
               </div>
-
               <div className="grid grid-cols-3 gap-2 text-center mb-2">
                 <div>
                   <div className="text-[10px] text-muted-foreground">Trades</div>
@@ -126,7 +138,6 @@ export function StrategyForensicDashboard() {
                   </div>
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-2 text-center text-[10px]">
                 <div className="bg-profit/10 rounded p-1">
                   <span className="text-muted-foreground">Avg Win: </span>
@@ -137,8 +148,6 @@ export function StrategyForensicDashboard() {
                   <span className="text-loss font-mono">{s.avg_loss_pct ?? 0}%</span>
                 </div>
               </div>
-
-              {/* Worst trade indicator */}
               {s.worst_trade_pct < -1.5 && (
                 <div className="mt-1.5 flex items-center gap-1 text-[10px] text-loss">
                   <AlertTriangle className="h-3 w-3" />
@@ -193,6 +202,74 @@ export function StrategyForensicDashboard() {
           </table>
         </div>
       </Card>
+
+      {/* Symbol × Side Heatmap (NEW) */}
+      {bySymbol.length > 0 && (
+        <Card className="p-3 border-border">
+          <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+            <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+            Symbol × Side Risk Heatmap
+          </h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className="text-left py-1 px-2">Strateji</th>
+                  <th className="text-left py-1 px-2">Symbol</th>
+                  <th className="text-left py-1 px-2">Side</th>
+                  <th className="text-right py-1 px-2">Trades</th>
+                  <th className="text-right py-1 px-2">WR</th>
+                  <th className="text-right py-1 px-2">PnL</th>
+                  <th className="text-right py-1 px-2">Worst</th>
+                  <th className="text-right py-1 px-2">Avg Peak</th>
+                  <th className="text-right py-1 px-2">Risk</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bySymbol.slice(0, 20).map((row, i) => {
+                  const giveback = row.avg_peak_pct > 0 && row.avg_pnl_pct < row.avg_peak_pct
+                    ? ((1 - row.avg_pnl_pct / row.avg_peak_pct) * 100).toFixed(0)
+                    : null;
+                  const isHighRisk = row.total_pnl < -2 || row.win_rate < 35 || (row.worst_trade_pct && row.worst_trade_pct < -1.5);
+                  return (
+                    <tr key={i} className={`border-b border-border/50 ${isHighRisk ? 'bg-loss/5' : ''}`}>
+                      <td className="py-1 px-2 font-mono text-foreground">{row.normalized_strategy}</td>
+                      <td className="py-1 px-2 font-mono text-foreground">{row.symbol}</td>
+                      <td className="py-1 px-2">
+                        <Badge variant="outline" className="text-[9px]">
+                          {row.side === 'buy' ? '🟢' : '🔴'} {row.side.toUpperCase()}
+                        </Badge>
+                      </td>
+                      <td className="text-right py-1 px-2 font-mono text-foreground">{row.trades}</td>
+                      <td className={`text-right py-1 px-2 font-mono ${row.win_rate >= 50 ? 'text-profit' : 'text-loss'}`}>
+                        {row.win_rate}%
+                      </td>
+                      <td className={`text-right py-1 px-2 font-mono ${row.total_pnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+                        {row.total_pnl >= 0 ? '+' : ''}{row.total_pnl}$
+                      </td>
+                      <td className="text-right py-1 px-2 font-mono text-loss">
+                        {row.worst_trade_pct}%
+                      </td>
+                      <td className="text-right py-1 px-2 font-mono text-muted-foreground">
+                        {row.avg_peak_pct}%
+                      </td>
+                      <td className="text-right py-1 px-2">
+                        {isHighRisk ? (
+                          <span className="text-loss text-[9px] font-bold">⚠️ HIGH</span>
+                        ) : giveback && parseInt(giveback) > 50 ? (
+                          <span className="text-warning text-[9px]">📊 GIVEBACK {giveback}%</span>
+                        ) : (
+                          <span className="text-profit text-[9px]">✅ OK</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* Close Reason Breakdown */}
       <Card className="p-3 border-border">
