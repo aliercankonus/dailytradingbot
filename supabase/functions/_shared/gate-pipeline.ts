@@ -358,57 +358,64 @@ export function evaluateProductionGates(
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // SQUEEZE_BREAKOUT Optimization Layer
-  // Improve WR from 47% → 50%+ by adding StochRSI directional confirmation
+  // SQUEEZE_BREAKOUT Optimization Layer v3 (Backtest 2026-03-16)
+  // Backtest: 705 trades, 36.2% WR, -$221 → need quality floor + frequency reduction
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'SQUEEZE_BREAKOUT') {
-    // === FIX 1: Stricter BUY directional filter (forensic: 6 BUY trades avg -0.036%) ===
-    // Require momentum confirmation AND ADX slope rising for BUY entries
+    // === HARD BLOCK: Minimum quality 45 (backtest: low quality entries drive -PnL) ===
+    if (qualityScore < 45) {
+      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: quality=${qualityScore} < 45`);
+      return fail('SQUEEZE_LOW_QUALITY');
+    }
+    // === HARD BLOCK: Require minimum ADX 20 for meaningful breakout energy ===
+    if (adx < 20) {
+      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: ADX=${adx.toFixed(1)} < 20 (insufficient energy)`);
+      return fail('SQUEEZE_ADX_TOO_LOW');
+    }
+    // === HARD BLOCK: Require minimum |momentum| >= 5 (no flat momentum entries) ===
+    if (Math.abs(momentumResult.score) < 5) {
+      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5`);
+      return fail('SQUEEZE_NO_MOMENTUM');
+    }
+
+    // === FIX 1: Stricter BUY directional filter ===
     if (direction === 'LONG') {
-      // Hard block: BUY in bearish trend with weak momentum
       if (primaryTrend === 'bearish' && momentumResult.score < 10) {
         logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})`);
         return fail('SQUEEZE_BUY_COUNTER_TREND_WEAK');
       }
-      // Hard block: BUY with StochRSI overbought (K > 70) — forensic: entries at high K fail
       if (stochK > 70) {
         logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: overbought K=${stochK.toFixed(1)} > 70`);
         return fail('SQUEEZE_BUY_OVERBOUGHT');
       }
-      // Sizing reduction: moderate overbought zone
       if (stochK > 60) {
         positionMultiplier *= 0.60;
-        logger.info(`⚠️ SQUEEZE_BREAKOUT LONG overbought filter: K=${stochK.toFixed(1)}, pos reduced`);
       }
-      // Require ADX slope rising for BUY — declining ADX = fading energy
       if (adxSlope < 0) {
         positionMultiplier *= 0.50;
-        logger.info(`⚠️ SQUEEZE_BREAKOUT LONG ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
       }
-    } else if (direction === 'SHORT' && stochK < 25) {
-      positionMultiplier *= 0.60; // Already oversold → risky SHORT squeeze
-      logger.info(`⚠️ SQUEEZE_BREAKOUT SHORT oversold filter: K=${stochK.toFixed(1)}, pos reduced`);
-    }
-
-    // ADX minimum for squeeze: require at least 18 for meaningful breakout
-    if (adx < 18) {
-      positionMultiplier *= 0.50;
-      logger.info(`⚠️ SQUEEZE_BREAKOUT low ADX: ${adx.toFixed(1)} < 18, pos reduced`);
+    } else if (direction === 'SHORT') {
+      if (stochK < 25) {
+        positionMultiplier *= 0.60;
+      }
+      // SHORT in bullish trend with weak momentum → block
+      if (primaryTrend === 'bullish' && momentumResult.score > -10) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum`);
+        return fail('SQUEEZE_SELL_COUNTER_TREND_WEAK');
+      }
     }
 
     // Momentum alignment bonus: when momentum strongly confirms direction
     if ((direction === 'LONG' && momentumResult.score > 15) || (direction === 'SHORT' && momentumResult.score < -15)) {
-      positionMultiplier *= 1.15; // Strong momentum + squeeze = high conviction
-      logger.info(`💪 SQUEEZE_BREAKOUT momentum bonus: mom=${momentumResult.score}, pos boosted`);
+      positionMultiplier *= 1.15;
     }
 
     // Deep squeeze bonus
     const bbWidth = mfs.bollinger?.["1h"]?.width || 0;
     if (bbWidth > 0 && bbWidth < 2.0) {
-      positionMultiplier *= 1.20; // Very tight squeeze = strong breakout potential
-      logger.info(`🔥 SQUEEZE_BREAKOUT deep squeeze: bbWidth=${bbWidth.toFixed(2)}, 20% bonus`);
+      positionMultiplier *= 1.20;
     } else if (bbWidth > 0 && bbWidth > 2.5 && bbWidth < 3.0) {
-      positionMultiplier *= 0.70; // Shallow squeeze = lower conviction
+      positionMultiplier *= 0.70;
     }
   }
 
