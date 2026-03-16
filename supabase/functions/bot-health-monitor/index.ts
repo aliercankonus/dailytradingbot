@@ -425,7 +425,29 @@ serve(async (req) => {
         lastHeartbeatTime = new Date(latestHeartbeat[0].recorded_at);
         minutesSinceHeartbeat = Math.round((Date.now() - lastHeartbeatTime.getTime()) / (1000 * 60));
         
-        if (lastHeartbeatTime < heartbeatThreshold) {
+        if (lastHeartbeatTime >= heartbeatThreshold) {
+          // ===== AUTO-RECOVERY: Heartbeat is fresh — resolve any open heartbeat_missing alerts =====
+          const { data: openHeartbeatAlerts } = await supabase
+            .from('bot_health_state')
+            .select('id, started_at')
+            .eq('user_id', userId)
+            .eq('state_type', 'heartbeat_missing')
+            .is('resolved_at', null);
+          
+          if (openHeartbeatAlerts && openHeartbeatAlerts.length > 0) {
+            const now = new Date().toISOString();
+            const ids = openHeartbeatAlerts.map((a: any) => a.id);
+            await supabase
+              .from('bot_health_state')
+              .update({ resolved_at: now, state: 'recovered' })
+              .in('id', ids);
+            
+            for (const oa of openHeartbeatAlerts) {
+              const downtimeMin = Math.round((Date.now() - new Date(oa.started_at).getTime()) / 60000);
+              console.log(`[HEALTH_MONITOR user=${userIdShort}] ✅ HEARTBEAT RECOVERED — alert ${oa.id.substring(0, 8)} resolved (was missing for ${downtimeMin}min)`);
+            }
+          }
+        } else {
           // TIER 1 ALERT: No heartbeat for 30+ minutes
           overallStatus = 'critical';
           
