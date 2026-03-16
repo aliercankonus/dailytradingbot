@@ -1946,21 +1946,22 @@ export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // Extended tiers provide continuous profit protection from 0.50% to 2.50% peak
   // This ensures price-based locks are primary, decay exits are failsafe only
   TIERS: [
-    // Standard tiers (0.55% - 0.80%) - TIGHTENED: reduce peak giveback from ~30% → ~20%
-    { peakThreshold: 0.55, lockTarget: 0.40 },  // 73% protection (was 64%) — at 0.55% peak, lock +0.40%
-    { peakThreshold: 0.60, lockTarget: 0.45 },  // 75% protection (was 67%)
-    { peakThreshold: 0.65, lockTarget: 0.50 },  // 77% protection (was 69%)
-    { peakThreshold: 0.70, lockTarget: 0.55 },  // 79% protection (was 71%)
-    { peakThreshold: 0.75, lockTarget: 0.60 },  // 80% protection (was 73%)
-    { peakThreshold: 0.80, lockTarget: 0.65 },  // 81% protection (was 75%)
-    // Extended tiers (0.90% - 2.50%) — tightened proportionally
-    { peakThreshold: 0.90, lockTarget: 0.75 },  // 83% protection (was 78%)
-    { peakThreshold: 1.00, lockTarget: 0.82 },  // 82% protection (was 75%)
-    { peakThreshold: 1.25, lockTarget: 1.03 },  // 82% protection (was 76%)
-    { peakThreshold: 1.50, lockTarget: 1.25 },  // 83% protection (was 77%)
-    { peakThreshold: 1.75, lockTarget: 1.45 },  // 83% protection (was 77%)
-    { peakThreshold: 2.00, lockTarget: 1.65 },  // 83% protection (was 78%)
-    { peakThreshold: 2.50, lockTarget: 2.10 },  // 84% protection (was 80%)
+    // Standard tiers (0.50% - 0.80%) - v3 TIGHTENED: ~85% protection across all tiers
+    { peakThreshold: 0.50, lockTarget: 0.42 },  // 84% protection — capture small peaks
+    { peakThreshold: 0.55, lockTarget: 0.46 },  // 84% protection (was 73%)
+    { peakThreshold: 0.60, lockTarget: 0.50 },  // 83% protection (was 75%)
+    { peakThreshold: 0.65, lockTarget: 0.55 },  // 85% protection (was 77%)
+    { peakThreshold: 0.70, lockTarget: 0.60 },  // 86% protection (was 79%)
+    { peakThreshold: 0.75, lockTarget: 0.64 },  // 85% protection (was 80%)
+    { peakThreshold: 0.80, lockTarget: 0.68 },  // 85% protection (was 81%)
+    // Extended tiers (0.90% - 2.50%) — 85-87% protection
+    { peakThreshold: 0.90, lockTarget: 0.77 },  // 86% protection (was 83%)
+    { peakThreshold: 1.00, lockTarget: 0.86 },  // 86% protection (was 82%)
+    { peakThreshold: 1.25, lockTarget: 1.08 },  // 86% protection (was 82%)
+    { peakThreshold: 1.50, lockTarget: 1.30 },  // 87% protection (was 83%)
+    { peakThreshold: 1.75, lockTarget: 1.52 },  // 87% protection (was 83%)
+    { peakThreshold: 2.00, lockTarget: 1.74 },  // 87% protection (was 83%)
+    { peakThreshold: 2.50, lockTarget: 2.18 },  // 87% protection (was 84%)
   ],
   // Raised from 0.85 to 2.75 - progressive locks now control 0.50-2.50% range
   // Trailing stop takes over only for exceptional moves above 2.75%

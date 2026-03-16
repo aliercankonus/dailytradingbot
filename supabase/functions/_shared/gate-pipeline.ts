@@ -290,6 +290,11 @@ export function evaluateProductionGates(
   //     trailing_stop avg +0.161% too low — progressive lock not capturing
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'TREND_CONTINUATION') {
+    // Hard block: quality < 40 (backtest: low quality TC trades are negative expectancy)
+    if (qualityScore < 40) {
+      logger.info(`🚫 TREND_CONTINUATION blocked: quality=${qualityScore} < 40`);
+      return fail('TC_LOW_QUALITY');
+    }
     // Fix 1 (v1): Block LONG in RANGE_COMPRESSION — 30 trades, 30% WR, -13.09 PnL
     if (mfs.regime === 'RANGE_COMPRESSION' && direction === 'LONG') {
       logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION: regime=${mfs.regime}`);
@@ -301,22 +306,24 @@ export function evaluateProductionGates(
       return fail('TC_EXPANSION_SHORT_LOW_QUALITY');
     }
     // Fix 3 (v2): SELL side with declining ADX → halve position
-    // Forensic: 4 partial_loss trades all SELL, avg -0.85%, all with peak_pct near 0
     if (direction === 'SHORT' && adxSlope < -0.3) {
       positionMultiplier *= 0.50;
       logger.info(`⚠️ TC SHORT ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
     }
     // Fix 4 (v2): Block SELL entry when StochK < 20 (oversold = bad SHORT timing)
-    // Forensic: XRPUSDT SELL -1.226% entered at oversold levels
     if (direction === 'SHORT' && stochK < 20) {
       logger.info(`🚫 TC SHORT blocked: StochK=${stochK.toFixed(1)} < 20 (oversold entry)`);
       return fail('TC_SHORT_OVERSOLD_ENTRY');
     }
     // Fix 5 (v2): Require momentum alignment for BUY
-    // Forensic: DOTUSDT BUY -0.692% with weak momentum
     if (direction === 'LONG' && momentumResult.score < 3 && adx < 25) {
       positionMultiplier *= 0.40;
       logger.info(`⚠️ TC LONG weak momentum: score=${momentumResult.score}, adx=${adx.toFixed(1)}, pos reduced`);
+    }
+    // Fix 6 (v3): Block LONG with very weak momentum in any trend
+    if (direction === 'LONG' && momentumResult.score < 0) {
+      positionMultiplier *= 0.30;
+      logger.info(`⚠️ TC LONG negative momentum: score=${momentumResult.score}, pos 30%`);
     }
   }
 
