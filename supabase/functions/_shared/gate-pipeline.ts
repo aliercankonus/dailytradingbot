@@ -186,6 +186,29 @@ export function evaluateProductionGates(
   // Only hard block at very low quality (< 35)
   if (qualityScore < 35) return fail('VERY_LOW_QUALITY');
 
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 5b: BTC SHORT Stricter Filter
+  // BTC SHORT WR %25 → require higher quality + ADX slope confirmation
+  // ═══════════════════════════════════════════════════════════════
+  const isBtcShort = (symbol || mfs.symbol) === 'BTCUSDT' && direction === 'SHORT';
+  if (isBtcShort) {
+    // Higher quality floor for BTC SHORT (55 vs 35 default)
+    if (qualityScore < 55) {
+      logger.info(`🚫 BTC SHORT quality filter: quality=${qualityScore} < 55, blocking`);
+      return fail('BTC_SHORT_LOW_QUALITY');
+    }
+    // ADX slope must not be strongly decaying for BTC SHORT
+    if (adxSlope < -0.5) {
+      logger.info(`🚫 BTC SHORT ADX slope filter: slope=${adxSlope.toFixed(2)} < -0.5, blocking`);
+      return fail('BTC_SHORT_ADX_DECAY');
+    }
+    // Require minimum momentum strength for BTC SHORT
+    if (Math.abs(momentumResult.score) < 8) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ BTC SHORT weak momentum: score=${momentumResult.score}, pos reduced to ${(positionMultiplier * 100).toFixed(0)}%`);
+    }
+  }
+
   // Graduated quality sizing
   if (qualityScore < 50) {
     positionMultiplier *= 0.50;
@@ -257,6 +280,42 @@ export function evaluateProductionGates(
     const macdHist = mfs.macdHistogram;
     if ((direction === 'LONG' && macdHist > 0) || (direction === 'SHORT' && macdHist < 0)) {
       strategyName = 'SQUEEZE_BREAKOUT';
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SQUEEZE_BREAKOUT Optimization Layer
+  // Improve WR from 47% → 50%+ by adding StochRSI directional confirmation
+  // ═══════════════════════════════════════════════════════════════
+  if (strategyName === 'SQUEEZE_BREAKOUT') {
+    // StochRSI directional confirmation: reduce size when StochRSI opposes direction
+    if (direction === 'LONG' && stochK > 75) {
+      positionMultiplier *= 0.60; // Already overbought → risky LONG squeeze
+      logger.info(`⚠️ SQUEEZE_BREAKOUT LONG overbought filter: K=${stochK.toFixed(1)}, pos reduced`);
+    } else if (direction === 'SHORT' && stochK < 25) {
+      positionMultiplier *= 0.60; // Already oversold → risky SHORT squeeze
+      logger.info(`⚠️ SQUEEZE_BREAKOUT SHORT oversold filter: K=${stochK.toFixed(1)}, pos reduced`);
+    }
+
+    // ADX minimum for squeeze: require at least 18 for meaningful breakout
+    if (adx < 18) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ SQUEEZE_BREAKOUT low ADX: ${adx.toFixed(1)} < 18, pos reduced`);
+    }
+
+    // Momentum alignment bonus: when momentum strongly confirms direction
+    if ((direction === 'LONG' && momentumResult.score > 15) || (direction === 'SHORT' && momentumResult.score < -15)) {
+      positionMultiplier *= 1.15; // Strong momentum + squeeze = high conviction
+      logger.info(`💪 SQUEEZE_BREAKOUT momentum bonus: mom=${momentumResult.score}, pos boosted`);
+    }
+
+    // Deep squeeze bonus from BTC_PARAMS
+    const bbWidth = mfs.bollinger?.["1h"]?.width || 0;
+    if (bbWidth > 0 && bbWidth < 2.0) {
+      positionMultiplier *= 1.20; // Very tight squeeze = strong breakout potential
+      logger.info(`🔥 SQUEEZE_BREAKOUT deep squeeze: bbWidth=${bbWidth.toFixed(2)}, 20% bonus`);
+    } else if (bbWidth > 0 && bbWidth > 2.5 && bbWidth < 3.0) {
+      positionMultiplier *= 0.70; // Shallow squeeze = lower conviction
     }
   }
 
