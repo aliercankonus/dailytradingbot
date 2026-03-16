@@ -283,6 +283,42 @@ export function evaluateProductionGates(
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // SQUEEZE_BREAKOUT Optimization Layer
+  // Improve WR from 47% → 50%+ by adding StochRSI directional confirmation
+  // ═══════════════════════════════════════════════════════════════
+  if (strategyName === 'SQUEEZE_BREAKOUT') {
+    // StochRSI directional confirmation: reduce size when StochRSI opposes direction
+    if (direction === 'LONG' && stochK > 75) {
+      positionMultiplier *= 0.60; // Already overbought → risky LONG squeeze
+      logger.info(`⚠️ SQUEEZE_BREAKOUT LONG overbought filter: K=${stochK.toFixed(1)}, pos reduced`);
+    } else if (direction === 'SHORT' && stochK < 25) {
+      positionMultiplier *= 0.60; // Already oversold → risky SHORT squeeze
+      logger.info(`⚠️ SQUEEZE_BREAKOUT SHORT oversold filter: K=${stochK.toFixed(1)}, pos reduced`);
+    }
+
+    // ADX minimum for squeeze: require at least 18 for meaningful breakout
+    if (adx < 18) {
+      positionMultiplier *= 0.50;
+      logger.info(`⚠️ SQUEEZE_BREAKOUT low ADX: ${adx.toFixed(1)} < 18, pos reduced`);
+    }
+
+    // Momentum alignment bonus: when momentum strongly confirms direction
+    if ((direction === 'LONG' && momentumResult.score > 15) || (direction === 'SHORT' && momentumResult.score < -15)) {
+      positionMultiplier *= 1.15; // Strong momentum + squeeze = high conviction
+      logger.info(`💪 SQUEEZE_BREAKOUT momentum bonus: mom=${momentumResult.score}, pos boosted`);
+    }
+
+    // Deep squeeze bonus from BTC_PARAMS
+    const bbWidth = mfs.bollinger?.["1h"]?.width || 0;
+    if (bbWidth > 0 && bbWidth < 2.0) {
+      positionMultiplier *= 1.20; // Very tight squeeze = strong breakout potential
+      logger.info(`🔥 SQUEEZE_BREAKOUT deep squeeze: bbWidth=${bbWidth.toFixed(2)}, 20% bonus`);
+    } else if (bbWidth > 0 && bbWidth > 2.5 && bbWidth < 3.0) {
+      positionMultiplier *= 0.70; // Shallow squeeze = lower conviction
+    }
+  }
+
   // Floor: minimum 10% position (never zero unless hard-blocked)
   positionMultiplier = Math.max(positionMultiplier, 0.10);
 
