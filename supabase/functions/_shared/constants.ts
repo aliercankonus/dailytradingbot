@@ -495,7 +495,7 @@ export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; max
 // Expected impact: ~20% fewer SL trades, PF improvement +0.15-0.25.
 export const STRATEGY_QUALITY_GATES: Record<string, { minQualityScore: number }> = {
   'STRONG_TREND': {
-    minQualityScore: 65,            // Reject if qualityScore < 65 (was using global ~45-52)
+    minQualityScore: 50,            // Lowered from 65 — was killing valid strong trend signals
   },
   'SQUEEZE_BREAKOUT': {
     minQualityScore: 58,            // Moderate filter — squeeze signals need decent setup quality
