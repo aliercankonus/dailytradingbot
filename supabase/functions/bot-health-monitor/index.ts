@@ -337,7 +337,34 @@ serve(async (req) => {
         const wsHealth = await checkWebSocketHealth(supabaseUrl, supabaseKey, fn);
         wsHealthResults.push(wsHealth);
         
-        if (wsHealth.status !== 'healthy') {
+        if (wsHealth.status === 'healthy') {
+          // ===== AUTO-RECOVERY DETECTION =====
+          // Resolve any open alerts for this WebSocket function
+          const { data: openAlerts } = await supabase
+            .from('bot_health_state')
+            .select('id, user_id, state, started_at')
+            .eq('state_type', `websocket_${fn}`)
+            .is('resolved_at', null);
+          
+          if (openAlerts && openAlerts.length > 0) {
+            const now = new Date().toISOString();
+            const ids = openAlerts.map((a: any) => a.id);
+            await supabase
+              .from('bot_health_state')
+              .update({ resolved_at: now, state: 'recovered' })
+              .in('id', ids);
+            
+            console.log(`[HEALTH_MONITOR] ✅ AUTO-RECOVERY: WebSocket ${fn} recovered — resolved ${openAlerts.length} open alert(s)`);
+            
+            for (const openAlert of openAlerts) {
+              const startedAt = new Date(openAlert.started_at);
+              const downtimeMin = Math.round((Date.now() - startedAt.getTime()) / 60000);
+              console.log(`[HEALTH_MONITOR]   → Alert ${openAlert.id.substring(0, 8)} for user ${openAlert.user_id.substring(0, 8)} resolved (was ${openAlert.state} for ${downtimeMin}min)`);
+            }
+          } else {
+            console.log(`[HEALTH_MONITOR] ✅ WebSocket ${fn}: healthy`);
+          }
+        } else {
           console.warn(`[HEALTH_MONITOR] ⚠️ WebSocket ${fn}: ${wsHealth.status} - ${wsHealth.error || 'stale'}`);
           
           // Check cooldown before alerting
