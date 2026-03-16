@@ -284,6 +284,23 @@ export function evaluateProductionGates(
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // TREND_CONTINUATION Surgical Fixes (Forensic-driven)
+  // Problem: RANGE_COMPRESSION LONG -13.09 PnL, TREND_EXPANSION SHORT low quality losses
+  // ═══════════════════════════════════════════════════════════════
+  if (strategyName === 'TREND_CONTINUATION') {
+    // Fix 1: Block LONG in RANGE_COMPRESSION — 30 trades, 30% WR, -13.09 PnL
+    if (mfs.regime === 'RANGE_COMPRESSION' && direction === 'LONG') {
+      logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION: regime=${mfs.regime}`);
+      return fail('TC_RANGE_COMPRESSION_LONG_BLOCKED');
+    }
+    // Fix 2: TREND_EXPANSION SHORT requires quality >= 55
+    if (mfs.regime === 'TREND_EXPANSION' && direction === 'SHORT' && qualityScore < 55) {
+      logger.info(`🚫 TREND_CONTINUATION SHORT low quality in TREND_EXPANSION: quality=${qualityScore} < 55`);
+      return fail('TC_EXPANSION_SHORT_LOW_QUALITY');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // STRONG_TREND Surgical Fixes (Forensic-driven)
   // Problem: SL bleeding (-232 PnL), bad entry timing, micro-lock drag
   // ═══════════════════════════════════════════════════════════════
