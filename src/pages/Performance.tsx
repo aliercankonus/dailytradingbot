@@ -11,6 +11,7 @@ import { format } from "date-fns";
 
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
+import { StrategyForensicDashboard } from "@/components/StrategyForensicDashboard";
 
 
 const Performance = () => {
