@@ -347,7 +347,7 @@ export const BTC_PARAMS = {
   // UNVALIDATED — restricting to safe strategies until backtest confirms edge
   // Mirrors SHORT routing logic to prevent untested STRONG_TREND/TREND_CONTINUATION drag
   longStrategyRouting: {
-    enabled: false, // DISABLED: BTC LONG has no edge (PF 0.34 over 90-day bearish). Backtest confirmed: disabled PF=1.48 vs Q70 PF=1.46.
+    enabled: true, // RE-ENABLED: Allow BTC LONG — macro bias gate handles sizing reduction instead of hard block
     enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
     disabledStrategies: {
       STRONG_TREND: { enabled: false, reason: 'Unvalidated for LONG — risk of late entry in exhaustion' },
