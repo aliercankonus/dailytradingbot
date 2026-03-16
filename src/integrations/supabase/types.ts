@@ -1599,6 +1599,10 @@ export type Database = {
         Args: { p_since: string; p_user_id: string }
         Returns: Json
       }
+      get_strategy_forensic_report: {
+        Args: { p_days?: number; p_user_id: string }
+        Returns: Json
+      }
       get_user_binance_credentials: {
         Args: { p_user_id: string }
         Returns: {
