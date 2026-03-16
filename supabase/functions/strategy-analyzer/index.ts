@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+// RADICAL SIMPLIFICATION: Use simplified gate pipeline for signal decisions
+import { evaluateProductionGates, type GateResult } from "../_shared/gate-pipeline.ts";
 import {
   LOW_CONFIDENCE_STANDARD_EXIT,
   ADX_THRESHOLDS, 
@@ -2714,7 +2716,13 @@ serve(async (req) => {
       | 'ANALYZER_ERROR'
       // Dead-momentum-chasing prevention
       | 'WORSE_PRICE_REENTRY_BLOCK'
-      | 'SAME_DIRECTION_STACKING';
+      | 'SAME_DIRECTION_STACKING'
+      // SIMPLIFIED PIPELINE gates
+      | 'ADX_NO_ENERGY'
+      | 'NO_DIRECTION'
+      | 'MOMENTUM_STRONGLY_OPPOSING'
+      | 'VERY_LOW_QUALITY'
+      | 'UNKNOWN';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     const rejectionBuffer = new RejectionBuffer();
@@ -3265,7 +3273,184 @@ serve(async (req) => {
         
         logger.forSymbol(symbol).debug(`📊 EARLY SMART MOMENTUM: score=${earlySmartMomentum.score.toFixed(0)} (${earlySmartMomentum.direction}) phase=${earlySmartMomentum.phase} | ADX slope=${earlyAdxSlope.toFixed(3)}, rising=${earlySmartAdxRising}`);
         const _mc = earlySmartMomentum.components;
-        // NOTE: MOMENTUM_COMPONENTS log deferred until after liquidity trap detection (line ~3242)
+
+        // ═══════════════════════════════════════════════════════════════
+        // RADICAL SIMPLIFICATION: Use simplified gate pipeline
+        // This bypasses the 14,000 lines of legacy gate logic below
+        // and generates signals directly when conditions are met.
+        // ═══════════════════════════════════════════════════════════════
+        const simplifiedGateResult = evaluateProductionGates(
+          mfs as any,
+          earlySmartMomentum,
+          symbol,
+          klines,
+        );
+        
+        if (!simplifiedGateResult.passed) {
+          // Gate rejected — log and skip to next symbol
+          perSymbolGateAttribution.set(symbol, { 
+            gate: (simplifiedGateResult.gate || 'UNKNOWN') as GateType, 
+            details: `Simplified pipeline: ${simplifiedGateResult.gate} | ADX=${adx.toFixed(1)} K=${mfs.stochRsi["1h"].k.toFixed(1)} mom=${earlySmartMomentum.score.toFixed(0)}` 
+          });
+          symbolRegimeMap.set(symbol, mfs.regime || 'REJECTED');
+          
+          rejectionBuffer.add({
+            user_id: userId,
+            symbol,
+            rejection_reason: `SIMPLIFIED_GATE: ${simplifiedGateResult.gate}`,
+            filters_status: {
+              gate: simplifiedGateResult.gate,
+              adx: adx.toFixed(1),
+              adxSlope: adxSlope.toFixed(2),
+              stochK: mfs.stochRsi["1h"].k.toFixed(1),
+              momentumScore: earlySmartMomentum.score.toFixed(0),
+              primaryTrend: mfs.primaryTrend,
+              regime: mfs.regime,
+            },
+          });
+          
+          logger.forSymbol(symbol).info(`🚫 SIMPLIFIED GATE REJECT: ${simplifiedGateResult.gate} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} K=${mfs.stochRsi["1h"].k.toFixed(1)} mom=${earlySmartMomentum.score.toFixed(0)} trend=${mfs.primaryTrend}`);
+          continue;
+        }
+        
+        // Gate PASSED — generate signal directly, bypass all legacy gates
+        const gateDirection = simplifiedGateResult.direction!;
+        const gateSignalType: 'long' | 'short' = gateDirection === 'LONG' ? 'long' : 'short';
+        const gatePositionMultiplier = simplifiedGateResult.positionMultiplier;
+        const gateQuality = simplifiedGateResult.qualityScore;
+        const gateStrategy = simplifiedGateResult.strategyName;
+        
+        // Get market data for signal
+        const marketDataForSignal = marketDataMap.get(symbol);
+        if (!marketDataForSignal) {
+          logger.forSymbol(symbol).warn(`Missing market data after gate pass`);
+          continue;
+        }
+        const signalPrice = parseFloat(marketDataForSignal.lastPrice);
+        if (!Number.isFinite(signalPrice) || signalPrice <= 0) {
+          logger.forSymbol(symbol).warn(`Invalid price after gate pass: ${marketDataForSignal.lastPrice}`);
+          continue;
+        }
+        
+        // Calculate SL/TP using ATR
+        const signalATR = mfs.atr || earlyATR;
+        const atrPercent = signalATR / signalPrice * 100;
+        
+        // Dynamic SL based on ADX and position multiplier
+        let slMultiplier = 1.5; // Base: 1.5x ATR
+        if (adx >= 35 && adxSlope > 0) slMultiplier = 2.0; // Strong trend: wider SL
+        else if (adx < 20) slMultiplier = 1.0; // Low energy: tighter SL
+        
+        // TP proportional to SL with risk:reward based on confidence
+        let tpMultiplier = slMultiplier * 2.0; // Default 1:2 R:R
+        if (gateQuality >= 70) tpMultiplier = slMultiplier * 2.5; // High quality: 1:2.5
+        else if (gateQuality < 50) tpMultiplier = slMultiplier * 1.5; // Low quality: 1:1.5
+        
+        const slAmount = signalATR * slMultiplier;
+        const tpAmount = signalATR * tpMultiplier;
+        
+        const signalSL = gateSignalType === 'long' 
+          ? signalPrice - slAmount 
+          : signalPrice + slAmount;
+        const signalTP = gateSignalType === 'long' 
+          ? signalPrice + tpAmount 
+          : signalPrice - tpAmount;
+        
+        // Calculate position size
+        const basePositionSize = riskParams.base_position_size_percent || 2;
+        const finalPositionSize = basePositionSize * gatePositionMultiplier;
+        
+        // Map trend for DB
+        const dbTrend = mfs.primaryTrend === 'bullish' ? 'bullish' 
+          : mfs.primaryTrend === 'bearish' ? 'bearish' : 'ranging';
+        
+        const simplifiedSignal = {
+          user_id: userId,
+          symbol,
+          signal_type: gateSignalType,
+          trend: dbTrend as 'bullish' | 'bearish' | 'ranging',
+          confidence_score: Math.round(Math.min(gateQuality, 100)),
+          entry_price: signalPrice,
+          stop_loss: signalSL,
+          take_profit: signalTP,
+          strategy_name: gateStrategy,
+          reason: `Simplified Pipeline: ${gateStrategy} | ADX=${adx.toFixed(1)} Mom=${earlySmartMomentum.score.toFixed(0)} Pos=${(gatePositionMultiplier * 100).toFixed(0)}%`,
+          indicators: {
+            pipeline: 'SIMPLIFIED_V1',
+            strategyName: gateStrategy,
+            qualityScore: gateQuality,
+            positionSizePercent: finalPositionSize,
+            positionMultiplier: gatePositionMultiplier,
+            adx: adx.toFixed(1),
+            adxSlope: adxSlope.toFixed(2),
+            stochRsi1h_k: mfs.stochRsi["1h"].k.toFixed(1),
+            stochRsi4h_k: mfs.stochRsi["4h"]?.k?.toFixed(1) ?? 'N/A',
+            momentumScore: earlySmartMomentum.score.toFixed(0),
+            momentumDirection: earlySmartMomentum.direction,
+            momentumPhase: earlySmartMomentum.phase,
+            primaryTrend: mfs.primaryTrend,
+            regime: mfs.regime,
+            slAtr: slMultiplier.toFixed(1),
+            tpAtr: tpMultiplier.toFixed(1),
+            atrPercent: atrPercent.toFixed(3),
+          },
+          expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 min expiry
+          created_by_rebalancer: false,
+        };
+        
+        // Store regime for dashboard
+        symbolRegimeMap.set(symbol, mfs.regime || gateStrategy);
+        
+        logger.forSymbol(symbol).success(
+          `✅ SIMPLIFIED SIGNAL: ${gateSignalType.toUpperCase()} ${symbol} via ${gateStrategy} | ` +
+          `Price=${signalPrice.toFixed(2)} SL=${signalSL.toFixed(2)} TP=${signalTP.toFixed(2)} | ` +
+          `ADX=${adx.toFixed(1)} Mom=${earlySmartMomentum.score.toFixed(0)} Quality=${gateQuality} | ` +
+          `Position=${(gatePositionMultiplier * 100).toFixed(0)}% (${finalPositionSize.toFixed(2)}%)`
+        );
+        
+        // Insert signal into DB
+        const { data: insertedSimplifiedSignal, error: simplifiedInsertError } = await supabase
+          .from("trading_signals")
+          .insert(simplifiedSignal)
+          .select("id")
+          .single();
+        
+        if (simplifiedInsertError) {
+          logger.forSymbol(symbol).error(`Simplified signal insert error: ${simplifiedInsertError.message}`);
+          continue;
+        }
+        
+        if (insertedSimplifiedSignal) {
+          const signalWithId = { ...simplifiedSignal, id: insertedSimplifiedSignal.id };
+          signals.push(signalWithId);
+          totalSignalsGenerated++;
+          existingSignalsSet.add(symbol);
+          
+          // IMMEDIATE EXECUTION
+          if (riskParams.auto_execute_signals) {
+            try {
+              const execStartMs = Date.now();
+              const { error: executeError } = await supabase.functions.invoke("execute-trade", {
+                headers: { "x-user-id": userId },
+                body: { signalId: insertedSimplifiedSignal.id, action: "execute" },
+              });
+              const execLatencyMs = Date.now() - execStartMs;
+              if (!executeError) {
+                executedSignals++;
+                logger.forSymbol(symbol).success(`⚡ Immediately executed (${execLatencyMs}ms latency)`);
+              } else {
+                logger.forSymbol(symbol).error(`Immediate execution failed: ${executeError}`);
+              }
+            } catch (execErr) {
+              logger.forSymbol(symbol).error(`Immediate execution error: ${execErr}`);
+            }
+          }
+        }
+        
+        continue; // Skip ALL legacy gate logic — signal already generated
+        
+        // NOTE: All code below this point in the per-symbol loop is LEGACY gate logic
+        // that is now bypassed by the simplified pipeline above.
 
         // Collect micro exhaustion data for dashboard snapshot
         const _exh = earlySmartMomentum.microExhaustion;
