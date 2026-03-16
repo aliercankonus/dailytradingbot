@@ -469,7 +469,7 @@ serve(async (req) => {
       // Use ADX and volume to determine exit sensitivity
       // ============================================================
       const mfsForPosition = mfsMap.get(position.symbol);
-      // MFS-NATIVE: All reads from MarketFeatureSnapshot — no trendData fallbacks
+      const trendData = trendDataMap.get(position.symbol) as any; // Raw trend snapshot for legacy exit logic
       const positionAdx = mfsForPosition?.adx ?? 20;
       const positionVolumeScore = mfsForPosition?.volumeScore ?? 0;
       const positionConfidence = mfsForPosition?.confidence ?? 50;
