@@ -11,6 +11,7 @@ import { format } from "date-fns";
 
 import { PerformanceAnalytics } from "@/components/PerformanceAnalytics";
 import { LossAttributionDashboard } from "@/components/LossAttributionDashboard";
+import { StrategyForensicDashboard } from "@/components/StrategyForensicDashboard";
 
 
 const Performance = () => {
@@ -119,9 +120,10 @@ const Performance = () => {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="relative md:contents">
-            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-3 h-8">
+            <TabsList className="flex w-full overflow-x-auto scrollbar-hide md:grid md:grid-cols-4 h-8">
               <TabsTrigger value="portfolio" className="min-w-[5rem] flex-shrink-0 text-xs">Portfolio</TabsTrigger>
               <TabsTrigger value="analytics" className="min-w-[5rem] flex-shrink-0 text-xs">P&L & Risk</TabsTrigger>
+              <TabsTrigger value="forensics" className="min-w-[5rem] flex-shrink-0 text-xs">Forensics</TabsTrigger>
               <TabsTrigger value="losses" className="min-w-[5rem] flex-shrink-0 text-xs">Loss Analysis</TabsTrigger>
             </TabsList>
             <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-background to-transparent pointer-events-none md:hidden" />
@@ -304,6 +306,11 @@ const Performance = () => {
                 </Card>
               </>
             )}
+          </TabsContent>
+
+          {/* Strategy Forensics Tab */}
+          <TabsContent value="forensics" className="space-y-4">
+            <StrategyForensicDashboard />
           </TabsContent>
 
           {/* Loss Analysis Tab */}

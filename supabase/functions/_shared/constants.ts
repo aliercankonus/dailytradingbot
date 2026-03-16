@@ -487,7 +487,10 @@ export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; max
     atrMultiplier: 0.9,             // 0.9x ATR — moderate tightening
     maxCapOverride: 1.0,            // Hard cap at 1.0% — forensic: avg SL was -1.38/-1.41%, cap saves ~+15 PnL
   },
-  // SQUEEZE_BREAKOUT keeps symbol defaults — breakouts need room to breathe
+  'SQUEEZE_BREAKOUT': {
+    atrMultiplier: 1.0,             // Standard ATR — breakouts need room
+    maxCapOverride: 1.5,            // Hard cap at 1.5% — forensic: DOTUSDT -3.08% SL wiped all gains
+  },
 } as const;
 
 // ============= STRATEGY-SPECIFIC ENTRY QUALITY GATES =============
@@ -1932,21 +1935,21 @@ export const PROGRESSIVE_PROFIT_LOCK_PARAMS = {
   // Extended tiers provide continuous profit protection from 0.50% to 2.50% peak
   // This ensures price-based locks are primary, decay exits are failsafe only
   TIERS: [
-    // Standard tiers (0.55% - 0.80%) - adjusted for new handoff at 0.55%
-    { peakThreshold: 0.55, lockTarget: 0.35 },  // At 0.55% peak → lock +0.35% gross (+0.15% net)
-    { peakThreshold: 0.60, lockTarget: 0.40 },  // Lock +0.40% at +0.60% peak
-    { peakThreshold: 0.65, lockTarget: 0.45 },  // Lock +0.45% at +0.65% peak
-    { peakThreshold: 0.70, lockTarget: 0.50 },  // Lock +0.50% at +0.70% peak
-    { peakThreshold: 0.75, lockTarget: 0.55 },  // Lock +0.55% at +0.75% peak
-    { peakThreshold: 0.80, lockTarget: 0.60 },  // Lock +0.60% at +0.80% peak
-    // Extended tiers (0.90% - 2.50%) - NEW: Prevent over-reliance on decay exits
-    { peakThreshold: 0.90, lockTarget: 0.70 },  // Lock +0.70% at +0.90% peak
-    { peakThreshold: 1.00, lockTarget: 0.75 },  // Lock +0.75% at +1.00% peak
-    { peakThreshold: 1.25, lockTarget: 0.95 },  // Lock +0.95% at +1.25% peak
-    { peakThreshold: 1.50, lockTarget: 1.15 },  // Lock +1.15% at +1.50% peak
-    { peakThreshold: 1.75, lockTarget: 1.35 },  // Lock +1.35% at +1.75% peak
-    { peakThreshold: 2.00, lockTarget: 1.55 },  // Lock +1.55% at +2.00% peak
-    { peakThreshold: 2.50, lockTarget: 2.00 },  // Lock +2.00% at +2.50% peak
+    // Standard tiers (0.55% - 0.80%) - TIGHTENED: reduce peak giveback from ~30% → ~20%
+    { peakThreshold: 0.55, lockTarget: 0.40 },  // 73% protection (was 64%) — at 0.55% peak, lock +0.40%
+    { peakThreshold: 0.60, lockTarget: 0.45 },  // 75% protection (was 67%)
+    { peakThreshold: 0.65, lockTarget: 0.50 },  // 77% protection (was 69%)
+    { peakThreshold: 0.70, lockTarget: 0.55 },  // 79% protection (was 71%)
+    { peakThreshold: 0.75, lockTarget: 0.60 },  // 80% protection (was 73%)
+    { peakThreshold: 0.80, lockTarget: 0.65 },  // 81% protection (was 75%)
+    // Extended tiers (0.90% - 2.50%) — tightened proportionally
+    { peakThreshold: 0.90, lockTarget: 0.75 },  // 83% protection (was 78%)
+    { peakThreshold: 1.00, lockTarget: 0.82 },  // 82% protection (was 75%)
+    { peakThreshold: 1.25, lockTarget: 1.03 },  // 82% protection (was 76%)
+    { peakThreshold: 1.50, lockTarget: 1.25 },  // 83% protection (was 77%)
+    { peakThreshold: 1.75, lockTarget: 1.45 },  // 83% protection (was 77%)
+    { peakThreshold: 2.00, lockTarget: 1.65 },  // 83% protection (was 78%)
+    { peakThreshold: 2.50, lockTarget: 2.10 },  // 84% protection (was 80%)
   ],
   // Raised from 0.85 to 2.75 - progressive locks now control 0.50-2.50% range
   // Trailing stop takes over only for exceptional moves above 2.75%

@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
-import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, GRADUATED_QUALITY_GATE, DYNAMIC_MAX_TRADES, TRAILING_DAILY_LIMIT, DYNAMIC_CONSISTENCY, VOLUME_FILTER, OBV_FILTER, VWAP_FILTER, SLIPPAGE_PROTECTION, MOMENTUM_POSITION_ADJ, ALIGNMENT_POSITION_ADJ, BOLLINGER_POSITION_ADJ, QUALITY_BASED_SIZING, LEGACY_STRATEGY_MULTIPLIERS, RISK_REWARD_FILTER, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
+import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, CONFIDENCE_THRESHOLDS, QUALITY_THRESHOLDS, STRATEGY_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, TREND_VALIDATION_PARAMS, CORRELATION_PARAMS, ORDER_EXECUTION_PARAMS, VOLUME_RELAXATION_PARAMS, STRONG_TREND_HTF_BYPASS_PARAMS, TREND_CONTINUATION_TIGHT_STOPS, DEEP_STOCHRSI_HARD_GATE, CONTEXTUAL_TP_EXPANSION, FLASH_CRASH_BOUNCE_PROBE, CAPITULATION_BOUNCE_PROBE, GRADUATED_QUALITY_GATE, DYNAMIC_MAX_TRADES, TRAILING_DAILY_LIMIT, DYNAMIC_CONSISTENCY, VOLUME_FILTER, OBV_FILTER, VWAP_FILTER, SLIPPAGE_PROTECTION, MOMENTUM_POSITION_ADJ, ALIGNMENT_POSITION_ADJ, BOLLINGER_POSITION_ADJ, QUALITY_BASED_SIZING, LEGACY_STRATEGY_MULTIPLIERS, RISK_REWARD_FILTER, DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES, getSymbolParams, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import { checkPositionCorrelation, getKnownCorrelation } from "../_shared/correlation.ts";
 import { calculateATR, calculateHistoricalATRAvg } from "../_shared/indicators.ts";
 import { 
@@ -1446,6 +1446,41 @@ serve(async (req) => {
           stopLoss = minStopLoss;
           logger.info(`✓ Adjusted SL to ${stopLoss.toFixed(2)} (${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% minimum distance)`);
         }
+      }
+    }
+
+    // ============================================================
+    // STRATEGY-SPECIFIC SL CAP ENFORCEMENT
+    // Forensic: SQUEEZE_BREAKOUT DOTUSDT -3.08% SL wiped all strategy gains
+    // Apply STRATEGY_SL_OVERRIDES maxCapOverride + DYNAMIC_SL_PARAMS
+    // ============================================================
+    if (!isProbeEntry) {
+      const stratName = signal.strategy_name || '';
+      const stratOverride = STRATEGY_SL_OVERRIDES[stratName];
+      const symP = getSymbolParams(signal.symbol);
+      let maxSlPercent = stratOverride?.maxCapOverride ?? symP.stopLoss.maxCapPercent;
+      
+      // Dynamic SL tightening for high ATR regimes
+      if (DYNAMIC_SL_PARAMS.ENABLED) {
+        const currentAtrPercent = mfs.atrPercent || atrPercent;
+        if (currentAtrPercent > DYNAMIC_SL_PARAMS.EXTREME_ATR_THRESHOLD_PERCENT) {
+          maxSlPercent *= DYNAMIC_SL_PARAMS.EXTREME_ATR_CAP_MULTIPLIER;
+        } else if (currentAtrPercent > DYNAMIC_SL_PARAMS.HIGH_ATR_THRESHOLD_PERCENT) {
+          maxSlPercent *= DYNAMIC_SL_PARAMS.HIGH_ATR_CAP_MULTIPLIER;
+        }
+      }
+      
+      // Calculate current SL distance
+      const slDistancePercent = signalSide === 'BUY'
+        ? ((currentPrice - stopLoss) / currentPrice) * 100
+        : ((stopLoss - currentPrice) / currentPrice) * 100;
+      
+      if (slDistancePercent > maxSlPercent) {
+        const oldSL = stopLoss;
+        stopLoss = signalSide === 'BUY'
+          ? currentPrice * (1 - maxSlPercent / 100)
+          : currentPrice * (1 + maxSlPercent / 100);
+        logger.risk(`🔒 SL CAP APPLIED: ${stratName} SL capped from ${slDistancePercent.toFixed(2)}% → ${maxSlPercent.toFixed(2)}% | $${oldSL.toFixed(2)} → $${stopLoss.toFixed(2)}`);
       }
     }
 

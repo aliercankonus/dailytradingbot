@@ -322,10 +322,29 @@ export function evaluateProductionGates(
   // Improve WR from 47% → 50%+ by adding StochRSI directional confirmation
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'SQUEEZE_BREAKOUT') {
-    // StochRSI directional confirmation: reduce size when StochRSI opposes direction
-    if (direction === 'LONG' && stochK > 75) {
-      positionMultiplier *= 0.60; // Already overbought → risky LONG squeeze
-      logger.info(`⚠️ SQUEEZE_BREAKOUT LONG overbought filter: K=${stochK.toFixed(1)}, pos reduced`);
+    // === FIX 1: Stricter BUY directional filter (forensic: 6 BUY trades avg -0.036%) ===
+    // Require momentum confirmation AND ADX slope rising for BUY entries
+    if (direction === 'LONG') {
+      // Hard block: BUY in bearish trend with weak momentum
+      if (primaryTrend === 'bearish' && momentumResult.score < 10) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})`);
+        return fail('SQUEEZE_BUY_COUNTER_TREND_WEAK');
+      }
+      // Hard block: BUY with StochRSI overbought (K > 70) — forensic: entries at high K fail
+      if (stochK > 70) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: overbought K=${stochK.toFixed(1)} > 70`);
+        return fail('SQUEEZE_BUY_OVERBOUGHT');
+      }
+      // Sizing reduction: moderate overbought zone
+      if (stochK > 60) {
+        positionMultiplier *= 0.60;
+        logger.info(`⚠️ SQUEEZE_BREAKOUT LONG overbought filter: K=${stochK.toFixed(1)}, pos reduced`);
+      }
+      // Require ADX slope rising for BUY — declining ADX = fading energy
+      if (adxSlope < 0) {
+        positionMultiplier *= 0.50;
+        logger.info(`⚠️ SQUEEZE_BREAKOUT LONG ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
+      }
     } else if (direction === 'SHORT' && stochK < 25) {
       positionMultiplier *= 0.60; // Already oversold → risky SHORT squeeze
       logger.info(`⚠️ SQUEEZE_BREAKOUT SHORT oversold filter: K=${stochK.toFixed(1)}, pos reduced`);
@@ -343,7 +362,7 @@ export function evaluateProductionGates(
       logger.info(`💪 SQUEEZE_BREAKOUT momentum bonus: mom=${momentumResult.score}, pos boosted`);
     }
 
-    // Deep squeeze bonus from BTC_PARAMS
+    // Deep squeeze bonus
     const bbWidth = mfs.bollinger?.["1h"]?.width || 0;
     if (bbWidth > 0 && bbWidth < 2.0) {
       positionMultiplier *= 1.20; // Very tight squeeze = strong breakout potential
