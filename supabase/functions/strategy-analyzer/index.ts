@@ -2716,7 +2716,13 @@ serve(async (req) => {
       | 'ANALYZER_ERROR'
       // Dead-momentum-chasing prevention
       | 'WORSE_PRICE_REENTRY_BLOCK'
-      | 'SAME_DIRECTION_STACKING';
+      | 'SAME_DIRECTION_STACKING'
+      // SIMPLIFIED PIPELINE gates
+      | 'ADX_NO_ENERGY'
+      | 'NO_DIRECTION'
+      | 'MOMENTUM_STRONGLY_OPPOSING'
+      | 'VERY_LOW_QUALITY'
+      | 'UNKNOWN';
     
     const perSymbolGateAttribution = new Map<string, { gate: GateType; details: string }>();
     const rejectionBuffer = new RejectionBuffer();
