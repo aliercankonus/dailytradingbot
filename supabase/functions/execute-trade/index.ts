@@ -1449,6 +1449,41 @@ serve(async (req) => {
       }
     }
 
+    // ============================================================
+    // STRATEGY-SPECIFIC SL CAP ENFORCEMENT
+    // Forensic: SQUEEZE_BREAKOUT DOTUSDT -3.08% SL wiped all strategy gains
+    // Apply STRATEGY_SL_OVERRIDES maxCapOverride + DYNAMIC_SL_PARAMS
+    // ============================================================
+    if (!isProbeEntry) {
+      const stratName = signal.strategy_name || '';
+      const stratOverride = STRATEGY_SL_OVERRIDES[stratName];
+      const symP = getSymbolParams(signal.symbol);
+      let maxSlPercent = stratOverride?.maxCapOverride ?? symP.stopLoss.maxCapPercent;
+      
+      // Dynamic SL tightening for high ATR regimes
+      if (DYNAMIC_SL_PARAMS.ENABLED) {
+        const currentAtrPercent = mfs.atrPercent || atrPercent;
+        if (currentAtrPercent > DYNAMIC_SL_PARAMS.EXTREME_ATR_THRESHOLD_PERCENT) {
+          maxSlPercent *= DYNAMIC_SL_PARAMS.EXTREME_ATR_CAP_MULTIPLIER;
+        } else if (currentAtrPercent > DYNAMIC_SL_PARAMS.HIGH_ATR_THRESHOLD_PERCENT) {
+          maxSlPercent *= DYNAMIC_SL_PARAMS.HIGH_ATR_CAP_MULTIPLIER;
+        }
+      }
+      
+      // Calculate current SL distance
+      const slDistancePercent = signalSide === 'BUY'
+        ? ((currentPrice - stopLoss) / currentPrice) * 100
+        : ((stopLoss - currentPrice) / currentPrice) * 100;
+      
+      if (slDistancePercent > maxSlPercent) {
+        const oldSL = stopLoss;
+        stopLoss = signalSide === 'BUY'
+          ? currentPrice * (1 - maxSlPercent / 100)
+          : currentPrice * (1 + maxSlPercent / 100);
+        logger.risk(`🔒 SL CAP APPLIED: ${stratName} SL capped from ${slDistancePercent.toFixed(2)}% → ${maxSlPercent.toFixed(2)}% | $${oldSL.toFixed(2)} → $${stopLoss.toFixed(2)}`);
+      }
+    }
+
     logger.info(`Using strategy SL: ${stopLoss.toFixed(2)}, TP: ${takeProfit.toFixed(2)}${isProbeEntry ? ' (probe entry - tighter stops allowed)' : ` (minimum ${RISK_PARAMS.MIN_STOP_DISTANCE_PERCENT}% distance enforced)`}`);
 
     // ============================================================

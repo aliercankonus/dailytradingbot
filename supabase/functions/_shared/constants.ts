@@ -487,7 +487,10 @@ export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; max
     atrMultiplier: 0.9,             // 0.9x ATR — moderate tightening
     maxCapOverride: 1.0,            // Hard cap at 1.0% — forensic: avg SL was -1.38/-1.41%, cap saves ~+15 PnL
   },
-  // SQUEEZE_BREAKOUT keeps symbol defaults — breakouts need room to breathe
+  'SQUEEZE_BREAKOUT': {
+    atrMultiplier: 1.0,             // Standard ATR — breakouts need room
+    maxCapOverride: 1.5,            // Hard cap at 1.5% — forensic: DOTUSDT -3.08% SL wiped all gains
+  },
 } as const;
 
 // ============= STRATEGY-SPECIFIC ENTRY QUALITY GATES =============
