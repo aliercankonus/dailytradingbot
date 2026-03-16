@@ -326,9 +326,8 @@ export const BTC_PARAMS = {
   //   STRONG_TREND:     PF 1.10, WR 22%, avg loss 0.98% (DRAG)
   //   TREND_CONTINUATION: PF <1, WR 50%, avg loss 0.61% (NOISE)
   shortStrategyRouting: {
-    enabled: true,
-    // Only these strategies can generate SHORT signals for BTC
-    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    enabled: false, // DISABLED: All strategies allowed for BTC SHORT — routing was killing valid signals
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION', 'STRONG_TREND', 'TREND_CONTINUATION'] as string[],
     // Disabled strategies (kept as feature flags for future re-enablement)
     disabledStrategies: {
       STRONG_TREND: { enabled: false, reason: 'Late entry → pullback → stop. WR 22%, PF 1.10' },
@@ -348,7 +347,7 @@ export const BTC_PARAMS = {
   // UNVALIDATED — restricting to safe strategies until backtest confirms edge
   // Mirrors SHORT routing logic to prevent untested STRONG_TREND/TREND_CONTINUATION drag
   longStrategyRouting: {
-    enabled: false, // DISABLED: BTC LONG has no edge (PF 0.34 over 90-day bearish). Backtest confirmed: disabled PF=1.48 vs Q70 PF=1.46.
+    enabled: true, // RE-ENABLED: Allow BTC LONG — macro bias gate handles sizing reduction instead of hard block
     enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
     disabledStrategies: {
       STRONG_TREND: { enabled: false, reason: 'Unvalidated for LONG — risk of late entry in exhaustion' },
@@ -396,12 +395,12 @@ export const BTC_PARAMS = {
 export const ALTCOIN_PARAMS = {
   symbols: ['ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'],
   gates: {
-    STOCHRSI_LONG_OVERBOUGHT: 75,   // Tighter block
-    STOCHRSI_SHORT_OVERSOLD: 25,    // Tighter block
-    STRONG_TREND_MIN_MOM: 18,       // Much higher momentum requirement
-    PARABOLIC_ADX: 50,              // Higher ADX for trend confirmation
-    MOMENTUM_OPPOSING_THRESHOLD: 10, // Tighter opposing block
-    MIN_QUALITY_SCORE: 52,           // Higher quality floor
+    STOCHRSI_LONG_OVERBOUGHT: 85,   // Widened from 75 — stop over-filtering
+    STOCHRSI_SHORT_OVERSOLD: 15,    // Widened from 25 — stop over-filtering
+    STRONG_TREND_MIN_MOM: 10,       // Lowered from 18 — was too strict
+    PARABOLIC_ADX: 45,              // Lowered from 50 — more participation
+    MOMENTUM_OPPOSING_THRESHOLD: 15, // Widened from 10 — less blocking
+    MIN_QUALITY_SCORE: 40,           // Lowered from 52 — was killing valid signals
   },
   stopLoss: {
     atrMultiplier: 1.0,             // Much tighter for altcoin volatility
@@ -423,8 +422,8 @@ export const ALTCOIN_PARAMS = {
   // UNVALIDATED — restricting all altcoins to safe strategies
   // Altcoin volatility makes STRONG_TREND/TREND_CONTINUATION high-risk
   strategyRouting: {
-    enabled: true,
-    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    enabled: false, // DISABLED: All strategies allowed for altcoins — routing was killing valid signals
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION', 'STRONG_TREND', 'TREND_CONTINUATION'] as string[],
     disabledStrategies: {
       STRONG_TREND: { enabled: false, reason: 'Violent bounces cause premature stops on altcoins' },
       TREND_CONTINUATION: { enabled: false, reason: 'Short squeezes invalidate trend-following on altcoins' },
@@ -496,7 +495,7 @@ export const STRATEGY_SL_OVERRIDES: Record<string, { atrMultiplier?: number; max
 // Expected impact: ~20% fewer SL trades, PF improvement +0.15-0.25.
 export const STRATEGY_QUALITY_GATES: Record<string, { minQualityScore: number }> = {
   'STRONG_TREND': {
-    minQualityScore: 65,            // Reject if qualityScore < 65 (was using global ~45-52)
+    minQualityScore: 50,            // Lowered from 65 — was killing valid strong trend signals
   },
   'SQUEEZE_BREAKOUT': {
     minQualityScore: 58,            // Moderate filter — squeeze signals need decent setup quality

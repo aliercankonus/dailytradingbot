@@ -1,15 +1,16 @@
-// ============= SHARED GATE PIPELINE =============
-// Production-parity gate evaluation and exit logic.
-// Used by both strategy-analyzer (future) and backtest-runner.
+// ============= SIMPLIFIED GATE PIPELINE =============
+// RADICAL SIMPLIFICATION: 12+ gates → 5 essential gates
+// Philosophy: Participate aggressively, manage risk via position sizing + exits
+// Hard blocks only for truly dangerous setups, everything else is soft sizing
 
 import type { MarketFeatureSnapshot } from "./market-feature-snapshot.ts";
 import type { MomentumScoreResult } from "./smart-momentum.ts";
 import {
-  ADX_THRESHOLDS, ADX_GATE, STOCHRSI_THRESHOLDS,
+  ADX_THRESHOLDS, STOCHRSI_THRESHOLDS,
   QUALITY_THRESHOLDS, TRADING_FEE_PARAMS,
   getSymbolParams, BTC_PARAMS,
-  DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES, STRATEGY_QUALITY_GATES,
-  EXHAUSTION_BOUNCE_RECOVERY, DEEP_OVERSOLD_BOUNCE, GATE_CONFLICT_DETECTOR,
+  DYNAMIC_SL_PARAMS, STRATEGY_SL_OVERRIDES,
+  GATE_CONFLICT_DETECTOR,
 } from "./constants.ts";
 import { calculateQualityScore } from "./scoring.ts";
 import {
@@ -54,7 +55,8 @@ export interface BacktestPosition {
   entryAdx: number;
 }
 
-// ============= PRODUCTION GATE PIPELINE =============
+// ============= SIMPLIFIED PRODUCTION GATE PIPELINE =============
+// Only 5 hard gates. Everything else is position sizing adjustment.
 
 export function evaluateProductionGates(
   mfs: MarketFeatureSnapshot,
@@ -63,8 +65,8 @@ export function evaluateProductionGates(
   klines?: any[],
 ): GateResult {
   const sp = getSymbolParams(symbol || mfs.symbol);
-  const isBtcSymbol = BTC_PARAMS.symbols.includes(symbol || mfs.symbol);
-  let shortOverrides: typeof BTC_PARAMS.shortGateOverrides | null = null;
+  let positionMultiplier = 1.0;
+
   const fail = (gate: string): GateResult => ({
     passed: false, gate, direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
@@ -75,323 +77,202 @@ export function evaluateProductionGates(
   const stochK = mfs.stochRsi["1h"].k;
   const primaryTrend = mfs.primaryTrend;
 
-  // GATE 1: ADX Hard Floor
-  const effectiveHardFloor = shortOverrides?.adxHardFloor ?? ADX_GATE.HARD_FLOOR;
-  if (adx < effectiveHardFloor) return fail('ADX_HARD_FLOOR');
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 1: ADX Minimum Energy (Hard Floor = 14)
+  // Without ANY trend energy, no directional trade is valid
+  // ═══════════════════════════════════════════════════════════════
+  if (adx < 14) return fail('ADX_NO_ENERGY');
 
-  // GATE 2: ADX Graduated Tiers
-  let adxPositionMultiplier = 1.0;
-  if (adx < ADX_THRESHOLDS.MINIMUM) {
-    if (ADX_GATE.GRADUATED_TIERS.ENABLED && adxSlope > 0) {
-      adxPositionMultiplier = ADX_GATE.GRADUATED_TIERS.EARLY_TRANSITION.POSITION_MULTIPLIER;
-    } else if (adxSlope > -0.5 && adx >= (shortOverrides ? 16 : 18)) {
-      adxPositionMultiplier = 0.30;
-    } else {
-      return fail('ADX_TOO_LOW');
-    }
-  } else if (adx < ADX_THRESHOLDS.MODERATE) {
-    adxPositionMultiplier = adxSlope > 0
-      ? (ADX_GATE.GRADUATED_TIERS.FORMING_TREND?.POSITION_MULTIPLIER ?? 0.50)
-      : 0.35;
+  // Graduated ADX sizing (soft adjustments, NOT hard blocks)
+  if (adx < 18) {
+    positionMultiplier = 0.30; // Very low energy = micro probe
+  } else if (adx < 22) {
+    positionMultiplier = 0.50; // Low energy = cautious
+  } else if (adx < 30) {
+    positionMultiplier = 0.75; // Moderate = standard
+  }
+  // ADX >= 30 = full position (1.0x)
+
+  // Bonus for very strong trends
+  if (adx >= 40 && adxSlope > 0) {
+    positionMultiplier = Math.min(positionMultiplier * 1.15, 1.0);
   }
 
-  // GATE 3: Deep StochRSI Extremes
-  if (stochK < STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERSOLD || stochK > STOCHRSI_THRESHOLDS.HIGH_REVERSAL_OVERBOUGHT) {
-    if (adx >= ADX_THRESHOLDS.VERY_STRONG) {
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.30);
-    } else if (adx >= ADX_THRESHOLDS.STRONG && adxSlope > 0.2) {
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
-    } else {
-      return fail('DEEP_STOCHRSI_EXTREME');
-    }
-  }
-
-  // GATE 4: Direction
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 2: Direction Determination
+  // Simple: trend + momentum alignment = direction
+  // ═══════════════════════════════════════════════════════════════
   let direction: 'LONG' | 'SHORT' | null = null;
   const emaBullish = primaryTrend === 'bullish';
   const emaBearish = primaryTrend === 'bearish';
-  const dirMinMom = shortOverrides?.directionMinMomentum ?? 10;
-  const dirMinAdx = shortOverrides?.directionMinAdxForMomentum ?? ADX_THRESHOLDS.VERY_STRONG;
 
+  // Primary: Trend + momentum agreement
   if (emaBullish && momentumResult.score > 0) direction = 'LONG';
   else if (emaBearish && momentumResult.score < 0) direction = 'SHORT';
-  else if (momentumResult.score > dirMinMom && adx > dirMinAdx) direction = 'LONG';
-  else if (momentumResult.score < -dirMinMom && adx > dirMinAdx) direction = 'SHORT';
-  else if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope > 0.3) {
+  // Secondary: Strong momentum with moderate ADX
+  else if (momentumResult.score > 8 && adx > 20) direction = 'LONG';
+  else if (momentumResult.score < -8 && adx > 20) direction = 'SHORT';
+  // Tertiary: DI separation with ADX energy
+  else if (adx >= 25 && adxSlope > 0) {
     const diPlus = mfs.diPlus || 0;
     const diMinus = mfs.diMinus || 0;
     if (diPlus > diMinus + 5) direction = 'LONG';
     else if (diMinus > diPlus + 5) direction = 'SHORT';
-  } else if (adx >= ADX_THRESHOLDS.MODERATE && adxSlope > 0.2) {
-    if (momentumResult.score > 5) direction = 'LONG';
-    else if (momentumResult.score < -5) direction = 'SHORT';
+  }
+  // Quaternary: Moderate momentum in moderate energy
+  else if (adx >= 18) {
+    if (momentumResult.score > 3) direction = 'LONG';
+    else if (momentumResult.score < -3) direction = 'SHORT';
   }
 
-  const isBtcShort = isBtcSymbol && direction === 'SHORT';
-  if (!direction && isBtcSymbol && adx >= 20 && momentumResult.score < -3) {
-    const diPlus = mfs.diPlus || 0;
-    const diMinus = mfs.diMinus || 0;
-    if (diMinus > diPlus + 3) {
-      direction = 'SHORT';
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.35);
-    }
-  }
-  if (direction === 'SHORT' && isBtcSymbol) {
-    shortOverrides = BTC_PARAMS.shortGateOverrides;
-  }
   if (!direction) return fail('NO_DIRECTION');
 
-  // GATE 4.5: Global Macro Bias Layer
-  // Forensic evidence: LONG PF=0.34 vs SHORT PF=1.42 over 90-day bearish regime.
-  // ALL LONG strategies are net negative in bearish macro — no edge exists.
-  // Block all LONG trades when primaryTrend is bearish; block all SHORT when bullish.
-  // EXCEPTION: Exhaustion Bounce Recovery — when bearish trend is exhausting from deep oversold,
-  // the bounce IS the trade. Allow LONG with reduced sizing.
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 3: Macro Bias (Soft — sizing reduction, NOT hard block)
+  // Counter-trend trades get 30% position, not blocked entirely
+  // ═══════════════════════════════════════════════════════════════
   if (direction === 'LONG' && primaryTrend === 'bearish') {
-    const ebr = EXHAUSTION_BOUNCE_RECOVERY;
-    const stochD = mfs.stochRsi["1h"].d;
-    const overextATR = mfs.momentum?.overextensionATR ?? 0;
-    
-    // 3-filter confluence: ADX energy + slope decay + overextension + K>D bounce confirmation
-    const hasExhaustionStructure = ebr.ENABLED &&
-      adx >= ebr.MIN_ADX_FOR_EXHAUSTION &&                                    // trend still has energy
-      adxSlope < ebr.MAX_ADX_SLOPE_FOR_EXHAUSTION &&                          // but losing it fast
-      overextATR >= ebr.MIN_OVEREXTENSION_ATR &&                              // price truly overextended
-      stochK < ebr.MAX_STOCHRSI_K_FOR_BOUNCE &&                              // deeply oversold
-      (!ebr.REQUIRE_EXHAUSTION_REGIME || ebr.VALID_REGIMES.includes(mfs.regime || ''));
-    
-    // K > D = momentum turning up (bounce confirmation), except at extreme capitulation
-    const hasBounceConfirmation = !ebr.REQUIRE_K_ABOVE_D || 
-      stochK > stochD || 
-      stochK < ebr.DEEP_OVERSOLD_SKIP_K_ABOVE_D;
-    
-    const isExhaustionBounce = hasExhaustionStructure && hasBounceConfirmation;
-    
-    // Diagnostic: always log why exhaustion bounce passes or fails
-    if (ebr.LOG_DETECTIONS) {
-      const checks = {
-        enabled: ebr.ENABLED,
-        adxOk: adx >= ebr.MIN_ADX_FOR_EXHAUSTION,
-        slopeOk: adxSlope < ebr.MAX_ADX_SLOPE_FOR_EXHAUSTION,
-        overextOk: overextATR >= ebr.MIN_OVEREXTENSION_ATR,
-        stochOk: stochK < ebr.MAX_STOCHRSI_K_FOR_BOUNCE,
-        regimeOk: !ebr.REQUIRE_EXHAUSTION_REGIME || ebr.VALID_REGIMES.includes(mfs.regime || ''),
-        kAboveDOk: !ebr.REQUIRE_K_ABOVE_D || stochK > stochD || stochK < ebr.DEEP_OVERSOLD_SKIP_K_ABOVE_D,
-      };
-      logger.info(`🔍 EXHAUSTION_BOUNCE_CHECK: K=${stochK.toFixed(1)}, D=${stochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, overextATR=${overextATR.toFixed(2)}, regime=${mfs.regime} | pass=${isExhaustionBounce} | ${JSON.stringify(checks)}`);
-    }
-    
-    if (isExhaustionBounce) {
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, ebr.POSITION_MULTIPLIER);
-      logger.info(`🔄 EXHAUSTION_BOUNCE: LONG in bearish — K=${stochK.toFixed(1)}, D=${stochD.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, overext=${overextATR.toFixed(2)}ATR, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
-    } else if (DEEP_OVERSOLD_BOUNCE.ENABLED) {
-      // DEEP_OVERSOLD_BOUNCE: No slope/overextension required — just deeply oversold + exhaustion regime
-      const dob = DEEP_OVERSOLD_BOUNCE;
-      const isDeepOversoldBounce = 
-        stochK < dob.MAX_K &&
-        adx >= dob.MIN_ADX &&
-        dob.VALID_REGIMES.includes(mfs.regime || '');
-      
-      if (isDeepOversoldBounce) {
-        adxPositionMultiplier = Math.min(adxPositionMultiplier, dob.POSITION_MULTIPLIER);
-        logger.info(`🎯 DEEP_OVERSOLD_BOUNCE: LONG in bearish — K=${stochK.toFixed(1)}, ADX=${adx.toFixed(1)}, slope=${adxSlope.toFixed(2)}, regime=${mfs.regime}, pos=${(adxPositionMultiplier * 100).toFixed(0)}%`);
-      } else {
-        return fail('MACRO_BIAS_LONG_BLOCKED');
-      }
+    // Counter-trend LONG in bearish: reduced but allowed
+    // Deep oversold = bigger position (bounce opportunity)
+    if (stochK < 15) {
+      positionMultiplier = Math.min(positionMultiplier, 0.40); // Deep oversold bounce
+      logger.info(`🔄 COUNTER-TREND LONG allowed: deep oversold K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
+    } else if (stochK < 30) {
+      positionMultiplier = Math.min(positionMultiplier, 0.30); // Oversold bounce probe
+      logger.info(`🔄 COUNTER-TREND LONG allowed: oversold K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
     } else {
-      return fail('MACRO_BIAS_LONG_BLOCKED');
+      positionMultiplier = Math.min(positionMultiplier, 0.20); // Very small counter-trend probe
+      logger.info(`🔄 COUNTER-TREND LONG micro-probe: K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
     }
   }
   if (direction === 'SHORT' && primaryTrend === 'bullish') {
-    return fail('MACRO_BIAS_SHORT_BLOCKED');
+    if (stochK > 85) {
+      positionMultiplier = Math.min(positionMultiplier, 0.40); // Deep overbought
+    } else if (stochK > 70) {
+      positionMultiplier = Math.min(positionMultiplier, 0.30);
+    } else {
+      positionMultiplier = Math.min(positionMultiplier, 0.20);
+    }
   }
 
-  // GATE 5: Counter-Trend
-  const ctMinAdx = shortOverrides?.counterTrendMinAdx ?? ADX_THRESHOLDS.EXCEPTIONAL;
-  if (direction === 'LONG' && emaBearish && adx > ADX_THRESHOLDS.EXCEPTIONAL) return fail('COUNTER_TREND');
-  if (direction === 'SHORT' && emaBullish && adx > ctMinAdx) return fail('COUNTER_TREND');
-
-  // GATE 5.5: StochRSI Directional Protection
-  const obThreshold = sp.gates.STOCHRSI_LONG_OVERBOUGHT;
-  const osThreshold = sp.gates.STOCHRSI_SHORT_OVERSOLD;
-  if (direction === 'SHORT' && stochK > obThreshold) {
-    if (adx < ADX_THRESHOLDS.VERY_STRONG) return fail('STOCHRSI_DIRECTIONAL_BLOCK');
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 4: Momentum Opposing (Hard block only for STRONG opposing)
+  // Reduced threshold: only block when momentum is strongly against trade
+  // ═══════════════════════════════════════════════════════════════
+  if (direction === 'LONG' && momentumResult.score < -20 && momentumResult.isAccelerating) {
+    // Only block if momentum is strongly accelerating AGAINST the trade
+    if (adx < 35) return fail('MOMENTUM_STRONGLY_OPPOSING');
+    positionMultiplier = Math.min(positionMultiplier, 0.25);
   }
-  if (direction === 'LONG' && stochK < osThreshold) {
-    if (adx < ADX_THRESHOLDS.VERY_STRONG) return fail('STOCHRSI_DIRECTIONAL_BLOCK');
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
+  if (direction === 'SHORT' && momentumResult.score > 20 && momentumResult.isAccelerating) {
+    if (adx < 35) return fail('MOMENTUM_STRONGLY_OPPOSING');
+    positionMultiplier = Math.min(positionMultiplier, 0.25);
   }
 
-  // GATE 5.6: Overbought/Oversold Block
-  if (direction === 'LONG' && stochK > obThreshold && adx < ADX_THRESHOLDS.VERY_STRONG) return fail('OVERBOUGHT_LONG_BLOCK');
-  if (direction === 'SHORT' && stochK < osThreshold && adx < ADX_THRESHOLDS.VERY_STRONG) return fail('OVERSOLD_SHORT_BLOCK');
-
-  // GATE 6: Momentum Direction Alignment
-  const momOpposingThreshold = sp.gates.MOMENTUM_OPPOSING_THRESHOLD;
-  if (direction === 'LONG' && momentumResult.score < -momOpposingThreshold) {
-    if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
-    } else return fail('MOMENTUM_OPPOSING');
-  }
-  if (direction === 'SHORT' && momentumResult.score > momOpposingThreshold) {
-    if (adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3) {
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
-    } else return fail('MOMENTUM_OPPOSING');
+  // Soft opposing penalty (not a block)
+  if (direction === 'LONG' && momentumResult.score < -10) {
+    positionMultiplier *= 0.70;
+  } else if (direction === 'SHORT' && momentumResult.score > 10) {
+    positionMultiplier *= 0.70;
   }
 
-  // GATE 7: Severe StochRSI
-  if (direction === 'SHORT' && stochK < STOCHRSI_THRESHOLDS.EXTREME_OVERSOLD && adx < ADX_THRESHOLDS.EXTREME) return fail('SEVERE_OVERSOLD_BLOCK');
-  if (direction === 'LONG' && stochK > STOCHRSI_THRESHOLDS.EXTREME_OVERBOUGHT && adx < ADX_THRESHOLDS.EXTREME) return fail('SEVERE_OVERBOUGHT_BLOCK');
-
-  // GATE 8: Near-Extreme Protection
-  if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.5) {
-    if (adx < ADX_THRESHOLDS.STRONG || adxSlope > 0) return fail('NEAR_24H_LOW');
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
-  } else if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.8) {
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
-  }
-  if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.5) {
-    if (adx < ADX_THRESHOLDS.STRONG || adxSlope > 0) return fail('NEAR_24H_HIGH');
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.25);
-  } else if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.8) {
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
-  }
-
-  // GATE 9: Overextension ATR
-  if (momentumResult.overextensionATR > 2.0) {
-    if (!(adx >= ADX_THRESHOLDS.VERY_STRONG && adxSlope >= 0.3)) return fail('OVEREXTENSION_ATR');
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.20);
-  }
-
-  // GATE 10: Quality Score
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 5: Quality Score (Lowered floor — let more trades through)
+  // ═══════════════════════════════════════════════════════════════
   const effectiveTrend = direction === 'LONG' ? 'bullish' : 'bearish';
   const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
   const qualityScore = qualityResult.score;
-  const effectiveQualityFloor = (isBtcShort && shortOverrides) ? shortOverrides.minQualityScore : sp.gates.MIN_QUALITY_SCORE;
-  if (qualityScore < effectiveQualityFloor) return fail('LOW_QUALITY_HARD_FLOOR');
-  if (!isBtcShort && qualityScore < QUALITY_THRESHOLDS.MIN_ENTRY_QUALITY) return fail('LOW_QUALITY');
 
-  // GATE 11: Momentum Slope
-  if (momentumResult.isAccelerating) {
-    if ((direction === 'LONG' && momentumResult.direction === 'bearish') ||
-        (direction === 'SHORT' && momentumResult.direction === 'bullish')) {
-      return fail('MOMENTUM_SLOPE_OPPOSING');
+  // Only hard block at very low quality (< 35)
+  if (qualityScore < 35) return fail('VERY_LOW_QUALITY');
+
+  // Graduated quality sizing
+  if (qualityScore < 50) {
+    positionMultiplier *= 0.50;
+  } else if (qualityScore < 60) {
+    positionMultiplier *= 0.70;
+  } else if (qualityScore < 70) {
+    positionMultiplier *= 0.85;
+  }
+  // qualityScore >= 70 = full position
+
+  // ═══════════════════════════════════════════════════════════════
+  // SOFT ADJUSTMENTS (position sizing, never hard blocks)
+  // ═══════════════════════════════════════════════════════════════
+
+  // StochRSI extremes: reduce position, don't block
+  if (direction === 'SHORT' && stochK < 10) {
+    positionMultiplier *= 0.60; // Very oversold for SHORT = risky
+  } else if (direction === 'LONG' && stochK > 90) {
+    positionMultiplier *= 0.60; // Very overbought for LONG = risky
+  }
+
+  // Near 24h extreme: reduce position, don't block
+  if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.5) {
+    positionMultiplier *= 0.50; // Near 24h low = risky for SHORT
+  } else if (direction === 'LONG' && mfs.distanceFromHighPercent < 0.5) {
+    positionMultiplier *= 0.50; // Near 24h high = risky for LONG
+  }
+
+  // Overextension: reduce position, don't block
+  if (momentumResult.overextensionATR > 2.0) {
+    if (adx >= 35 && adxSlope > 0) {
+      positionMultiplier *= 0.50; // Strong trend + overextended = cautious
+    } else {
+      positionMultiplier *= 0.30; // Weak trend + overextended = very cautious
     }
   }
 
-  // GATE 12: ADX Slope Decay
-  if (adxSlope < -2.0 && adx < ADX_THRESHOLDS.STRONG) return fail('ADX_STRUCTURAL_COLLAPSE');
-  if (adxSlope < -1.0) adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
-  else if (adxSlope < -0.2) adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.80);
-
-  // Strategy classification
-  let strategyName = 'TREND_CONTINUATION';
-  if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
-  // MOMENTUM_ACCELERATION disabled: 14 trades, -5.52% PnL, breakout chase pattern.
-  // Accelerating momentum is reclassified into its base strategy (STRONG_TREND or TREND_CONTINUATION).
-  // if (momentumResult.isAccelerating) strategyName = 'MOMENTUM_ACCELERATION';
-
-  // GATE: STRONG_TREND Directional Alignment
-  // Backtest-proven: counter-trend LONG has 18.2% WR (0 TP hits) → hard block.
-  // Counter-trend SHORT also net negative at 0.40x → hard block both sides.
-  // Asymmetric 0.40x SHORT tested: PF 0.83 vs symmetric block PF 0.85.
-  if (strategyName === 'STRONG_TREND') {
-    if (direction === 'LONG' && primaryTrend === 'bearish') {
-      return fail('STRONG_TREND_COUNTER_TREND_LONG');
-    }
-    if (direction === 'SHORT' && primaryTrend === 'bullish') {
-      return fail('STRONG_TREND_COUNTER_TREND_SHORT');
-    }
+  // ADX slope decay: reduce position
+  if (adxSlope < -2.0) {
+    positionMultiplier *= 0.40;
+  } else if (adxSlope < -1.0) {
+    positionMultiplier *= 0.60;
+  } else if (adxSlope < -0.3) {
+    positionMultiplier *= 0.80;
   }
 
-  // GATE: Strategy-Specific Entry Quality Filter
-  // Forensic evidence: mid-quality STRONG_TREND trades hit SL at 2x rate.
-  // Pattern: high quality → win, mid quality → stop loss.
-  // This gate alone eliminates ~20% of SL trades.
-  const stratQualityGate = STRATEGY_QUALITY_GATES[strategyName];
-  if (stratQualityGate && qualityScore < stratQualityGate.minQualityScore) {
-    return fail(`${strategyName}_LOW_QUALITY`);
+  // Regime-based adjustment
+  if (mfs.regime === 'RANGE_COMPRESSION') {
+    positionMultiplier *= 0.35; // Small range trades, not blocked
+  } else if (mfs.regime === 'TREND_EXHAUSTION') {
+    positionMultiplier *= 0.50;
   }
+
+  // Compressed/squeeze: bonus if direction confirmed
   if (mfs.isCompressed) {
     const macdHist = mfs.macdHistogram;
-    const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0 && mfs.macdExpanding) ||
-                                 (direction === 'SHORT' && macdHist < 0 && mfs.macdExpanding);
-    const squeezeDirPartial = (direction === 'LONG' && macdHist > 0) || (direction === 'SHORT' && macdHist < 0);
+    const squeezeDirConfirmed = (direction === 'LONG' && macdHist > 0) || (direction === 'SHORT' && macdHist < 0);
     if (squeezeDirConfirmed) {
+      positionMultiplier *= 1.10; // Squeeze breakout bonus
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // STRATEGY CLASSIFICATION (No routing blocks!)
+  // ═══════════════════════════════════════════════════════════════
+  let strategyName = 'TREND_CONTINUATION';
+  if (adx > ADX_THRESHOLDS.VERY_STRONG) strategyName = 'STRONG_TREND';
+  if (mfs.isCompressed) {
+    const macdHist = mfs.macdHistogram;
+    if ((direction === 'LONG' && macdHist > 0) || (direction === 'SHORT' && macdHist < 0)) {
       strategyName = 'SQUEEZE_BREAKOUT';
-    } else if (squeezeDirPartial && adx >= (shortOverrides?.squeezeMinAdxForPartial ?? ADX_THRESHOLDS.MODERATE) && adxSlope > 0) {
-      strategyName = 'SQUEEZE_BREAKOUT';
-      adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.40);
-    } else {
-      return fail('SQUEEZE_NO_DIRECTION');
-    }
-
-    // Squeeze quality gates
-    const sqFilter = BTC_PARAMS.squeezeDepthFilter;
-    const volFilter = BTC_PARAMS.volumeExpansionFilter;
-    const bodyFilter = BTC_PARAMS.candleBodyFilter;
-
-    if (sqFilter.enabled) {
-      const bw = mfs.bollinger?.["1h"]?.bandwidth ?? 99;
-      if (bw > sqFilter.maxBandwidth) return fail('SQUEEZE_TOO_SHALLOW');
-      if (bw > sqFilter.shallowPenaltyBandwidth) {
-        adxPositionMultiplier = Math.min(adxPositionMultiplier, sqFilter.shallowPenaltyMultiplier);
-      } else if (bw < sqFilter.deepSqueezeBonusBandwidth) {
-        adxPositionMultiplier *= sqFilter.deepSqueezeBonusMultiplier;
-      }
-    }
-    if (volFilter.enabled) {
-      const volRatio = mfs.volume?.["1h"]?.volumeRatio ?? mfs.volumeRatio ?? 1.0;
-      if (volRatio < volFilter.softMinVolumeRatio) return fail('NO_VOLUME_EXPANSION');
-      if (volRatio < volFilter.minVolumeRatio) {
-        adxPositionMultiplier = Math.min(adxPositionMultiplier, volFilter.softPositionMultiplier);
-      }
-    }
-    if (bodyFilter.enabled && klines && klines.length > 0) {
-      const lastKline = klines[klines.length - 1];
-      const open = parseFloat(lastKline[1]);
-      const close = parseFloat(lastKline[4]);
-      const candleBody = Math.abs(close - open);
-      const bodyAtrRatio = mfs.atr > 0 ? candleBody / mfs.atr : 0;
-      if (bodyAtrRatio < bodyFilter.minBodyAtrRatio) return fail('WEAK_BREAKOUT_CANDLE');
     }
   }
 
-  // GATE: SQUEEZE_BREAKOUT Directional Alignment
-  // Forensic evidence: SQUEEZE_BREAKOUT LONG = -23.36% PnL (52 trades), SHORT = +13.55%
-  // Counter-trend breakouts in bearish macro are predominantly fake breakouts.
-  if (strategyName === 'SQUEEZE_BREAKOUT') {
-    if (direction === 'LONG' && primaryTrend === 'bearish') {
-      return fail('SQUEEZE_BREAKOUT_COUNTER_TREND_LONG');
-    }
-    if (direction === 'SHORT' && primaryTrend === 'bullish') {
-      return fail('SQUEEZE_BREAKOUT_COUNTER_TREND_SHORT');
-    }
-  }
+  // Floor: minimum 10% position (never zero unless hard-blocked)
+  positionMultiplier = Math.max(positionMultiplier, 0.10);
 
-  // GATE: MOMENTUM_ACCELERATION — DISABLED
-  // Strategy fully disabled (reclassified to base). Gate kept as comment for forensic history.
-  // Forensic evidence: 14 trades, -5.52% PnL. Breakout chase pattern with no edge.
-
-  // Apply regime-based multiplier from MFS
-  if (mfs.regime === 'RANGE_COMPRESSION' && strategyName !== 'SQUEEZE_BREAKOUT') {
-    return fail('REGIME_RANGE_COMPRESSION');
-  }
-  if (mfs.regime === 'TREND_EXHAUSTION') {
-    adxPositionMultiplier = Math.min(adxPositionMultiplier, 0.30);
-  }
+  logger.info(`✅ GATE PASS: ${symbol || mfs.symbol} ${direction} | strategy=${strategyName} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | K=${stochK.toFixed(1)} | mom=${momentumResult.score} | quality=${qualityScore} | pos=${(positionMultiplier * 100).toFixed(0)}%`);
 
   return {
     passed: true, gate: null, direction, qualityScore,
     momentumScore: momentumResult.score,
-    positionMultiplier: adxPositionMultiplier, strategyName,
+    positionMultiplier, strategyName,
   };
 }
 
 // ============= GATE CONFLICT DETECTOR =============
-// Diagnoses when BOTH long AND short are blocked — deadlock state
-// Called externally per-symbol to track conflict rates
 
 export function detectGateConflict(
   mfs: MarketFeatureSnapshot,
@@ -399,7 +280,6 @@ export function detectGateConflict(
   symbol: string,
 ): { longBlocked: boolean; shortBlocked: boolean; deadlocked: boolean; reason: string } {
   const longResult = evaluateProductionGates({ ...mfs, primaryTrend: mfs.primaryTrend } as any, momentumResult, symbol);
-  // Simulate short direction check
   const shortResult = evaluateProductionGates({ ...mfs, primaryTrend: mfs.primaryTrend } as any, { ...momentumResult, score: -momentumResult.score } as any, symbol);
   
   const longBlocked = !longResult.passed;
@@ -471,23 +351,17 @@ export function checkProductionExits(
   if (decayResult.shouldExit) return { shouldExit: true, exitReason: decayResult.exitReason };
 
   // 5. Trailing Stop
-  const isBtcShort = position.symbol.startsWith('BTC') && side === 'SHORT';
-  const btcShortTrail = BTC_PARAMS.shortTrailing;
-  if (isBtcShort && position.peakPnl >= btcShortTrail.activationPercent) {
-    let trailDistance = btcShortTrail.tiers[0].trailDistance;
-    for (const tier of btcShortTrail.tiers) {
-      if (position.peakPnl >= tier.peakThreshold) trailDistance = tier.trailDistance;
-    }
-    if (adx >= btcShortTrail.adxRelaxationThreshold) trailDistance *= btcShortTrail.adxRelaxationMultiplier;
-    const lockLevel = Math.max(btcShortTrail.minTrailFloor, position.peakPnl * (1 - trailDistance));
-    if (pnlPercent < lockLevel && pnlPercent > 0) return { shouldExit: true, exitReason: 'trailing_stop' };
-  } else if (!isBtcShort && position.peakPnl >= 0.8) {
+  if (position.peakPnl >= 0.8) {
     let trailDistance: number;
     if (position.peakPnl >= 2.0) trailDistance = 0.12;
     else if (position.peakPnl >= 1.5) trailDistance = 0.15;
     else if (position.peakPnl >= 1.0) trailDistance = 0.18;
     else trailDistance = 0.25;
-    const lockLevel = Math.max(0.5, position.peakPnl * (1 - trailDistance));
+    
+    // Give more room in strong trends
+    if (adx >= 35 && adxSlope > 0) trailDistance *= 1.3;
+    
+    const lockLevel = Math.max(0.4, position.peakPnl * (1 - trailDistance));
     if (pnlPercent < lockLevel && pnlPercent > 0) return { shouldExit: true, exitReason: 'trailing_stop' };
   }
 
@@ -509,23 +383,23 @@ export function checkProductionExits(
     }
   }
 
-  // 7b. Mean Reversion Trailing TP (TP1=1.2% → trailing)
+  // 8. MR Trailing TP
   const mrTrailing = evaluateMRTrailingTP(posCtx, mktCtx);
   if (mrTrailing.shouldActivateTrailing && mrTrailing.suggestedStopLoss !== null) {
     const shouldExit = side === 'LONG' ? currentPrice <= mrTrailing.suggestedStopLoss : currentPrice >= mrTrailing.suggestedStopLoss;
     if (shouldExit) return { shouldExit: true, exitReason: 'mr_trailing_tp_exit' };
   }
 
-  // 8. Time stop
+  // 9. Time stop (24h max hold)
   const entryTime = new Date(position.entryTime).getTime();
   const currentTimestamp = new Date(currentTime).getTime();
   const hoursHeld = (currentTimestamp - entryTime) / (1000 * 60 * 60);
   if (hoursHeld > 24) return { shouldExit: true, exitReason: 'time_stop_24h' };
 
-  // 9. Moderate exhaustion exit
+  // 10. Moderate exhaustion exit
   if (position.peakPnl > 0.35 && pnlPercent < position.peakPnl * 0.25) return { shouldExit: true, exitReason: 'moderate_exhaustion_exit' };
 
-  // 10. Momentum reversal exit
+  // 11. Momentum reversal exit
   const symParams = getSymbolParams(position.symbol);
   if (hoursHeld > symParams.exits.momentumReversalMinHours) {
     if ((side === 'LONG' && momentumScore < -symParams.exits.momentumReversalScore && primaryTrend === 'bearish') ||
@@ -534,28 +408,15 @@ export function checkProductionExits(
     }
   }
 
-  // 10b. Early momentum flip
-  if (hoursHeld > symParams.exits.earlyFlipMinHours && hoursHeld <= symParams.exits.earlyFlipMaxHours) {
-    if ((side === 'LONG' && momentumScore < -symParams.exits.earlyMomentumFlipScore) ||
-        (side === 'SHORT' && momentumScore > symParams.exits.earlyMomentumFlipScore)) {
-      if (pnlPercent < symParams.exits.earlyMomentumFlipThreshold) return { shouldExit: true, exitReason: 'early_momentum_flip_exit' };
-    }
-  }
-
-  // 11. ADX collapse exit
+  // 12. ADX collapse exit
   if (adx < 15 && adxSlope < -1.0 && hoursHeld > 4 && pnlPercent < 0.3) return { shouldExit: true, exitReason: 'adx_collapse_exit' };
 
-  // 12. Universal hard PnL floor (strategy-aware + dynamic ATR tightening)
-  const isBtc = position.symbol.startsWith('BTC');
+  // 13. Hard PnL floor
   let hardFloorPercent = symParams.stopLoss.maxCapPercent;
-  
-  // Strategy-specific override
   const stratOverride = STRATEGY_SL_OVERRIDES[position.strategyName || ''];
   if (stratOverride?.maxCapOverride) {
     hardFloorPercent = Math.min(hardFloorPercent, stratOverride.maxCapOverride);
   }
-  
-  // Dynamic tightening for high ATR
   if (DYNAMIC_SL_PARAMS.ENABLED && position.atrPercentAtEntry) {
     if (position.atrPercentAtEntry > DYNAMIC_SL_PARAMS.EXTREME_ATR_THRESHOLD_PERCENT) {
       hardFloorPercent *= DYNAMIC_SL_PARAMS.EXTREME_ATR_CAP_MULTIPLIER;
@@ -563,11 +424,7 @@ export function checkProductionExits(
       hardFloorPercent *= DYNAMIC_SL_PARAMS.HIGH_ATR_CAP_MULTIPLIER;
     }
   }
-  
   if (pnlPercent < -hardFloorPercent) return { shouldExit: true, exitReason: 'hard_pnl_floor_exit' };
-
-  // 13. Altcoin stale loss cut
-  if (!isBtc && hoursHeld > 3 && pnlPercent < -0.5 && pnlPercent < position.peakPnl - 0.3) return { shouldExit: true, exitReason: 'stale_loss_exit' };
 
   return { shouldExit: false, exitReason: '' };
 }
