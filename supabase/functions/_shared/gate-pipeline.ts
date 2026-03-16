@@ -284,6 +284,23 @@ export function evaluateProductionGates(
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // STRONG_TREND Surgical Fixes (Forensic-driven)
+  // Problem: SL bleeding (-232 PnL), bad entry timing, micro-lock drag
+  // ═══════════════════════════════════════════════════════════════
+  if (strategyName === 'STRONG_TREND') {
+    // Fix 1: StochRSI entry filter — block overbought LONG / oversold SHORT
+    // Forensic finding: avg StochK at SL exit was 74.6 (LONG) / 25.6 (SHORT)
+    if (direction === 'LONG' && stochK > 70) {
+      logger.info(`🚫 STRONG_TREND LONG blocked: StochK=${stochK.toFixed(1)} > 70 (overbought entry)`);
+      return fail('STRONG_TREND_STOCH_OVERBOUGHT');
+    }
+    if (direction === 'SHORT' && stochK < 30) {
+      logger.info(`🚫 STRONG_TREND SHORT blocked: StochK=${stochK.toFixed(1)} < 30 (oversold entry)`);
+      return fail('STRONG_TREND_STOCH_OVERSOLD');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // SQUEEZE_BREAKOUT Optimization Layer
   // Improve WR from 47% → 50%+ by adding StochRSI directional confirmation
   // ═══════════════════════════════════════════════════════════════
@@ -424,8 +441,9 @@ export function checkProductionExits(
     if (pnlPercent < lockLevel && pnlPercent > 0) return { shouldExit: true, exitReason: 'trailing_stop' };
   }
 
-  // 6. Micro Profit Lock
-  if (position.peakPnl > 0.10 && position.peakPnl < 0.60) {
+  // 6. Micro Profit Lock (BYPASSED for STRONG_TREND — forensic finding: avg -0.40% PnL per micro exit)
+  const isStrongTrend = position.strategyName === 'STRONG_TREND';
+  if (!isStrongTrend && position.peakPnl > 0.10 && position.peakPnl < 0.60) {
     const microResult = evaluateMicroProfitLock(posCtx, position.peakPnl);
     if (microResult.applied && microResult.newStopLoss !== null) {
       const shouldExit = side === 'LONG' ? currentPrice <= microResult.newStopLoss : currentPrice >= microResult.newStopLoss;
