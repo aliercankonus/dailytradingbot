@@ -395,12 +395,12 @@ export const BTC_PARAMS = {
 export const ALTCOIN_PARAMS = {
   symbols: ['ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT'],
   gates: {
-    STOCHRSI_LONG_OVERBOUGHT: 75,   // Tighter block
-    STOCHRSI_SHORT_OVERSOLD: 25,    // Tighter block
-    STRONG_TREND_MIN_MOM: 18,       // Much higher momentum requirement
-    PARABOLIC_ADX: 50,              // Higher ADX for trend confirmation
-    MOMENTUM_OPPOSING_THRESHOLD: 10, // Tighter opposing block
-    MIN_QUALITY_SCORE: 52,           // Higher quality floor
+    STOCHRSI_LONG_OVERBOUGHT: 85,   // Widened from 75 — stop over-filtering
+    STOCHRSI_SHORT_OVERSOLD: 15,    // Widened from 25 — stop over-filtering
+    STRONG_TREND_MIN_MOM: 10,       // Lowered from 18 — was too strict
+    PARABOLIC_ADX: 45,              // Lowered from 50 — more participation
+    MOMENTUM_OPPOSING_THRESHOLD: 15, // Widened from 10 — less blocking
+    MIN_QUALITY_SCORE: 40,           // Lowered from 52 — was killing valid signals
   },
   stopLoss: {
     atrMultiplier: 1.0,             // Much tighter for altcoin volatility
