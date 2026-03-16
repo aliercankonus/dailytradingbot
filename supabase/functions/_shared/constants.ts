@@ -326,9 +326,8 @@ export const BTC_PARAMS = {
   //   STRONG_TREND:     PF 1.10, WR 22%, avg loss 0.98% (DRAG)
   //   TREND_CONTINUATION: PF <1, WR 50%, avg loss 0.61% (NOISE)
   shortStrategyRouting: {
-    enabled: true,
-    // Only these strategies can generate SHORT signals for BTC
-    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION'] as string[],
+    enabled: false, // DISABLED: All strategies allowed for BTC SHORT — routing was killing valid signals
+    enabledStrategies: ['SQUEEZE_BREAKOUT', 'MOMENTUM_ACCELERATION', 'STRONG_TREND', 'TREND_CONTINUATION'] as string[],
     // Disabled strategies (kept as feature flags for future re-enablement)
     disabledStrategies: {
       STRONG_TREND: { enabled: false, reason: 'Late entry → pullback → stop. WR 22%, PF 1.10' },
