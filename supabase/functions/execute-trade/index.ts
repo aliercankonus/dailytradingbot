@@ -1456,7 +1456,11 @@ serve(async (req) => {
     // ============================================================
     if (!isProbeEntry) {
       const stratName = signal.strategy_name || '';
-      const stratOverride = STRATEGY_SL_OVERRIDES[stratName];
+      // Check both exact name and normalized variants for SL override lookup
+      const stratOverride = STRATEGY_SL_OVERRIDES[stratName] 
+        || (stratName.startsWith('Adaptive Trend Entry') ? STRATEGY_SL_OVERRIDES['TREND_CONTINUATION'] : undefined)
+        || (stratName.startsWith('Quality+Momentum') ? STRATEGY_SL_OVERRIDES['TREND_CONTINUATION'] : undefined)
+        || (stratName.startsWith('Near-Quality') ? STRATEGY_SL_OVERRIDES['TREND_CONTINUATION'] : undefined);
       const symP = getSymbolParams(signal.symbol);
       let maxSlPercent = stratOverride?.maxCapOverride ?? symP.stopLoss.maxCapPercent;
       
