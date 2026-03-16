@@ -308,6 +308,11 @@ const Performance = () => {
             )}
           </TabsContent>
 
+          {/* Strategy Forensics Tab */}
+          <TabsContent value="forensics" className="space-y-4">
+            <StrategyForensicDashboard />
+          </TabsContent>
+
           {/* Loss Analysis Tab */}
           <TabsContent value="losses" className="space-y-4">
             <LossAttributionDashboard />
