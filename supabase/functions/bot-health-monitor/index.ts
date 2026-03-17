@@ -367,30 +367,85 @@ serve(async (req) => {
         } else {
           console.warn(`[HEALTH_MONITOR] ⚠️ WebSocket ${fn}: ${wsHealth.status} - ${wsHealth.error || 'stale'}`);
           
-          // Check cooldown before alerting
-          const withinCooldown = await isWithinCooldown(supabase, 'system', `websocket_${fn}`);
-          if (!withinCooldown) {
-            // Send alert to all active traders
-            for (const user of riskParams) {
-              const alert: AlertResult = {
-                alertType: 'websocket_failure',
-                severity: wsHealth.status === 'unreachable' ? 'critical' : 'warning',
-                message: `WebSocket ${fn} is ${wsHealth.status}${wsHealth.error ? `: ${wsHealth.error}` : ''}`,
-                details: {
-                  function: fn,
-                  status: wsHealth.status,
+          // For "degraded" (not unreachable), require consecutive failures before alerting
+          // This prevents flapping alerts from cold starts and instance cycling
+          if (wsHealth.status === 'degraded') {
+            const { data: recentStates } = await supabase
+              .from('bot_health_state')
+              .select('state, last_seen_at')
+              .eq('state_type', `websocket_${fn}`)
+              .is('resolved_at', null)
+              .order('last_seen_at', { ascending: false })
+              .limit(1);
+            
+            const hasOngoingDegradedState = recentStates && recentStates.length > 0 && recentStates[0].state === 'degraded';
+            const ongoingDuration = hasOngoingDegradedState 
+              ? Date.now() - new Date(recentStates[0].last_seen_at).getTime()
+              : 0;
+            
+            // Only alert if degraded for more than 10 minutes (2+ health check cycles)
+            if (!hasOngoingDegradedState) {
+              // First detection — track state but don't alert yet
+              for (const user of riskParams) {
+                await updateStateTracking(supabase, user.user_id, `websocket_${fn}`, 'degraded', {
+                  function: fn, status: wsHealth.status,
                   activeConnections: wsHealth.activeConnections,
                   lastMessageAgoMs: wsHealth.lastMessageAgoMs,
-                  error: wsHealth.error,
-                },
-                alertSent: false,
-              };
-              
-              const sent = await sendHealthAlert(supabaseUrl, supabaseKey, user.user_id, alert);
-              if (sent) {
-                alertsSentCount++;
-                await updateStateTracking(supabase, user.user_id, `websocket_${fn}`, wsHealth.status, alert.details);
-                await markAlertSent(supabase, user.user_id, `websocket_${fn}`, wsHealth.status);
+                });
+              }
+              console.log(`[HEALTH_MONITOR] 🔸 WebSocket ${fn} degraded — first detection, deferring alert`);
+            } else if (ongoingDuration < 600000) {
+              // Still within grace period (<10 min)
+              console.log(`[HEALTH_MONITOR] 🔸 WebSocket ${fn} degraded for ${Math.round(ongoingDuration / 60000)}min — within grace period, no alert`);
+            } else {
+              // Persistent degradation — send alert
+              console.warn(`[HEALTH_MONITOR] 🔴 WebSocket ${fn} degraded for ${Math.round(ongoingDuration / 60000)}min — sending alert`);
+              const withinCooldown = await isWithinCooldown(supabase, 'system', `websocket_${fn}`);
+              if (!withinCooldown) {
+                for (const user of riskParams) {
+                  const alert: AlertResult = {
+                    alertType: 'websocket_failure',
+                    severity: 'warning',
+                    message: `WebSocket ${fn} is degraded for ${Math.round(ongoingDuration / 60000)} minutes`,
+                    details: {
+                      function: fn, status: wsHealth.status,
+                      activeConnections: wsHealth.activeConnections,
+                      lastMessageAgoMs: wsHealth.lastMessageAgoMs,
+                      error: wsHealth.error,
+                    },
+                    alertSent: false,
+                  };
+                  const sent = await sendHealthAlert(supabaseUrl, supabaseKey, user.user_id, alert);
+                  if (sent) {
+                    alertsSentCount++;
+                    await markAlertSent(supabase, user.user_id, `websocket_${fn}`, wsHealth.status);
+                  }
+                }
+              }
+            }
+          } else {
+            // Unreachable — alert immediately
+            const withinCooldown = await isWithinCooldown(supabase, 'system', `websocket_${fn}`);
+            if (!withinCooldown) {
+              for (const user of riskParams) {
+                const alert: AlertResult = {
+                  alertType: 'websocket_failure',
+                  severity: 'critical',
+                  message: `WebSocket ${fn} is ${wsHealth.status}${wsHealth.error ? `: ${wsHealth.error}` : ''}`,
+                  details: {
+                    function: fn, status: wsHealth.status,
+                    activeConnections: wsHealth.activeConnections,
+                    lastMessageAgoMs: wsHealth.lastMessageAgoMs,
+                    error: wsHealth.error,
+                  },
+                  alertSent: false,
+                };
+                const sent = await sendHealthAlert(supabaseUrl, supabaseKey, user.user_id, alert);
+                if (sent) {
+                  alertsSentCount++;
+                  await updateStateTracking(supabase, user.user_id, `websocket_${fn}`, wsHealth.status, alert.details);
+                  await markAlertSent(supabase, user.user_id, `websocket_${fn}`, wsHealth.status);
+                }
               }
             }
           }
