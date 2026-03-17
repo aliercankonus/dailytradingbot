@@ -19,6 +19,7 @@ let activeConnections = 0;
 let lastBinanceMessage = Date.now();
 let totalMessagesReceived = 0;
 let lastError: string | null = null;
+const instanceStartTime = Date.now();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -33,7 +34,9 @@ serve(async (req) => {
   if (req.method === 'GET' && upgradeHeader.toLowerCase() !== "websocket") {
     const now = Date.now();
     const timeSinceLastMessage = now - lastBinanceMessage;
-    const isHealthy = activeConnections === 0 || timeSinceLastMessage < 120000; // 2 min threshold
+    const instanceAge = now - instanceStartTime;
+    // Healthy if: no active connections (idle is normal), OR instance just booted (<3min), OR recent messages
+    const isHealthy = activeConnections === 0 || instanceAge < 180000 || timeSinceLastMessage < 120000; // 2 min threshold
     
     // Log health heartbeat to DB
     try {
