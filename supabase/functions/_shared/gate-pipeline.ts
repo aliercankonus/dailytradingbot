@@ -335,6 +335,9 @@ export function evaluateProductionGates(
   //     partial_loss trades avg -1.514% with peak_pct=0 (instant loss)
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'STRONG_TREND') {
+    const stSymbol = symbol || mfs.symbol;
+    const atrPct = mfs.atrPercent || 0;
+
     // Fix 1 (v1): StochRSI entry filter — block overbought LONG / oversold SHORT
     if (direction === 'LONG' && stochK > 70) {
       logger.info(`🚫 STRONG_TREND LONG blocked: StochK=${stochK.toFixed(1)} > 70 (overbought entry)`);
@@ -344,20 +347,40 @@ export function evaluateProductionGates(
       logger.info(`🚫 STRONG_TREND SHORT blocked: StochK=${stochK.toFixed(1)} < 30 (oversold entry)`);
       return fail('STRONG_TREND_STOCH_OVERSOLD');
     }
-    // Fix 2 (v2): SELL with declining ADX slope → reduce position
-    // Forensic: 10 partial_loss SELL trades with peak_pct=0, avg -1.514%
+
+    // Fix 2 (v3): BUY hard block — 90d forensic: 11T, 27.3% WR, -$0.78
+    // BUY only viable with STRONG momentum (≥15) — below this, all losses
+    if (direction === 'LONG' && momentumResult.score < 15) {
+      logger.info(`🚫 STRONG_TREND LONG blocked: momentum=${momentumResult.score} < 15 (27.3% WR historically)`);
+      return fail('STRONG_TREND_BUY_WEAK_MOMENTUM');
+    }
+
+    // Fix 3 (v3): SELL instant-loss prevention — 16 trades hit SL/partial_loss with peak≈0%
+    // Require minimum |momentum| ≥ 5 for directional confirmation
+    if (direction === 'SHORT' && Math.abs(momentumResult.score) < 5) {
+      logger.info(`🚫 STRONG_TREND SHORT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5 (instant-loss pattern)`);
+      return fail('STRONG_TREND_SHORT_NO_MOMENTUM');
+    }
+
+    // Fix 4 (v3): ETHUSDT SELL — 14T, 35.7% WR, barely +$1.44 → need quality ≥ 60
+    if (stSymbol === 'ETHUSDT' && direction === 'SHORT' && qualityScore < 60) {
+      logger.info(`🚫 STRONG_TREND ETHUSDT SHORT blocked: quality=${qualityScore} < 60 (35.7% WR)`);
+      return fail('STRONG_TREND_ETH_SHORT_LOW_QUALITY');
+    }
+
+    // Fix 5 (v3): ADAUSDT SELL — 2T, 0% WR, -$0.72 → hard block (insufficient edge)
+    if (stSymbol === 'ADAUSDT' && direction === 'SHORT') {
+      logger.info(`🚫 STRONG_TREND ADAUSDT SHORT blocked: 0% WR historically`);
+      return fail('STRONG_TREND_ADA_SHORT_BLOCKED');
+    }
+
+    // Fix 6 (v2→v3): SELL with declining ADX slope → reduce position (keeps profitable trailing trades)
     if (direction === 'SHORT' && adxSlope < 0) {
       positionMultiplier *= 0.50;
       logger.info(`⚠️ ST SHORT declining ADX: slope=${adxSlope.toFixed(2)}, pos halved`);
     }
-    // Fix 3 (v2): BUY side quality gate — BUY WR 27.3% (3/11)
-    // Only allow BUY with strong momentum confirmation
-    if (direction === 'LONG' && momentumResult.score < 8) {
-      positionMultiplier *= 0.40;
-      logger.info(`⚠️ ST LONG weak momentum: score=${momentumResult.score}, pos reduced to 40%`);
-    }
-    // Fix 4 (v2): High-ATR SELL guard — DOTUSDT (ATR 2.5%) losses were most severe
-    const atrPct = mfs.atrPercent || 0;
+
+    // Fix 7 (v2): High-ATR SELL guard
     if (direction === 'SHORT' && atrPct > 1.5 && qualityScore < 65) {
       positionMultiplier *= 0.50;
       logger.info(`⚠️ ST SHORT high-ATR guard: atr=${atrPct.toFixed(2)}%, quality=${qualityScore}, pos halved`);
