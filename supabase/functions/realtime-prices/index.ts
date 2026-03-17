@@ -19,6 +19,7 @@ let activeConnections = 0;
 let lastBinanceMessage = Date.now();
 let totalMessagesReceived = 0;
 let lastError: string | null = null;
+const instanceStartTime = Date.now();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
