@@ -135,27 +135,36 @@ export function evaluateProductionGates(
   if (!direction) return fail('NO_DIRECTION');
 
   // ═══════════════════════════════════════════════════════════════
-  // GATE 3: Macro Bias (Soft — sizing reduction, NOT hard block)
-  // Counter-trend trades get 30% position, not blocked entirely
+  // STOCH AUTHORITY (Phase 1 unification)
+  // Single call replaces 8 scattered StochRSI layers.
+  // See _shared/stoch-authority.ts for tier logic.
+  // ═══════════════════════════════════════════════════════════════
+  const stochCtx: StochContext = evaluateStochContext(mfs, direction, { adxSlope, timeframe: '1h' });
+  if (stochCtx.hardBlock) {
+    logger.info(`🚫 STOCH ABSOLUTE BLOCK: ${symbol || mfs.symbol} ${direction} | ${stochCtx.reason}`);
+    return fail(stochCtx.hardBlockReason || 'STOCH_ABSOLUTE_EXTREME');
+  }
+  // Apply soft runway multiplier once — replaces all previous stoch-based sizing.
+  positionMultiplier *= stochCtx.runwayMultiplier;
+
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 3: Macro Bias (counter-trend sizing)
+  // Uses StochContext tier (deep-favorable = better bounce opportunity).
   // ═══════════════════════════════════════════════════════════════
   if (direction === 'LONG' && primaryTrend === 'bearish') {
-    // Counter-trend LONG in bearish: reduced but allowed
-    // Deep oversold = bigger position (bounce opportunity)
-    if (stochK < 15) {
-      positionMultiplier = Math.min(positionMultiplier, 0.40); // Deep oversold bounce
-      logger.info(`🔄 COUNTER-TREND LONG allowed: deep oversold K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
-    } else if (stochK < 30) {
-      positionMultiplier = Math.min(positionMultiplier, 0.30); // Oversold bounce probe
-      logger.info(`🔄 COUNTER-TREND LONG allowed: oversold K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
+    if (stochCtx.tier === 'DEEP_FAVORABLE') {
+      positionMultiplier = Math.min(positionMultiplier, 0.40);
+    } else if (stochCtx.tier === 'FAVORABLE') {
+      positionMultiplier = Math.min(positionMultiplier, 0.30);
     } else {
-      positionMultiplier = Math.min(positionMultiplier, 0.20); // Very small counter-trend probe
-      logger.info(`🔄 COUNTER-TREND LONG micro-probe: K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
+      positionMultiplier = Math.min(positionMultiplier, 0.20);
     }
+    logger.info(`🔄 COUNTER-TREND LONG: tier=${stochCtx.tier} K=${stochCtx.kValue.toFixed(1)} pos=${(positionMultiplier * 100).toFixed(0)}%`);
   }
   if (direction === 'SHORT' && primaryTrend === 'bullish') {
-    if (stochK > 85) {
-      positionMultiplier = Math.min(positionMultiplier, 0.40); // Deep overbought
-    } else if (stochK > 70) {
+    if (stochCtx.tier === 'DEEP_FAVORABLE') {
+      positionMultiplier = Math.min(positionMultiplier, 0.40);
+    } else if (stochCtx.tier === 'FAVORABLE') {
       positionMultiplier = Math.min(positionMultiplier, 0.30);
     } else {
       positionMultiplier = Math.min(positionMultiplier, 0.20);
