@@ -29,6 +29,8 @@ const logger = createLogger('gate-pipeline');
 
 export { classifyGateFamily } from "./gate-family.ts";
 export type { GateFamily } from "./gate-family.ts";
+export { GATE_FLAGS, CANONICAL_HARD_GATES, isCanonicalHardGate } from "./gate-flags.ts";
+export type { GateStrictnessMode, GateFlags } from "./gate-flags.ts";
 
 // ============= TYPES =============
 
