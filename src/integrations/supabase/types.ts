@@ -1304,6 +1304,7 @@ export type Database = {
           checked_at: string
           created_at: string | null
           filters_status: Json | null
+          gate_family: string | null
           id: string
           rejection_reason: string
           symbol: string
@@ -1315,6 +1316,7 @@ export type Database = {
           checked_at?: string
           created_at?: string | null
           filters_status?: Json | null
+          gate_family?: string | null
           id?: string
           rejection_reason: string
           symbol: string
@@ -1326,6 +1328,7 @@ export type Database = {
           checked_at?: string
           created_at?: string | null
           filters_status?: Json | null
+          gate_family?: string | null
           id?: string
           rejection_reason?: string
           symbol?: string
@@ -1583,6 +1586,7 @@ export type Database = {
           archived_count: number
         }[]
       }
+      classify_gate_family: { Args: { p_reason: string }; Returns: string }
       delete_encrypted_api_key: {
         Args: { p_key_type: string; p_user_id: string }
         Returns: boolean
