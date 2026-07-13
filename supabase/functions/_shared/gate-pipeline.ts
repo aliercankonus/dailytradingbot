@@ -23,11 +23,14 @@ import {
 import { createLogger } from "./logging.ts";
 import { classifyGateFamily, type GateFamily } from "./gate-family.ts";
 import { evaluateStochContext, type StochContext } from "./stoch-authority.ts";
+import { strictBlock, GATE_FLAGS } from "./gate-flags.ts";
 
 const logger = createLogger('gate-pipeline');
 
 export { classifyGateFamily } from "./gate-family.ts";
 export type { GateFamily } from "./gate-family.ts";
+export { GATE_FLAGS, CANONICAL_HARD_GATES, isCanonicalHardGate } from "./gate-flags.ts";
+export type { GateStrictnessMode, GateFlags } from "./gate-flags.ts";
 
 // ============= TYPES =============
 
@@ -226,13 +229,22 @@ export function evaluateProductionGates(
   if (isBtcShort) {
     // Higher quality floor for BTC SHORT (55 vs 35 default)
     if (qualityScore < 55) {
-      logger.info(`🚫 BTC SHORT quality filter: quality=${qualityScore} < 55, blocking`);
-      return fail('BTC_SHORT_LOW_QUALITY');
+      const d = strictBlock('BTC_SHORT_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 BTC SHORT quality filter: quality=${qualityScore} < 55, blocking${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
+      logger.info(`⚠️ BTC SHORT quality soft: quality=${qualityScore} < 55, pos x${d.softMultiplier}`);
     }
     // ADX slope must not be strongly decaying for BTC SHORT
     if (adxSlope < -0.5) {
-      logger.info(`🚫 BTC SHORT ADX slope filter: slope=${adxSlope.toFixed(2)} < -0.5, blocking`);
-      return fail('BTC_SHORT_ADX_DECAY');
+      const d = strictBlock('BTC_SHORT_ADX_DECAY');
+      if (d.hardBlock) {
+        logger.info(`🚫 BTC SHORT ADX slope filter: slope=${adxSlope.toFixed(2)} < -0.5, blocking${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Require minimum momentum strength for BTC SHORT
     if (Math.abs(momentumResult.score) < 8) {
@@ -312,18 +324,30 @@ export function evaluateProductionGates(
   if (strategyName === 'TREND_CONTINUATION') {
     // Hard block: quality < 40 (backtest: low quality TC trades are negative expectancy)
     if (qualityScore < 40) {
-      logger.info(`🚫 TREND_CONTINUATION blocked: quality=${qualityScore} < 40`);
-      return fail('TC_LOW_QUALITY');
+      const d = strictBlock('TC_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 TREND_CONTINUATION blocked: quality=${qualityScore} < 40${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Fix 1 (v1): Block LONG in RANGE_COMPRESSION — 30 trades, 30% WR, -13.09 PnL
     if (mfs.regime === 'RANGE_COMPRESSION' && direction === 'LONG') {
-      logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION: regime=${mfs.regime}`);
-      return fail('TC_RANGE_COMPRESSION_LONG_BLOCKED');
+      const d = strictBlock('TC_RANGE_COMPRESSION_LONG_BLOCKED');
+      if (d.hardBlock) {
+        logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Fix 2 (v1): TREND_EXPANSION SHORT requires quality >= 55
     if (mfs.regime === 'TREND_EXPANSION' && direction === 'SHORT' && qualityScore < 55) {
-      logger.info(`🚫 TREND_CONTINUATION SHORT low quality in TREND_EXPANSION: quality=${qualityScore} < 55`);
-      return fail('TC_EXPANSION_SHORT_LOW_QUALITY');
+      const d = strictBlock('TC_EXPANSION_SHORT_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 TREND_CONTINUATION SHORT low quality in TREND_EXPANSION: quality=${qualityScore} < 55${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Fix 3 (v2): SELL side with declining ADX → halve position
     if (direction === 'SHORT' && adxSlope < -0.3) {
@@ -331,7 +355,6 @@ export function evaluateProductionGates(
       logger.info(`⚠️ TC SHORT ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
     }
     // Fix 4 (v2): OBSOLETE — replaced by stoch-authority runwayMultiplier (EXTENDED_SHORT tier at K<30).
-    // Hard block removed: soft sizing already penalizes oversold SHORT entries.
 
     // Fix 5 (v2): Require momentum alignment for BUY
     if (direction === 'LONG' && momentumResult.score < 3 && adx < 25) {
@@ -362,29 +385,43 @@ export function evaluateProductionGates(
 
 
     // Fix 2 (v3): BUY hard block — 90d forensic: 11T, 27.3% WR, -$0.78
-    // BUY only viable with STRONG momentum (≥15) — below this, all losses
     if (direction === 'LONG' && momentumResult.score < 15) {
-      logger.info(`🚫 STRONG_TREND LONG blocked: momentum=${momentumResult.score} < 15 (27.3% WR historically)`);
-      return fail('STRONG_TREND_BUY_WEAK_MOMENTUM');
+      const d = strictBlock('STRONG_TREND_BUY_WEAK_MOMENTUM');
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND LONG blocked: momentum=${momentumResult.score} < 15 (27.3% WR historically)${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
-    // Fix 3 (v3): SELL instant-loss prevention — 16 trades hit SL/partial_loss with peak≈0%
-    // Require minimum |momentum| ≥ 5 for directional confirmation
+    // Fix 3 (v3): SELL instant-loss prevention
     if (direction === 'SHORT' && Math.abs(momentumResult.score) < 5) {
-      logger.info(`🚫 STRONG_TREND SHORT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5 (instant-loss pattern)`);
-      return fail('STRONG_TREND_SHORT_NO_MOMENTUM');
+      const d = strictBlock('STRONG_TREND_SHORT_NO_MOMENTUM');
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND SHORT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5 (instant-loss pattern)${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
-    // Fix 4 (v3): ETHUSDT SELL — 14T, 35.7% WR, barely +$1.44 → need quality ≥ 60
+    // Fix 4 (v3): ETHUSDT SELL quality floor 60
     if (stSymbol === 'ETHUSDT' && direction === 'SHORT' && qualityScore < 60) {
-      logger.info(`🚫 STRONG_TREND ETHUSDT SHORT blocked: quality=${qualityScore} < 60 (35.7% WR)`);
-      return fail('STRONG_TREND_ETH_SHORT_LOW_QUALITY');
+      const d = strictBlock('STRONG_TREND_ETH_SHORT_LOW_QUALITY', { symbolLevel: true });
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND ETHUSDT SHORT blocked: quality=${qualityScore} < 60${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
-    // Fix 5 (v3): ADAUSDT SELL — 2T, 0% WR, -$0.72 → hard block (insufficient edge)
+    // Fix 5 (v3): ADAUSDT SELL — 0% WR
     if (stSymbol === 'ADAUSDT' && direction === 'SHORT') {
-      logger.info(`🚫 STRONG_TREND ADAUSDT SHORT blocked: 0% WR historically`);
-      return fail('STRONG_TREND_ADA_SHORT_BLOCKED');
+      const d = strictBlock('STRONG_TREND_ADA_SHORT_BLOCKED', { symbolLevel: true });
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND ADAUSDT SHORT blocked: 0% WR historically${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
     // Fix 6 (v2→v3): SELL with declining ADX slope → reduce position (keeps profitable trailing trades)
@@ -405,35 +442,55 @@ export function evaluateProductionGates(
   // Backtest: 705 trades, 36.2% WR, -$221 → need quality floor + frequency reduction
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'SQUEEZE_BREAKOUT') {
-    // === HARD BLOCK: Minimum quality 45 (backtest: low quality entries drive -PnL) ===
+    // Quality floor 45
     if (qualityScore < 45) {
-      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: quality=${qualityScore} < 45`);
-      return fail('SQUEEZE_LOW_QUALITY');
+      const d = strictBlock('SQUEEZE_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT blocked: quality=${qualityScore} < 45${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
-    // === HARD BLOCK: Require minimum ADX 20 for meaningful breakout energy ===
+    // ADX floor 20
     if (adx < 20) {
-      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: ADX=${adx.toFixed(1)} < 20 (insufficient energy)`);
-      return fail('SQUEEZE_ADX_TOO_LOW');
+      const d = strictBlock('SQUEEZE_ADX_TOO_LOW');
+      if (d.hardBlock) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT blocked: ADX=${adx.toFixed(1)} < 20${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
-    // === HARD BLOCK: Require minimum |momentum| >= 5 (no flat momentum entries) ===
+    // Momentum floor 5
     if (Math.abs(momentumResult.score) < 5) {
-      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5`);
-      return fail('SQUEEZE_NO_MOMENTUM');
+      const d = strictBlock('SQUEEZE_NO_MOMENTUM');
+      if (d.hardBlock) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
     // === Directional filter (StochRSI handled by stoch-authority) ===
     if (direction === 'LONG') {
       if (primaryTrend === 'bearish' && momentumResult.score < 10) {
-        logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})`);
-        return fail('SQUEEZE_BUY_COUNTER_TREND_WEAK');
+        const d = strictBlock('SQUEEZE_BUY_COUNTER_TREND_WEAK');
+        if (d.hardBlock) {
+          logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+          return fail(d.reason);
+        }
+        positionMultiplier *= d.softMultiplier;
       }
       if (adxSlope < 0) {
         positionMultiplier *= 0.50;
       }
     } else if (direction === 'SHORT') {
       if (primaryTrend === 'bullish' && momentumResult.score > -10) {
-        logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum`);
-        return fail('SQUEEZE_SELL_COUNTER_TREND_WEAK');
+        const d = strictBlock('SQUEEZE_SELL_COUNTER_TREND_WEAK');
+        if (d.hardBlock) {
+          logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+          return fail(d.reason);
+        }
+        positionMultiplier *= d.softMultiplier;
       }
     }
     // NOTE: Removed stochK>70 hard block for LONG (SQUEEZE_BUY_OVERBOUGHT) and

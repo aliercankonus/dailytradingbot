@@ -1,0 +1,29 @@
+// ============= ADX category view (Phase 3B) =============
+// Named re-exports of ADX-family constants. Definitions live in
+// ../constants.ts. Import from here for ADX-scoped clarity.
+// ========================================================
+export {
+  ADX_THRESHOLDS,
+  ADX_GATE,
+  ADX_PHASES,
+  ADX_EXHAUSTION_PARAMS,
+  ADX_EXHAUSTION_REFINED_PARAMS,
+  ADX_EXHAUSTION_LATE_ENTRY_PROTECTION,
+  ADX_RISING_PERCENT_B_BYPASS,
+  ADX_RISING_DIRECTIONAL_BYPASS_PARAMS,
+  ADX_SLOPE_GRADUATED_GATE,
+  HIGH_ADX_1H_CONFIRMATION_GATE,
+  REGIME_ADAPTIVE_ADX_PARAMS,
+  MOMENTUM_ADX_FLOOR_PARAMS,
+  STRONG_ADX_OVERRIDE_PARAMS,
+  STRONG_ADX_UNIVERSAL_OVERRIDE_PARAMS,
+  LOW_ADX_TREND_EXCEPTION_PARAMS,
+  ADX_SCORE_PARAMS,
+  STRATEGY_ADX_RESTRICTIONS,
+  ADX_REVERSAL_WEIGHTS,
+  TREND_ACCELERATION_PARAMS,
+  TREND_PHASE_GATE,
+  TREND_STRENGTH_PARAMS,
+  EXPANSION_GATE,
+} from "../constants.ts";
+export type { AdxPhase } from "../constants.ts";
