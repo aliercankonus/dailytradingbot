@@ -454,15 +454,29 @@ export function evaluateProductionGates(
     }
   }
 
+  // Per-strategy sub-score floor pass (Phase 2b): raises floors for strategies
+  // with historically weak sub-score profiles. Soft sizing only, no hard block.
+  const stratFloors = getStrategyFloors(strategyName);
+  const stratSubScores = calculateQualitySubScores(mfs, effectiveTrend, mfs.symbol, { floors: stratFloors });
+  if (stratSubScores.breachedFloors.length > 0 && stratSubScores.breachedFloors.length > subScores.breachedFloors.length) {
+    const extraPenalty = 0.80;
+    positionMultiplier *= extraPenalty;
+    logger.info(`⚠️ STRATEGY FLOOR (${strategyName}): ${stratSubScores.reason} → extra x${extraPenalty}`);
+  }
+
   // Floor: minimum 10% position (never zero unless hard-blocked)
   positionMultiplier = Math.max(positionMultiplier, 0.10);
 
-  logger.info(`✅ GATE PASS: ${symbol || mfs.symbol} ${direction} | strategy=${strategyName} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | K=${stochK.toFixed(1)} | mom=${momentumResult.score} | quality=${qualityScore} | pos=${(positionMultiplier * 100).toFixed(0)}%`);
+  logger.info(`✅ GATE PASS: ${symbol || mfs.symbol} ${direction} | strategy=${strategyName} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | K=${stochK.toFixed(1)} | mom=${momentumResult.score} | Q=${qualityScore}(e${subScores.entryQ.toFixed(0)}/t${subScores.trendQ.toFixed(0)}/c${subScores.contextQ.toFixed(0)}) | pos=${(positionMultiplier * 100).toFixed(0)}%`);
 
   return {
     passed: true, gate: null, gateFamily: null, direction, qualityScore,
     momentumScore: momentumResult.score,
     positionMultiplier, strategyName,
+    entryQ: subScores.entryQ,
+    trendQ: subScores.trendQ,
+    contextQ: subScores.contextQ,
+    breachedFloors: stratSubScores.breachedFloors,
   };
 }
 
