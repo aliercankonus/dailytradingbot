@@ -61,7 +61,7 @@ export default function TradingCoachAgent() {
     if (error) {
       toast({ title: "Failed to load reports", description: error.message, variant: "destructive" });
     } else {
-      setReports((data as AgentReport[]) ?? []);
+      setReports((data as unknown as AgentReport[]) ?? []);
       if ((data?.length ?? 0) > 0 && !activeId) setActiveId(data![0].id);
     }
     setLoading(false);
