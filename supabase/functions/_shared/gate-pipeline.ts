@@ -440,35 +440,55 @@ export function evaluateProductionGates(
   // Backtest: 705 trades, 36.2% WR, -$221 → need quality floor + frequency reduction
   // ═══════════════════════════════════════════════════════════════
   if (strategyName === 'SQUEEZE_BREAKOUT') {
-    // === HARD BLOCK: Minimum quality 45 (backtest: low quality entries drive -PnL) ===
+    // Quality floor 45
     if (qualityScore < 45) {
-      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: quality=${qualityScore} < 45`);
-      return fail('SQUEEZE_LOW_QUALITY');
+      const d = strictBlock('SQUEEZE_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT blocked: quality=${qualityScore} < 45${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
-    // === HARD BLOCK: Require minimum ADX 20 for meaningful breakout energy ===
+    // ADX floor 20
     if (adx < 20) {
-      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: ADX=${adx.toFixed(1)} < 20 (insufficient energy)`);
-      return fail('SQUEEZE_ADX_TOO_LOW');
+      const d = strictBlock('SQUEEZE_ADX_TOO_LOW');
+      if (d.hardBlock) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT blocked: ADX=${adx.toFixed(1)} < 20${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
-    // === HARD BLOCK: Require minimum |momentum| >= 5 (no flat momentum entries) ===
+    // Momentum floor 5
     if (Math.abs(momentumResult.score) < 5) {
-      logger.info(`🚫 SQUEEZE_BREAKOUT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5`);
-      return fail('SQUEEZE_NO_MOMENTUM');
+      const d = strictBlock('SQUEEZE_NO_MOMENTUM');
+      if (d.hardBlock) {
+        logger.info(`🚫 SQUEEZE_BREAKOUT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
     // === Directional filter (StochRSI handled by stoch-authority) ===
     if (direction === 'LONG') {
       if (primaryTrend === 'bearish' && momentumResult.score < 10) {
-        logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})`);
-        return fail('SQUEEZE_BUY_COUNTER_TREND_WEAK');
+        const d = strictBlock('SQUEEZE_BUY_COUNTER_TREND_WEAK');
+        if (d.hardBlock) {
+          logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+          return fail(d.reason);
+        }
+        positionMultiplier *= d.softMultiplier;
       }
       if (adxSlope < 0) {
         positionMultiplier *= 0.50;
       }
     } else if (direction === 'SHORT') {
       if (primaryTrend === 'bullish' && momentumResult.score > -10) {
-        logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum`);
-        return fail('SQUEEZE_SELL_COUNTER_TREND_WEAK');
+        const d = strictBlock('SQUEEZE_SELL_COUNTER_TREND_WEAK');
+        if (d.hardBlock) {
+          logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+          return fail(d.reason);
+        }
+        positionMultiplier *= d.softMultiplier;
       }
     }
     // NOTE: Removed stochK>70 hard block for LONG (SQUEEZE_BUY_OVERBOUGHT) and
