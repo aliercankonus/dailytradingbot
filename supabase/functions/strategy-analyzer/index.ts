@@ -440,6 +440,7 @@ interface BufferedRejection {
   user_id: string;
   symbol: string;
   rejection_reason: string;
+  gate_family: string;
   filters_status: any;
   trend_data?: any;
   checked_at: string;
@@ -450,11 +451,12 @@ class RejectionBuffer {
   private buffer: BufferedRejection[] = [];
   private dedupKeys = new Set<string>();
 
-  add(entry: Omit<BufferedRejection, 'checked_at'>) {
+  add(entry: Omit<BufferedRejection, 'checked_at' | 'gate_family'> & { gate_family?: string }) {
     const dedupKey = `${entry.symbol}::${entry.rejection_reason}`;
     if (this.dedupKeys.has(dedupKey)) return; // Same symbol+reason already in this cycle
     this.dedupKeys.add(dedupKey);
-    this.buffer.push({ ...entry, checked_at: new Date().toISOString() });
+    const gate_family = entry.gate_family ?? classifyGateFamily(entry.rejection_reason);
+    this.buffer.push({ ...entry, gate_family, checked_at: new Date().toISOString() });
   }
 
   async flush(supabase: any, logger: any) {
