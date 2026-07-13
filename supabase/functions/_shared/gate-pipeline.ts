@@ -20,14 +20,19 @@ import {
   type PositionContext, type MarketContext, type UserExitSettings,
 } from "./exit-strategies.ts";
 import { createLogger } from "./logging.ts";
+import { classifyGateFamily, type GateFamily } from "./gate-family.ts";
 
 const logger = createLogger('gate-pipeline');
+
+export { classifyGateFamily } from "./gate-family.ts";
+export type { GateFamily } from "./gate-family.ts";
 
 // ============= TYPES =============
 
 export interface GateResult {
   passed: boolean;
   gate: string | null;
+  gateFamily: GateFamily | null;
   direction: 'LONG' | 'SHORT' | null;
   qualityScore: number;
   momentumScore: number;
@@ -68,7 +73,8 @@ export function evaluateProductionGates(
   let positionMultiplier = 1.0;
 
   const fail = (gate: string): GateResult => ({
-    passed: false, gate, direction: null, qualityScore: 0,
+    passed: false, gate, gateFamily: classifyGateFamily(gate),
+    direction: null, qualityScore: 0,
     momentumScore: momentumResult.score, positionMultiplier: 0, strategyName: '',
   });
 
@@ -455,7 +461,7 @@ export function evaluateProductionGates(
   logger.info(`✅ GATE PASS: ${symbol || mfs.symbol} ${direction} | strategy=${strategyName} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | K=${stochK.toFixed(1)} | mom=${momentumResult.score} | quality=${qualityScore} | pos=${(positionMultiplier * 100).toFixed(0)}%`);
 
   return {
-    passed: true, gate: null, direction, qualityScore,
+    passed: true, gate: null, gateFamily: null, direction, qualityScore,
     momentumScore: momentumResult.score,
     positionMultiplier, strategyName,
   };
