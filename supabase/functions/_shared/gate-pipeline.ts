@@ -323,11 +323,9 @@ export function evaluateProductionGates(
       positionMultiplier *= 0.50;
       logger.info(`⚠️ TC SHORT ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
     }
-    // Fix 4 (v2): Block SELL entry when StochK < 20 (oversold = bad SHORT timing)
-    if (direction === 'SHORT' && stochK < 20) {
-      logger.info(`🚫 TC SHORT blocked: StochK=${stochK.toFixed(1)} < 20 (oversold entry)`);
-      return fail('TC_SHORT_OVERSOLD_ENTRY');
-    }
+    // Fix 4 (v2): OBSOLETE — replaced by stoch-authority runwayMultiplier (EXTENDED_SHORT tier at K<30).
+    // Hard block removed: soft sizing already penalizes oversold SHORT entries.
+
     // Fix 5 (v2): Require momentum alignment for BUY
     if (direction === 'LONG' && momentumResult.score < 3 && adx < 25) {
       positionMultiplier *= 0.40;
@@ -351,15 +349,10 @@ export function evaluateProductionGates(
     const stSymbol = symbol || mfs.symbol;
     const atrPct = mfs.atrPercent || 0;
 
-    // Fix 1 (v1): StochRSI entry filter — block overbought LONG / oversold SHORT
-    if (direction === 'LONG' && stochK > 70) {
-      logger.info(`🚫 STRONG_TREND LONG blocked: StochK=${stochK.toFixed(1)} > 70 (overbought entry)`);
-      return fail('STRONG_TREND_STOCH_OVERBOUGHT');
-    }
-    if (direction === 'SHORT' && stochK < 30) {
-      logger.info(`🚫 STRONG_TREND SHORT blocked: StochK=${stochK.toFixed(1)} < 30 (oversold entry)`);
-      return fail('STRONG_TREND_STOCH_OVERSOLD');
-    }
+    // Fix 1 (v1): OBSOLETE — replaced by stoch-authority runwayMultiplier.
+    // Previously: hard-block STRONG_TREND LONG at K>70 / SHORT at K<30.
+    // Now: EXTENDED/EXTREME tiers reduce position by 35-60%; ABSOLUTE still hard-blocks.
+
 
     // Fix 2 (v3): BUY hard block — 90d forensic: 11T, 27.3% WR, -$0.78
     // BUY only viable with STRONG momentum (≥15) — below this, all losses
@@ -421,32 +414,24 @@ export function evaluateProductionGates(
       return fail('SQUEEZE_NO_MOMENTUM');
     }
 
-    // === FIX 1: Stricter BUY directional filter ===
+    // === Directional filter (StochRSI handled by stoch-authority) ===
     if (direction === 'LONG') {
       if (primaryTrend === 'bearish' && momentumResult.score < 10) {
         logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})`);
         return fail('SQUEEZE_BUY_COUNTER_TREND_WEAK');
       }
-      if (stochK > 70) {
-        logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: overbought K=${stochK.toFixed(1)} > 70`);
-        return fail('SQUEEZE_BUY_OVERBOUGHT');
-      }
-      if (stochK > 60) {
-        positionMultiplier *= 0.60;
-      }
       if (adxSlope < 0) {
         positionMultiplier *= 0.50;
       }
     } else if (direction === 'SHORT') {
-      if (stochK < 25) {
-        positionMultiplier *= 0.60;
-      }
-      // SHORT in bullish trend with weak momentum → block
       if (primaryTrend === 'bullish' && momentumResult.score > -10) {
         logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum`);
         return fail('SQUEEZE_SELL_COUNTER_TREND_WEAK');
       }
     }
+    // NOTE: Removed stochK>70 hard block for LONG (SQUEEZE_BUY_OVERBOUGHT) and
+    // stochK>60/<25 soft penalties — stoch-authority runwayMultiplier now covers these.
+
 
     // Momentum alignment bonus: when momentum strongly confirms direction
     if ((direction === 'LONG' && momentumResult.score > 15) || (direction === 'SHORT' && momentumResult.score < -15)) {
