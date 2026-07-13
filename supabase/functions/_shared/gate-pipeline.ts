@@ -199,14 +199,24 @@ export function evaluateProductionGates(
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // GATE 5: Quality Score (Lowered floor — let more trades through)
+  // GATE 5: Quality Score — DECOMPOSED (Phase 2)
+  // Legacy total score kept for VERY_LOW_QUALITY hard floor.
+  // New: entryQ / trendQ / contextQ sub-scores drive interpretable sizing.
   // ═══════════════════════════════════════════════════════════════
   const effectiveTrend = direction === 'LONG' ? 'bullish' : 'bearish';
-  const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
-  const qualityScore = qualityResult.score;
+  const subScores: QualitySubScores = calculateQualitySubScores(mfs, effectiveTrend, mfs.symbol);
+  const qualityScore = subScores.total;
 
-  // Only hard block at very low quality (< 35)
+  // Hard floor unchanged: aggregate quality below 35 is dangerous.
   if (qualityScore < 35) return fail('VERY_LOW_QUALITY');
+
+  // Sub-score soft sizing (0.42 – 1.10x). Reason is preserved for forensics.
+  positionMultiplier *= subScores.sizingMultiplier;
+  if (subScores.breachedFloors.length > 0) {
+    logger.info(`⚠️ QUALITY SUB-SCORE: ${symbol || mfs.symbol} ${direction} | ${subScores.reason} → sizing x${subScores.sizingMultiplier.toFixed(2)}`);
+  } else if (subScores.isAllStrong) {
+    logger.info(`✨ QUALITY ALL-STRONG: ${symbol || mfs.symbol} ${direction} | ${subScores.reason} → sizing x${subScores.sizingMultiplier.toFixed(2)}`);
+  }
 
   // ═══════════════════════════════════════════════════════════════
   // GATE 5b: BTC SHORT Stricter Filter
@@ -231,15 +241,6 @@ export function evaluateProductionGates(
     }
   }
 
-  // Graduated quality sizing
-  if (qualityScore < 50) {
-    positionMultiplier *= 0.50;
-  } else if (qualityScore < 60) {
-    positionMultiplier *= 0.70;
-  } else if (qualityScore < 70) {
-    positionMultiplier *= 0.85;
-  }
-  // qualityScore >= 70 = full position
 
   // ═══════════════════════════════════════════════════════════════
   // SOFT ADJUSTMENTS (position sizing, never hard blocks)
