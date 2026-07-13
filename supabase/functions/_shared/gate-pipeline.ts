@@ -13,6 +13,7 @@ import {
   GATE_CONFLICT_DETECTOR,
 } from "./constants.ts";
 import { calculateQualityScore } from "./scoring.ts";
+import { calculateQualitySubScores, getStrategyFloors, type QualitySubScores } from "./quality-score.ts";
 import {
   evaluateDecayVelocity, evaluateProgressiveProfitLock,
   evaluateMicroProfitLock, calculateFeeAwarePnL,
@@ -39,6 +40,11 @@ export interface GateResult {
   momentumScore: number;
   positionMultiplier: number;
   strategyName: string;
+  // Phase 2: quality sub-scores (entry/trend/context, each 0-100)
+  entryQ?: number;
+  trendQ?: number;
+  contextQ?: number;
+  breachedFloors?: string[];
 }
 
 export interface BacktestPosition {
