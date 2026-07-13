@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "sdk_version": "0.20.1",
+  "path": "/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://ikrivrudkvvnksollslh.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "daily-trading-bot-mcp",
+      "version": "0.1.0",
+      "title": "Daily Trading Bot"
+    },
+    "tools": [
+      {
+        "name": "list_open_positions",
+        "title": "List open positions",
+        "description": "List the signed-in user's currently open trading positions with entry price, side, quantity, unrealized PnL, stop-loss, and take-profit.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Optional symbol filter, e.g. BTCUSDT."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "description": "Maximum number of positions to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_recent_closed_positions",
+        "title": "List recent closed positions",
+        "description": "List the signed-in user's most recently closed trading positions with realized PnL, close reason, and strategy.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Optional symbol filter, e.g. ETHUSDT."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25,
+              "description": "Maximum number of closed positions to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_recent_signals",
+        "title": "List recent trading signals",
+        "description": "List the signed-in user's most recent trading signals with symbol, side, entry price, SL/TP, confidence, and strategy.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "Optional symbol filter."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "executed",
+                "expired",
+                "rejected"
+              ],
+              "description": "Optional status filter."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 25,
+              "description": "Maximum number of signals to return (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_portfolio_summary",
+        "title": "Get portfolio summary",
+        "description": "Return an aggregate snapshot for the signed-in user: open position count, total open notional, and realized PnL over the last 24h / 7d / 30d.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
