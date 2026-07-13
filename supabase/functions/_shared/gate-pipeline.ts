@@ -239,12 +239,9 @@ export function evaluateProductionGates(
   // SOFT ADJUSTMENTS (position sizing, never hard blocks)
   // ═══════════════════════════════════════════════════════════════
 
-  // StochRSI extremes: reduce position, don't block
-  if (direction === 'SHORT' && stochK < 10) {
-    positionMultiplier *= 0.60; // Very oversold for SHORT = risky
-  } else if (direction === 'LONG' && stochK > 90) {
-    positionMultiplier *= 0.60; // Very overbought for LONG = risky
-  }
+  // NOTE: StochRSI extreme sizing is handled by stoch-authority (runwayMultiplier)
+  // applied earlier. Do NOT add stochK-based checks here — extend stoch-authority instead.
+
 
   // Near 24h extreme: reduce position, don't block
   if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.5) {
