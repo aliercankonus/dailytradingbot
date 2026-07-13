@@ -21,6 +21,7 @@ import {
 } from "./exit-strategies.ts";
 import { createLogger } from "./logging.ts";
 import { classifyGateFamily, type GateFamily } from "./gate-family.ts";
+import { evaluateStochContext, type StochContext } from "./stoch-authority.ts";
 
 const logger = createLogger('gate-pipeline');
 
