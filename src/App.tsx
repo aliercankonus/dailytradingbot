@@ -23,6 +23,7 @@ const Symbols = lazy(() => import("./pages/Symbols"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Health = lazy(() => import("./pages/Health"));
 const Backtest = lazy(() => import("./pages/Backtest"));
+const TradingCoachAgent = lazy(() => import("./pages/TradingCoachAgent"));
 
 const queryClient = new QueryClient();
 
@@ -58,6 +59,7 @@ const AnimatedRoutes = () => {
           <Route path="/performance" element={<ProtectedRoute><Performance /></ProtectedRoute>} />
           <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
           <Route path="/backtest" element={<ProtectedRoute><Backtest /></ProtectedRoute>} />
+          <Route path="/coach" element={<ProtectedRoute><TradingCoachAgent /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
