@@ -21,6 +21,7 @@ import {
 } from "./exit-strategies.ts";
 import { createLogger } from "./logging.ts";
 import { classifyGateFamily, type GateFamily } from "./gate-family.ts";
+import { evaluateStochContext, type StochContext } from "./stoch-authority.ts";
 
 const logger = createLogger('gate-pipeline');
 
@@ -134,27 +135,36 @@ export function evaluateProductionGates(
   if (!direction) return fail('NO_DIRECTION');
 
   // ═══════════════════════════════════════════════════════════════
-  // GATE 3: Macro Bias (Soft — sizing reduction, NOT hard block)
-  // Counter-trend trades get 30% position, not blocked entirely
+  // STOCH AUTHORITY (Phase 1 unification)
+  // Single call replaces 8 scattered StochRSI layers.
+  // See _shared/stoch-authority.ts for tier logic.
+  // ═══════════════════════════════════════════════════════════════
+  const stochCtx: StochContext = evaluateStochContext(mfs, direction, { adxSlope, timeframe: '1h' });
+  if (stochCtx.hardBlock) {
+    logger.info(`🚫 STOCH ABSOLUTE BLOCK: ${symbol || mfs.symbol} ${direction} | ${stochCtx.reason}`);
+    return fail(stochCtx.hardBlockReason || 'STOCH_ABSOLUTE_EXTREME');
+  }
+  // Apply soft runway multiplier once — replaces all previous stoch-based sizing.
+  positionMultiplier *= stochCtx.runwayMultiplier;
+
+  // ═══════════════════════════════════════════════════════════════
+  // GATE 3: Macro Bias (counter-trend sizing)
+  // Uses StochContext tier (deep-favorable = better bounce opportunity).
   // ═══════════════════════════════════════════════════════════════
   if (direction === 'LONG' && primaryTrend === 'bearish') {
-    // Counter-trend LONG in bearish: reduced but allowed
-    // Deep oversold = bigger position (bounce opportunity)
-    if (stochK < 15) {
-      positionMultiplier = Math.min(positionMultiplier, 0.40); // Deep oversold bounce
-      logger.info(`🔄 COUNTER-TREND LONG allowed: deep oversold K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
-    } else if (stochK < 30) {
-      positionMultiplier = Math.min(positionMultiplier, 0.30); // Oversold bounce probe
-      logger.info(`🔄 COUNTER-TREND LONG allowed: oversold K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
+    if (stochCtx.tier === 'DEEP_FAVORABLE') {
+      positionMultiplier = Math.min(positionMultiplier, 0.40);
+    } else if (stochCtx.tier === 'FAVORABLE') {
+      positionMultiplier = Math.min(positionMultiplier, 0.30);
     } else {
-      positionMultiplier = Math.min(positionMultiplier, 0.20); // Very small counter-trend probe
-      logger.info(`🔄 COUNTER-TREND LONG micro-probe: K=${stochK.toFixed(1)}, pos=${(positionMultiplier * 100).toFixed(0)}%`);
+      positionMultiplier = Math.min(positionMultiplier, 0.20);
     }
+    logger.info(`🔄 COUNTER-TREND LONG: tier=${stochCtx.tier} K=${stochCtx.kValue.toFixed(1)} pos=${(positionMultiplier * 100).toFixed(0)}%`);
   }
   if (direction === 'SHORT' && primaryTrend === 'bullish') {
-    if (stochK > 85) {
-      positionMultiplier = Math.min(positionMultiplier, 0.40); // Deep overbought
-    } else if (stochK > 70) {
+    if (stochCtx.tier === 'DEEP_FAVORABLE') {
+      positionMultiplier = Math.min(positionMultiplier, 0.40);
+    } else if (stochCtx.tier === 'FAVORABLE') {
       positionMultiplier = Math.min(positionMultiplier, 0.30);
     } else {
       positionMultiplier = Math.min(positionMultiplier, 0.20);
@@ -229,12 +239,9 @@ export function evaluateProductionGates(
   // SOFT ADJUSTMENTS (position sizing, never hard blocks)
   // ═══════════════════════════════════════════════════════════════
 
-  // StochRSI extremes: reduce position, don't block
-  if (direction === 'SHORT' && stochK < 10) {
-    positionMultiplier *= 0.60; // Very oversold for SHORT = risky
-  } else if (direction === 'LONG' && stochK > 90) {
-    positionMultiplier *= 0.60; // Very overbought for LONG = risky
-  }
+  // NOTE: StochRSI extreme sizing is handled by stoch-authority (runwayMultiplier)
+  // applied earlier. Do NOT add stochK-based checks here — extend stoch-authority instead.
+
 
   // Near 24h extreme: reduce position, don't block
   if (direction === 'SHORT' && mfs.distanceFromLowPercent < 0.5) {
@@ -316,11 +323,9 @@ export function evaluateProductionGates(
       positionMultiplier *= 0.50;
       logger.info(`⚠️ TC SHORT ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
     }
-    // Fix 4 (v2): Block SELL entry when StochK < 20 (oversold = bad SHORT timing)
-    if (direction === 'SHORT' && stochK < 20) {
-      logger.info(`🚫 TC SHORT blocked: StochK=${stochK.toFixed(1)} < 20 (oversold entry)`);
-      return fail('TC_SHORT_OVERSOLD_ENTRY');
-    }
+    // Fix 4 (v2): OBSOLETE — replaced by stoch-authority runwayMultiplier (EXTENDED_SHORT tier at K<30).
+    // Hard block removed: soft sizing already penalizes oversold SHORT entries.
+
     // Fix 5 (v2): Require momentum alignment for BUY
     if (direction === 'LONG' && momentumResult.score < 3 && adx < 25) {
       positionMultiplier *= 0.40;
@@ -344,15 +349,10 @@ export function evaluateProductionGates(
     const stSymbol = symbol || mfs.symbol;
     const atrPct = mfs.atrPercent || 0;
 
-    // Fix 1 (v1): StochRSI entry filter — block overbought LONG / oversold SHORT
-    if (direction === 'LONG' && stochK > 70) {
-      logger.info(`🚫 STRONG_TREND LONG blocked: StochK=${stochK.toFixed(1)} > 70 (overbought entry)`);
-      return fail('STRONG_TREND_STOCH_OVERBOUGHT');
-    }
-    if (direction === 'SHORT' && stochK < 30) {
-      logger.info(`🚫 STRONG_TREND SHORT blocked: StochK=${stochK.toFixed(1)} < 30 (oversold entry)`);
-      return fail('STRONG_TREND_STOCH_OVERSOLD');
-    }
+    // Fix 1 (v1): OBSOLETE — replaced by stoch-authority runwayMultiplier.
+    // Previously: hard-block STRONG_TREND LONG at K>70 / SHORT at K<30.
+    // Now: EXTENDED/EXTREME tiers reduce position by 35-60%; ABSOLUTE still hard-blocks.
+
 
     // Fix 2 (v3): BUY hard block — 90d forensic: 11T, 27.3% WR, -$0.78
     // BUY only viable with STRONG momentum (≥15) — below this, all losses
@@ -414,32 +414,24 @@ export function evaluateProductionGates(
       return fail('SQUEEZE_NO_MOMENTUM');
     }
 
-    // === FIX 1: Stricter BUY directional filter ===
+    // === Directional filter (StochRSI handled by stoch-authority) ===
     if (direction === 'LONG') {
       if (primaryTrend === 'bearish' && momentumResult.score < 10) {
         logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: bearish trend + weak momentum (${momentumResult.score})`);
         return fail('SQUEEZE_BUY_COUNTER_TREND_WEAK');
       }
-      if (stochK > 70) {
-        logger.info(`🚫 SQUEEZE_BREAKOUT LONG blocked: overbought K=${stochK.toFixed(1)} > 70`);
-        return fail('SQUEEZE_BUY_OVERBOUGHT');
-      }
-      if (stochK > 60) {
-        positionMultiplier *= 0.60;
-      }
       if (adxSlope < 0) {
         positionMultiplier *= 0.50;
       }
     } else if (direction === 'SHORT') {
-      if (stochK < 25) {
-        positionMultiplier *= 0.60;
-      }
-      // SHORT in bullish trend with weak momentum → block
       if (primaryTrend === 'bullish' && momentumResult.score > -10) {
         logger.info(`🚫 SQUEEZE_BREAKOUT SHORT blocked: bullish trend + weak momentum`);
         return fail('SQUEEZE_SELL_COUNTER_TREND_WEAK');
       }
     }
+    // NOTE: Removed stochK>70 hard block for LONG (SQUEEZE_BUY_OVERBOUGHT) and
+    // stochK>60/<25 soft penalties — stoch-authority runwayMultiplier now covers these.
+
 
     // Momentum alignment bonus: when momentum strongly confirms direction
     if ((direction === 'LONG' && momentumResult.score > 15) || (direction === 'SHORT' && momentumResult.score < -15)) {
