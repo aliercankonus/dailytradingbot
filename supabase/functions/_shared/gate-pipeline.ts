@@ -383,29 +383,43 @@ export function evaluateProductionGates(
 
 
     // Fix 2 (v3): BUY hard block — 90d forensic: 11T, 27.3% WR, -$0.78
-    // BUY only viable with STRONG momentum (≥15) — below this, all losses
     if (direction === 'LONG' && momentumResult.score < 15) {
-      logger.info(`🚫 STRONG_TREND LONG blocked: momentum=${momentumResult.score} < 15 (27.3% WR historically)`);
-      return fail('STRONG_TREND_BUY_WEAK_MOMENTUM');
+      const d = strictBlock('STRONG_TREND_BUY_WEAK_MOMENTUM');
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND LONG blocked: momentum=${momentumResult.score} < 15 (27.3% WR historically)${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
-    // Fix 3 (v3): SELL instant-loss prevention — 16 trades hit SL/partial_loss with peak≈0%
-    // Require minimum |momentum| ≥ 5 for directional confirmation
+    // Fix 3 (v3): SELL instant-loss prevention
     if (direction === 'SHORT' && Math.abs(momentumResult.score) < 5) {
-      logger.info(`🚫 STRONG_TREND SHORT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5 (instant-loss pattern)`);
-      return fail('STRONG_TREND_SHORT_NO_MOMENTUM');
+      const d = strictBlock('STRONG_TREND_SHORT_NO_MOMENTUM');
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND SHORT blocked: |momentum|=${Math.abs(momentumResult.score)} < 5 (instant-loss pattern)${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
-    // Fix 4 (v3): ETHUSDT SELL — 14T, 35.7% WR, barely +$1.44 → need quality ≥ 60
+    // Fix 4 (v3): ETHUSDT SELL quality floor 60
     if (stSymbol === 'ETHUSDT' && direction === 'SHORT' && qualityScore < 60) {
-      logger.info(`🚫 STRONG_TREND ETHUSDT SHORT blocked: quality=${qualityScore} < 60 (35.7% WR)`);
-      return fail('STRONG_TREND_ETH_SHORT_LOW_QUALITY');
+      const d = strictBlock('STRONG_TREND_ETH_SHORT_LOW_QUALITY', { symbolLevel: true });
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND ETHUSDT SHORT blocked: quality=${qualityScore} < 60${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
-    // Fix 5 (v3): ADAUSDT SELL — 2T, 0% WR, -$0.72 → hard block (insufficient edge)
+    // Fix 5 (v3): ADAUSDT SELL — 0% WR
     if (stSymbol === 'ADAUSDT' && direction === 'SHORT') {
-      logger.info(`🚫 STRONG_TREND ADAUSDT SHORT blocked: 0% WR historically`);
-      return fail('STRONG_TREND_ADA_SHORT_BLOCKED');
+      const d = strictBlock('STRONG_TREND_ADA_SHORT_BLOCKED', { symbolLevel: true });
+      if (d.hardBlock) {
+        logger.info(`🚫 STRONG_TREND ADAUSDT SHORT blocked: 0% WR historically${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
 
     // Fix 6 (v2→v3): SELL with declining ADX slope → reduce position (keeps profitable trailing trades)
