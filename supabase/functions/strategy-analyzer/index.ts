@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 // RADICAL SIMPLIFICATION: Use simplified gate pipeline for signal decisions
-import { evaluateProductionGates, type GateResult } from "../_shared/gate-pipeline.ts";
+import { evaluateProductionGates, classifyGateFamily, type GateResult } from "../_shared/gate-pipeline.ts";
 import {
   LOW_CONFIDENCE_STANDARD_EXIT,
   ADX_THRESHOLDS, 
