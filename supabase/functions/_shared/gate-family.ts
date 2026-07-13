@@ -24,7 +24,7 @@ export function classifyGateFamily(reason: string | null | undefined): GateFamil
   if (r.includes('QUALITY') || r.includes('VERY_LOW_QUALITY') || r.includes('LOW_QUALITY')) return 'QUALITY';
   if (r.startsWith('NO_DIRECTION') || r.includes('DIRECTION')) return 'DIRECTION';
   if (r.includes('ADX') || r.includes('NO_ENERGY') || r.includes('DECAY')) return 'ADX';
-  if (r.includes('STOCH') || r.includes('OVERBOUGHT') || r.includes('OVERSOLD') || r.includes('EXTREME')) return 'STOCH';
+  if (r.includes('STOCH') || r.includes('OVERBOUGHT') || r.includes('OVERSOLD') || r.includes('EXTREME') || r.includes('ABSOLUTE_OVERBOUGHT') || r.includes('ABSOLUTE_OVERSOLD')) return 'STOCH';
   if (r.includes('MOMENTUM')) return 'MOMENTUM';
   if (r.includes('RANGE_COMPRESSION') || r.includes('EXPANSION') || r.includes('EXHAUSTION') || r.includes('REGIME')) return 'REGIME';
   if (r.includes('PORTFOLIO') || r.includes('DAILY_LIMIT') || r.includes('POSITION_LIMIT') || r.includes('CORRELATION') || r.includes('DAILY_LOSS')) return 'PORTFOLIO';
