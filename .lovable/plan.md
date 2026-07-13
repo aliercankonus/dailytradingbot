@@ -1,102 +1,124 @@
+# Aksiyon Planı: Sistemi Sadeleştir & Karar Alınabilir Hale Getir
 
+Amaç: 30 gate + 9,583 satır constants + 8 katmanlı StochRSI kullanımından, **teşhis edilebilir + deterministik + 8 gate'lik** bir mimariye geçmek. Her faz kendi başına deploy edilebilir; bir sonrakine geçmeden önce ölçülür.
 
-# MR Bypass in ADX Transitional Zone (18-22)
+---
 
-## Summary
-Add Mean Reversion as the third bypass priority in the ADX transitional zone (18-22) of the strategy-analyzer, after Squeeze Expansion and Early Ignition. This implements single-bypass-per-signal enforcement using the existing `earlyMeanReversionSignal` computed upstream at line 7729.
+## Faz 0 — Ölç (Yarım Gün)
 
-## What Changes
+Şu an rejection tablosu boş, gate stats aggregate. Kanıtsız kesim yapmayacağız.
 
-### File: `supabase/functions/strategy-analyzer/index.ts`
+1. `cleanup-expired-signals` içinde `signal_rejection_log` retention'ı **7 gün → 30 gün**.
+2. `gate-pipeline.ts` içindeki her `fail(reason)` çağrısına ikinci parametre olarak `family` etiketi ekle: `QUALITY | ADX | STOCH | DIRECTION | REGIME | STRATEGY | RISK | PORTFOLIO`.
+3. `signal_rejection_log`'a `gate_family` kolonu ekle (migration + backfill NULL).
+4. `StrategyForensicDashboard`'a yeni tab: **"Gate Family Breakdown"** — son 7 gün / 30 gün toggle, family bazında bar chart + top 5 detay reason.
+5. **Canonical backtest** tanımla: sabit sembol seti (BTC/ETH/SOL/BNB/XRP/ADA/AVAX), sabit 60 gün pencere, sabit config → `backtest-runner`'a `--profile=canonical` flag.
 
-**Single edit location: Lines ~10674-10676** (between Early Ignition check and the rejection block)
+**Çıktı:** Hangi gate ailesi gerçekten baskın, sayısal olarak biliyoruz.
 
-Insert a new MR bypass check block after the Early Ignition check (line 10674) and before the "neither exception passed" rejection block (line 10676):
+---
+
+## Faz 1 — StochRSI'yi Tek Otoriteye İndir (1 Gün)
+
+Şu an 8 farklı yerde çelişkili şekilde kullanılıyor.
+
+1. `_shared/stoch-authority.ts` yeni dosya: tek fonksiyon `evaluateStochContext(mfs, direction, adxSlope)` → döner:
+   - `isExtreme: boolean` (hard block adayı, sadece K<1 veya K>99)
+   - `isFavorable: boolean` (trend yönüyle uyumlu extreme)
+   - `runwayMultiplier: 0.5–1.0` (soft sizing)
+2. Şu gate'leri **kaldır** ve yerini `stochContext` alsın:
+   - `LTF_SPIKE_PROTECTION`, `PRE_MOMENTUM_STOCHRSI`, `STOCHRSI_RUNWAY`, `SQUEEZE_BUY_OVERBOUGHT`, `STRONG_TREND_STOCH_OVERBOUGHT/OVERSOLD`, `NEAR_EXTREME_PROTECTION`.
+3. Kalan **tek StochRSI gate**: `STOCH_EXTREME_HARD_BLOCK` (yalnız K<1 SHORT / K>99 LONG). Diğer her şey `runwayMultiplier` üzerinden pozisyona etki eder.
+4. Docs: 6 markdown dosyasını sil, tek `STOCH_AUTHORITY.md` ekle.
+5. Unit test: `stoch-authority.test.ts` — 12 senaryo.
+
+---
+
+## Faz 2 — Quality Score'u Decompose Et (1 Gün)
+
+`VERY_LOW_QUALITY` en büyük reddedici ama opak.
+
+1. Tek `qualityScore` (0-100) yerine üç alt-skor:
+   - `entryQ` (0-100): timing (StochRSI runway, LTF confirmation)
+   - `trendQ` (0-100): ADX, ADX slope, HTF alignment
+   - `contextQ` (0-100): volume, ATR, regime uygunluğu
+2. Tek `qualityFloor` yerine strateji başına 3 floor: `strategy.floors = { entryQ, trendQ, contextQ }`. Her sinyal 3'ünü de geçmeli.
+3. Symbol/side bazlı hard block'ları kaldır (`ADAUSDT SHORT`, `ETHUSDT SELL Q≥60`) → yerine `symbolPerformanceMultiplier` (soft, 0.3–1.0, son 30 gün WR'den türet).
+4. Forensic dashboard: rejection'da hangi alt-skorun floor'u geçemediği görünsün.
+5. `constants.ts`'i böl:
+   - `constants/adx.ts`
+   - `constants/stoch.ts`
+   - `constants/quality.ts`
+   - `constants/strategies/{strongTrend,squeeze,meanReversion}.ts`
+   - `constants/risk.ts`
+   - `constants/index.ts` (barrel)
+
+---
+
+## Faz 3 — Gate Sayısını 8'e İndir (2 Gün)
+
+Kalacak 8 essential gate:
 
 ```text
-Current flow (lines 10625-10732):
-  1. Squeeze check (10631-10651) -> sets squeezeBreakoutActive
-  2. Early Ignition check (10653-10674) -> sets earlyIgnitionActive (only if !squeezeBreakoutActive)
-  3. Rejection if neither passed (10676-10731) -> continue
-
-New flow:
-  1. Squeeze check -> sets squeezeBreakoutActive
-  2. Early Ignition check (only if !squeezeBreakoutActive) -> sets earlyIgnitionActive
-  3. NEW: MR bypass check (only if !squeezeBreakoutActive && !earlyIgnitionActive) -> sets meanReversionTransitionalActive
-  4. Rejection if none passed -> continue
+1. ADX_MINIMUM              (hard: ADX < 18)
+2. DIRECTION_CONVICTION     (hard: NO_DIRECTION)
+3. MOMENTUM_POLARITY        (hard: opposing accel score > 50)
+4. STOCH_EXTREME_HARD_BLOCK (hard: K<1 SHORT / K>99 LONG)
+5. QUALITY_FLOOR            (hard: entryQ/trendQ/contextQ herhangi biri floor altı)
+6. REGIME_ALLOWLIST         (hard: strateji × regime whitelist)
+7. STRATEGY_PERFORMANCE     (hard: 30-gün WR < 25%)
+8. PORTFOLIO_LIMIT          (hard: 3 pozisyon / 2% günlük risk)
 ```
 
-**New block to insert (between lines 10674 and 10676):**
+Diğer her şey (~22 gate) → **risk score contributor** (soft sizing, position × multiplier).
 
-```typescript
-// 3. MEAN REVERSION BYPASS (Priority 3 - lowest)
-// Only fires if Squeeze and Early Ignition both failed
-// Uses upstream earlyMeanReversionSignal (computed at line ~7729, before ADX gate)
-let meanReversionTransitionalActive = false;
-let meanReversionTransitionalMultiplier = 1.0;
+1. `gate-pipeline.ts` yeniden yaz — 620 satır → ~250 satır hedef.
+2. Kaldırılan gate'lerin dokümantasyonunu `docs/gates/_archive/` altına taşı (silme, tarihe kayıt).
+3. Memory index temizliği: 60+ `mem://` kuralından decommission edilenler için silme (`legacy-decommissioning` memory'sine ekle).
+4. Regression: her gate için minimum 1 unit test (`gate-logic.test.ts` genişletmesi).
 
-if (!squeezeBreakoutActive && !earlyIgnitionActive && isInTransitionalZone &&
-    earlyMeanReversionSignal?.detected && earlyMeanReversionSignal?.allowed) {
-  meanReversionTransitionalActive = true;
-  meanReversionTransitionalMultiplier = COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER; // 0.25x
+---
 
-  if (ADX_GATE_V1_1.LOG_BYPASS_SELECTION) {
-    logger.forSymbol(symbol).info(
-      `${LOG_CATEGORIES.SUCCESS} 🔄 MEAN_REVERSION_BYPASS (v1.1): ADX=${adx.toFixed(1)} allowed ` +
-      `(exhaustionScore=${earlyMeanReversionSignal.exhaustionScore}, ` +
-      `direction=${earlyMeanReversionSignal.direction}, ` +
-      `${(meanReversionTransitionalMultiplier * 100).toFixed(0)}% size)`
-    );
-  }
-  perSymbolGateAttribution.set(symbol, {
-    gate: 'MEAN_REVERSION_TRANSITIONAL_V11',
-    details: `MR bypass in ADX transitional zone (score=${earlyMeanReversionSignal.exhaustionScore})`
-  });
-}
-```
+## Faz 4 — Determinism & Guardrail (Yarım Gün)
 
-**Update the rejection condition (line 10677):**
+1. `backtest-runner` için sabit seed, deterministik randomizasyon.
+2. CI benzeri check: her gate/config değişikliğinden sonra canonical backtest çalışır, sonuç bir önceki ile ±10% içinde olmalı (yoksa uyarı).
+3. `.lovable/plan.md`'e "add-only" yasağı: yeni gate önerisi ancak bir eskisi decommission edilirse geçer (memory'e "Configuration Bloat Limit"i aktive et).
 
-Change from:
-```typescript
-if (!squeezeBreakoutActive && !earlyIgnitionActive) {
-```
-To:
-```typescript
-if (!squeezeBreakoutActive && !earlyIgnitionActive && !meanReversionTransitionalActive) {
-```
+---
 
-**Add position size application (after line 10751):**
+## Teknik Notlar
 
-After the Early Ignition position size application block, add:
+**Migration'lar:**
+- `signal_rejection_log`: `gate_family text` kolonu
+- Retention job update (`cleanup-expired-signals` fonksiyonu)
 
-```typescript
-// Apply MR transitional position size reduction if active
-if (meanReversionTransitionalActive && meanReversionTransitionalMultiplier < 1.0) {
-  reversalPositionMultiplier = Math.min(reversalPositionMultiplier, meanReversionTransitionalMultiplier);
-  logger.forSymbol(symbol).info(
-    `${LOG_CATEGORIES.RISK} 🔄 MR Transitional (v1.1) - position size capped at ${(meanReversionTransitionalMultiplier * 100).toFixed(0)}%`
-  );
-}
-```
+**Etkilenen dosyalar:**
+- `supabase/functions/_shared/gate-pipeline.ts` (major refactor)
+- `supabase/functions/_shared/constants.ts` (bölünecek)
+- `supabase/functions/_shared/market-feature-snapshot.ts` (stochContext ekleme)
+- Yeni: `_shared/stoch-authority.ts`, `_shared/quality-score.ts`
+- `strategy-analyzer/index.ts` (gate çağrıları sadeleşecek)
+- `StrategyForensicDashboard.tsx` (Gate Family + Quality Decompose UI)
+- `docs/gates/` (6 dosya sil, 8'e indir)
 
-**Update rejection log `meanReversionBypass` field** in the rejection filters_status (lines 10703-10708) -- these already log MR context correctly, no change needed there.
+**Risk azaltma:**
+- Her faz sonunda canonical backtest karşılaştırması
+- Feature flag: `USE_LEGACY_GATE_PIPELINE=true` ile eskiye dönüş
+- Faz 3'ten önce Faz 0'ın verisi ışığında gate listesi doğrulanır
 
-## Architectural Validation
+---
 
-| Requirement | Status |
-|---|---|
-| Lives inside ADX 18-22 only | Yes - guarded by `isInTransitionalZone` |
-| Priority order preserved | Yes - only fires when `!squeezeBreakoutActive && !earlyIgnitionActive` |
-| Single-bypass-per-signal | Yes - mutual exclusion via boolean guards; rejection uses `continue` |
-| Position multiplier isolated | Yes - uses `Math.min()` invariant, scoped to this signal |
-| MR signal computed upstream | Yes - `detectExhaustion()` at line 7729, before ADX gate at ~10580 |
+## Beklenen Sonuç
 
-## Technical Details
+| Metrik | Şimdi | Hedef |
+|---|---|---|
+| Aktif gate sayısı | 30 | 8 hard + 22 soft contributor |
+| `fail()` noktası | 110 | ~40 |
+| `constants.ts` en büyük dosya | 9,583 satır | <2,000 (bölünmüş) |
+| StochRSI kullanım katmanı | 8 | 1 authority + soft multiplier |
+| Aynı config backtest tekrar edilebilirliği | ±%80 dalgalanma | ±%5 |
+| Quality reddi açıklanabilirliği | Opak tek skor | 3 alt-skorlu + hangi floor kaldı |
+| Rejection retention | 7 gün / şu an boş | 30 gün + family etiketli |
 
-- **Position multiplier**: `COUNTER_TREND_ADMISSION.PROBE_POSITION_MULTIPLIER` = 0.25x (25% of normal)
-- **Gate condition**: `earlyMeanReversionSignal.detected && earlyMeanReversionSignal.allowed`
-- **Gate attribution tag**: `MEAN_REVERSION_TRANSITIONAL_V11`
-- **No new constants needed** -- `BYPASS_PRIORITY_ORDER.MEAN_REVERSION: 3` already exists in `ADX_GATE_V1_1`
-- **No new imports needed** -- `COUNTER_TREND_ADMISSION` is already imported
-
+Onaylarsan Faz 0 ile başlıyorum.

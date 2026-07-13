@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 // RADICAL SIMPLIFICATION: Use simplified gate pipeline for signal decisions
-import { evaluateProductionGates, type GateResult } from "../_shared/gate-pipeline.ts";
+import { evaluateProductionGates, classifyGateFamily, type GateResult } from "../_shared/gate-pipeline.ts";
 import {
   LOW_CONFIDENCE_STANDARD_EXIT,
   ADX_THRESHOLDS, 
@@ -440,6 +440,7 @@ interface BufferedRejection {
   user_id: string;
   symbol: string;
   rejection_reason: string;
+  gate_family: string;
   filters_status: any;
   trend_data?: any;
   checked_at: string;
@@ -450,11 +451,12 @@ class RejectionBuffer {
   private buffer: BufferedRejection[] = [];
   private dedupKeys = new Set<string>();
 
-  add(entry: Omit<BufferedRejection, 'checked_at'>) {
+  add(entry: Omit<BufferedRejection, 'checked_at' | 'gate_family'> & { gate_family?: string }) {
     const dedupKey = `${entry.symbol}::${entry.rejection_reason}`;
     if (this.dedupKeys.has(dedupKey)) return; // Same symbol+reason already in this cycle
     this.dedupKeys.add(dedupKey);
-    this.buffer.push({ ...entry, checked_at: new Date().toISOString() });
+    const gate_family = entry.gate_family ?? classifyGateFamily(entry.rejection_reason);
+    this.buffer.push({ ...entry, gate_family, checked_at: new Date().toISOString() });
   }
 
   async flush(supabase: any, logger: any) {
@@ -708,6 +710,7 @@ const logRejectionWithAI = async (
       user_id: userId,
       symbol,
       rejection_reason: rejectionReason,
+      gate_family: classifyGateFamily(rejectionReason),
       filters_status: enrichedFiltersStatus,
       trend_data: mfsCompactSummary,
       checked_at: new Date().toISOString(),

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, AlertTriangle, Shield, Target, BarChart3 } from "lucide-react";
+import { GateFamilyBreakdown } from "./GateFamilyBreakdown";
 
 interface StrategyRow {
   normalized_strategy: string;
@@ -90,6 +91,9 @@ export function StrategyForensicDashboard() {
 
   return (
     <div className="space-y-4">
+      {/* Gate Family Breakdown — Faz 0 teşhis paneli */}
+      <GateFamilyBreakdown />
+
       {/* Period selector */}
       <div className="flex items-center gap-2">
         <span className="text-xs text-muted-foreground">Dönem:</span>

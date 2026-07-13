@@ -66,6 +66,7 @@ async function logExecutionRejection(
       user_id: userId,
       symbol: symbol,
       rejection_reason: `EXECUTION: ${reason}`,
+      gate_family: 'EXECUTION',
       filters_status: {
         signalId: signal?.id,
         signalType: signal?.signal_type,
