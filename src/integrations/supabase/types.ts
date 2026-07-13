@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_reports: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          executive_summary: string | null
+          id: string
+          kpis: Json | null
+          model: string | null
+          period_days: number
+          proposed_actions: Json | null
+          raw_input_stats: Json | null
+          status: string
+          strategy_verdict: Json | null
+          systemic_errors: Json | null
+          tokens_used: number | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          executive_summary?: string | null
+          id?: string
+          kpis?: Json | null
+          model?: string | null
+          period_days: number
+          proposed_actions?: Json | null
+          raw_input_stats?: Json | null
+          status?: string
+          strategy_verdict?: Json | null
+          systemic_errors?: Json | null
+          tokens_used?: number | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          executive_summary?: string | null
+          id?: string
+          kpis?: Json | null
+          model?: string | null
+          period_days?: number
+          proposed_actions?: Json | null
+          raw_input_stats?: Json | null
+          status?: string
+          strategy_verdict?: Json | null
+          systemic_errors?: Json | null
+          tokens_used?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       ai_signal_analysis: {
         Row: {
           confidence_adjustment: number | null
