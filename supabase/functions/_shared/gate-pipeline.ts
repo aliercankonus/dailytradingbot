@@ -227,13 +227,22 @@ export function evaluateProductionGates(
   if (isBtcShort) {
     // Higher quality floor for BTC SHORT (55 vs 35 default)
     if (qualityScore < 55) {
-      logger.info(`🚫 BTC SHORT quality filter: quality=${qualityScore} < 55, blocking`);
-      return fail('BTC_SHORT_LOW_QUALITY');
+      const d = strictBlock('BTC_SHORT_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 BTC SHORT quality filter: quality=${qualityScore} < 55, blocking${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
+      logger.info(`⚠️ BTC SHORT quality soft: quality=${qualityScore} < 55, pos x${d.softMultiplier}`);
     }
     // ADX slope must not be strongly decaying for BTC SHORT
     if (adxSlope < -0.5) {
-      logger.info(`🚫 BTC SHORT ADX slope filter: slope=${adxSlope.toFixed(2)} < -0.5, blocking`);
-      return fail('BTC_SHORT_ADX_DECAY');
+      const d = strictBlock('BTC_SHORT_ADX_DECAY');
+      if (d.hardBlock) {
+        logger.info(`🚫 BTC SHORT ADX slope filter: slope=${adxSlope.toFixed(2)} < -0.5, blocking${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Require minimum momentum strength for BTC SHORT
     if (Math.abs(momentumResult.score) < 8) {
