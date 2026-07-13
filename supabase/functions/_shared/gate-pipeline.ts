@@ -13,6 +13,7 @@ import {
   GATE_CONFLICT_DETECTOR,
 } from "./constants.ts";
 import { calculateQualityScore } from "./scoring.ts";
+import { calculateQualitySubScores, getStrategyFloors, type QualitySubScores } from "./quality-score.ts";
 import {
   evaluateDecayVelocity, evaluateProgressiveProfitLock,
   evaluateMicroProfitLock, calculateFeeAwarePnL,
@@ -39,6 +40,11 @@ export interface GateResult {
   momentumScore: number;
   positionMultiplier: number;
   strategyName: string;
+  // Phase 2: quality sub-scores (entry/trend/context, each 0-100)
+  entryQ?: number;
+  trendQ?: number;
+  contextQ?: number;
+  breachedFloors?: string[];
 }
 
 export interface BacktestPosition {
@@ -193,14 +199,24 @@ export function evaluateProductionGates(
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // GATE 5: Quality Score (Lowered floor — let more trades through)
+  // GATE 5: Quality Score — DECOMPOSED (Phase 2)
+  // Legacy total score kept for VERY_LOW_QUALITY hard floor.
+  // New: entryQ / trendQ / contextQ sub-scores drive interpretable sizing.
   // ═══════════════════════════════════════════════════════════════
   const effectiveTrend = direction === 'LONG' ? 'bullish' : 'bearish';
-  const qualityResult = calculateQualityScore(mfs, effectiveTrend, mfs.symbol);
-  const qualityScore = qualityResult.score;
+  const subScores: QualitySubScores = calculateQualitySubScores(mfs, effectiveTrend, mfs.symbol);
+  const qualityScore = subScores.total;
 
-  // Only hard block at very low quality (< 35)
+  // Hard floor unchanged: aggregate quality below 35 is dangerous.
   if (qualityScore < 35) return fail('VERY_LOW_QUALITY');
+
+  // Sub-score soft sizing (0.42 – 1.10x). Reason is preserved for forensics.
+  positionMultiplier *= subScores.sizingMultiplier;
+  if (subScores.breachedFloors.length > 0) {
+    logger.info(`⚠️ QUALITY SUB-SCORE: ${symbol || mfs.symbol} ${direction} | ${subScores.reason} → sizing x${subScores.sizingMultiplier.toFixed(2)}`);
+  } else if (subScores.isAllStrong) {
+    logger.info(`✨ QUALITY ALL-STRONG: ${symbol || mfs.symbol} ${direction} | ${subScores.reason} → sizing x${subScores.sizingMultiplier.toFixed(2)}`);
+  }
 
   // ═══════════════════════════════════════════════════════════════
   // GATE 5b: BTC SHORT Stricter Filter
@@ -225,15 +241,6 @@ export function evaluateProductionGates(
     }
   }
 
-  // Graduated quality sizing
-  if (qualityScore < 50) {
-    positionMultiplier *= 0.50;
-  } else if (qualityScore < 60) {
-    positionMultiplier *= 0.70;
-  } else if (qualityScore < 70) {
-    positionMultiplier *= 0.85;
-  }
-  // qualityScore >= 70 = full position
 
   // ═══════════════════════════════════════════════════════════════
   // SOFT ADJUSTMENTS (position sizing, never hard blocks)
@@ -447,15 +454,29 @@ export function evaluateProductionGates(
     }
   }
 
+  // Per-strategy sub-score floor pass (Phase 2b): raises floors for strategies
+  // with historically weak sub-score profiles. Soft sizing only, no hard block.
+  const stratFloors = getStrategyFloors(strategyName);
+  const stratSubScores = calculateQualitySubScores(mfs, effectiveTrend, mfs.symbol, { floors: stratFloors });
+  if (stratSubScores.breachedFloors.length > 0 && stratSubScores.breachedFloors.length > subScores.breachedFloors.length) {
+    const extraPenalty = 0.80;
+    positionMultiplier *= extraPenalty;
+    logger.info(`⚠️ STRATEGY FLOOR (${strategyName}): ${stratSubScores.reason} → extra x${extraPenalty}`);
+  }
+
   // Floor: minimum 10% position (never zero unless hard-blocked)
   positionMultiplier = Math.max(positionMultiplier, 0.10);
 
-  logger.info(`✅ GATE PASS: ${symbol || mfs.symbol} ${direction} | strategy=${strategyName} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | K=${stochK.toFixed(1)} | mom=${momentumResult.score} | quality=${qualityScore} | pos=${(positionMultiplier * 100).toFixed(0)}%`);
+  logger.info(`✅ GATE PASS: ${symbol || mfs.symbol} ${direction} | strategy=${strategyName} | ADX=${adx.toFixed(1)} slope=${adxSlope.toFixed(2)} | K=${stochK.toFixed(1)} | mom=${momentumResult.score} | Q=${qualityScore}(e${subScores.entryQ.toFixed(0)}/t${subScores.trendQ.toFixed(0)}/c${subScores.contextQ.toFixed(0)}) | pos=${(positionMultiplier * 100).toFixed(0)}%`);
 
   return {
     passed: true, gate: null, gateFamily: null, direction, qualityScore,
     momentumScore: momentumResult.score,
     positionMultiplier, strategyName,
+    entryQ: subScores.entryQ,
+    trendQ: subScores.trendQ,
+    contextQ: subScores.contextQ,
+    breachedFloors: stratSubScores.breachedFloors,
   };
 }
 
