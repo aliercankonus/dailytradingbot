@@ -23,6 +23,7 @@ import {
 import { createLogger } from "./logging.ts";
 import { classifyGateFamily, type GateFamily } from "./gate-family.ts";
 import { evaluateStochContext, type StochContext } from "./stoch-authority.ts";
+import { strictBlock, GATE_FLAGS } from "./gate-flags.ts";
 
 const logger = createLogger('gate-pipeline');
 
