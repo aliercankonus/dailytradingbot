@@ -710,6 +710,7 @@ const logRejectionWithAI = async (
       user_id: userId,
       symbol,
       rejection_reason: rejectionReason,
+      gate_family: classifyGateFamily(rejectionReason),
       filters_status: enrichedFiltersStatus,
       trend_data: mfsCompactSummary,
       checked_at: new Date().toISOString(),
