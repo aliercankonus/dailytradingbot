@@ -322,18 +322,30 @@ export function evaluateProductionGates(
   if (strategyName === 'TREND_CONTINUATION') {
     // Hard block: quality < 40 (backtest: low quality TC trades are negative expectancy)
     if (qualityScore < 40) {
-      logger.info(`🚫 TREND_CONTINUATION blocked: quality=${qualityScore} < 40`);
-      return fail('TC_LOW_QUALITY');
+      const d = strictBlock('TC_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 TREND_CONTINUATION blocked: quality=${qualityScore} < 40${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Fix 1 (v1): Block LONG in RANGE_COMPRESSION — 30 trades, 30% WR, -13.09 PnL
     if (mfs.regime === 'RANGE_COMPRESSION' && direction === 'LONG') {
-      logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION: regime=${mfs.regime}`);
-      return fail('TC_RANGE_COMPRESSION_LONG_BLOCKED');
+      const d = strictBlock('TC_RANGE_COMPRESSION_LONG_BLOCKED');
+      if (d.hardBlock) {
+        logger.info(`🚫 TREND_CONTINUATION LONG blocked in RANGE_COMPRESSION${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Fix 2 (v1): TREND_EXPANSION SHORT requires quality >= 55
     if (mfs.regime === 'TREND_EXPANSION' && direction === 'SHORT' && qualityScore < 55) {
-      logger.info(`🚫 TREND_CONTINUATION SHORT low quality in TREND_EXPANSION: quality=${qualityScore} < 55`);
-      return fail('TC_EXPANSION_SHORT_LOW_QUALITY');
+      const d = strictBlock('TC_EXPANSION_SHORT_LOW_QUALITY');
+      if (d.hardBlock) {
+        logger.info(`🚫 TREND_CONTINUATION SHORT low quality in TREND_EXPANSION: quality=${qualityScore} < 55${d.shadowSoft ? ' [shadow-soft]' : ''}`);
+        return fail(d.reason);
+      }
+      positionMultiplier *= d.softMultiplier;
     }
     // Fix 3 (v2): SELL side with declining ADX → halve position
     if (direction === 'SHORT' && adxSlope < -0.3) {
@@ -341,7 +353,6 @@ export function evaluateProductionGates(
       logger.info(`⚠️ TC SHORT ADX declining: slope=${adxSlope.toFixed(2)}, pos halved`);
     }
     // Fix 4 (v2): OBSOLETE — replaced by stoch-authority runwayMultiplier (EXTENDED_SHORT tier at K<30).
-    // Hard block removed: soft sizing already penalizes oversold SHORT entries.
 
     // Fix 5 (v2): Require momentum alignment for BUY
     if (direction === 'LONG' && momentumResult.score < 3 && adx < 25) {
