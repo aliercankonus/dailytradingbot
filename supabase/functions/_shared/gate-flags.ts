@@ -28,7 +28,7 @@ export interface GateFlags {
 // Defaults preserve pre-Phase-3A behavior. Flip to 'soft' or 'shadow-soft'
 // only after canonical backtest confirms parity or improvement.
 export const GATE_FLAGS: GateFlags = {
-  strategyBlockMode: 'strict',
+  strategyBlockMode: 'soft',
   softStrategyBlockMultiplier: 0.30,
   softSymbolBlockMultiplier: 0.20,
 } as const;
