@@ -242,6 +242,57 @@ export type Database = {
         }
         Relationships: []
       }
+      coach_action_audit: {
+        Row: {
+          action_index: number | null
+          action_type: string | null
+          column_name: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          new_value: string | null
+          previous_value: string | null
+          rationale: string | null
+          report_id: string | null
+          source: string
+          status: string
+          target: string
+          user_id: string
+        }
+        Insert: {
+          action_index?: number | null
+          action_type?: string | null
+          column_name?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          new_value?: string | null
+          previous_value?: string | null
+          rationale?: string | null
+          report_id?: string | null
+          source?: string
+          status?: string
+          target: string
+          user_id: string
+        }
+        Update: {
+          action_index?: number | null
+          action_type?: string | null
+          column_name?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          new_value?: string | null
+          previous_value?: string | null
+          rationale?: string | null
+          report_id?: string | null
+          source?: string
+          status?: string
+          target?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       function_metrics: {
         Row: {
           created_at: string

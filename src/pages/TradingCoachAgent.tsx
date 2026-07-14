@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { formatDistanceToNow } from "date-fns";
-import { Loader2, RefreshCw, Sparkles, AlertTriangle, TrendingUp, Wrench, Copy, ClipboardList, CheckCircle2, PlayCircle } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles, AlertTriangle, TrendingUp, Wrench, Copy, ClipboardList, CheckCircle2, PlayCircle, History, XCircle } from "lucide-react";
+import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,40 @@ export default function TradingCoachAgent() {
   const [pendingApply, setPendingApply] = useState<{ reportId: string; index: number; action: ProposedAction } | null>(null);
   const [applying, setApplying] = useState(false);
 
+  // Audit log
+  interface AuditEntry {
+    id: string;
+    report_id: string | null;
+    action_index: number | null;
+    action_type: string | null;
+    target: string;
+    column_name: string | null;
+    previous_value: string | null;
+    new_value: string | null;
+    status: string;
+    error_message: string | null;
+    rationale: string | null;
+    source: string;
+    created_at: string;
+  }
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+
+  const loadAudit = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("coach_action_audit" as any)
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (!error && data) setAuditLog(data as unknown as AuditEntry[]);
+  };
+
+  useEffect(() => {
+    loadAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   const applyAction = async () => {
     if (!pendingApply || !user) return;
     const plan = planActionApply(pendingApply.action);
@@ -110,15 +145,30 @@ export default function TradingCoachAgent() {
       return;
     }
     setApplying(true);
+
+    // Snapshot the previous value BEFORE mutating so the audit row is truthful.
+    let previousValue: string | null = null;
     try {
-      // 1. Update the whitelisted column on risk_parameters (RLS scopes to user_id).
+      const { data: prev } = await supabase
+        .from("risk_parameters")
+        .select(plan.column!)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (prev && plan.column! in prev) {
+        const raw = (prev as any)[plan.column!];
+        previousValue = raw === null || raw === undefined ? null : String(raw);
+      }
+    } catch {
+      // best-effort; keep previousValue null
+    }
+
+    try {
       const { error: rpErr } = await supabase
         .from("risk_parameters")
         .update({ [plan.column!]: plan.value as any })
         .eq("user_id", user.id);
       if (rpErr) throw rpErr;
 
-      // 2. Mark this action as applied in the agent_reports row.
       const report = reports.find((r) => r.id === pendingApply.reportId);
       if (report) {
         const nextActions = report.proposed_actions.map((a, i) =>
@@ -134,13 +184,50 @@ export default function TradingCoachAgent() {
         setReports((prev) => prev.map((r) => (r.id === pendingApply.reportId ? { ...r, proposed_actions: nextActions } : r)));
       }
 
+      // Persist audit row (success).
+      await supabase.from("coach_action_audit" as any).insert({
+        user_id: user.id,
+        report_id: pendingApply.reportId,
+        action_index: pendingApply.index,
+        action_type: pendingApply.action.type,
+        target: pendingApply.action.target,
+        column_name: plan.column,
+        previous_value: previousValue,
+        new_value: plan.displayValue,
+        status: "success",
+        rationale: pendingApply.action.rationale,
+        source: "coach_ui",
+      });
+      await loadAudit();
+
       toast({
         title: "Aksiyon uygulandı",
-        description: `${plan.column} = ${plan.displayValue}`,
+        description: `${plan.column}: ${previousValue ?? "—"} → ${plan.displayValue}`,
       });
       setPendingApply(null);
     } catch (e: any) {
-      toast({ title: "Uygulama başarısız", description: e.message ?? String(e), variant: "destructive" });
+      const errMsg = e?.message ?? String(e);
+      // Persist audit row (failure) — do not swallow silently.
+      try {
+        await supabase.from("coach_action_audit" as any).insert({
+          user_id: user.id,
+          report_id: pendingApply.reportId,
+          action_index: pendingApply.index,
+          action_type: pendingApply.action.type,
+          target: pendingApply.action.target,
+          column_name: plan.column,
+          previous_value: previousValue,
+          new_value: plan.displayValue,
+          status: "failed",
+          error_message: errMsg,
+          rationale: pendingApply.action.rationale,
+          source: "coach_ui",
+        });
+        await loadAudit();
+      } catch {
+        // ignore
+      }
+      toast({ title: "Uygulama başarısız", description: errMsg, variant: "destructive" });
     } finally {
       setApplying(false);
     }
@@ -308,6 +395,9 @@ export default function TradingCoachAgent() {
                   <TabsTrigger value="actions">
                     Actions ({active.proposed_actions?.length ?? 0})
                   </TabsTrigger>
+                  <TabsTrigger value="audit">
+                    Audit ({auditLog.filter((a) => a.report_id === active.id).length})
+                  </TabsTrigger>
                   <TabsTrigger value="raw">Raw Input</TabsTrigger>
                 </TabsList>
 
@@ -441,9 +531,94 @@ export default function TradingCoachAgent() {
                   })}
                 </TabsContent>
 
-
+                <TabsContent value="audit" className="space-y-3 mt-4">
+                  <Card>
+                    <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <History className="h-4 w-4" /> Uygulama Geçmişi
+                        </CardTitle>
+                        <CardDescription className="text-xs">
+                          Bu rapordan uygulanan aksiyonlar. Kayıtlar değiştirilemez.
+                        </CardDescription>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={loadAudit} title="Yenile">
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {(() => {
+                        const rows = auditLog.filter((a) => a.report_id === active.id);
+                        if (rows.length === 0) {
+                          return (
+                            <p className="text-sm text-muted-foreground py-8 text-center">
+                              Bu rapor için henüz uygulanan aksiyon yok.
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="divide-y">
+                            {rows.map((r) => (
+                              <div key={r.id} className="p-3 text-sm">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-2">
+                                    {r.status === "success" ? (
+                                      <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" /> Başarılı
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="destructive">
+                                        <XCircle className="h-3 w-3 mr-1" /> Başarısız
+                                      </Badge>
+                                    )}
+                                    <code className="text-xs font-semibold">
+                                      {r.column_name ?? r.target}
+                                    </code>
+                                    {r.action_type && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {r.action_type}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    {format(new Date(r.created_at), "yyyy-MM-dd HH:mm:ss")}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="text-muted-foreground">Önceki:</span>
+                                  <code className="px-1.5 py-0.5 rounded bg-muted">
+                                    {r.previous_value ?? "—"}
+                                  </code>
+                                  <span className="text-muted-foreground">→</span>
+                                  <span className="text-muted-foreground">Yeni:</span>
+                                  <code className="px-1.5 py-0.5 rounded bg-primary/10">
+                                    {r.new_value ?? "—"}
+                                  </code>
+                                  <span className="text-muted-foreground ml-auto">
+                                    kaynak: {r.source}
+                                  </span>
+                                </div>
+                                {r.error_message && (
+                                  <p className="text-xs text-destructive mt-1">
+                                    Hata: {r.error_message}
+                                  </p>
+                                )}
+                                {r.rationale && (
+                                  <p className="text-xs text-muted-foreground mt-1 italic">
+                                    {r.rationale}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
 
                 <TabsContent value="raw" className="mt-4">
+
                   <Card>
                     <CardContent className="pt-6">
                       <pre className="text-xs overflow-x-auto bg-muted/50 p-3 rounded">
