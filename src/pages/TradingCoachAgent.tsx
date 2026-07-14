@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { formatDistanceToNow } from "date-fns";
-import { Loader2, RefreshCw, Sparkles, AlertTriangle, TrendingUp, Wrench, Copy, ClipboardList } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles, AlertTriangle, TrendingUp, Wrench, Copy, ClipboardList, CheckCircle2, PlayCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,18 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { planActionApply, type ProposedAction } from "@/lib/coach-action-apply";
 
 interface AgentReport {
   id: string;
@@ -21,14 +32,7 @@ interface AgentReport {
   kpis: Record<string, any>;
   systemic_errors: Array<{ title: string; evidence: string; impact: string; confidence: string }>;
   strategy_verdict: Array<{ strategy: string; trades: number; verdict: string; reason: string }>;
-  proposed_actions: Array<{
-    type: string;
-    target: string;
-    current: string;
-    proposed: string;
-    rationale: string;
-    expected_impact: string;
-  }>;
+  proposed_actions: ProposedAction[];
   raw_input_stats: Record<string, any>;
   error_message: string | null;
   tokens_used: number | null;
@@ -90,6 +94,55 @@ export default function TradingCoachAgent() {
       toast({ title: "Agent failed", description: e.message ?? String(e), variant: "destructive" });
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Apply-action state
+  const [pendingApply, setPendingApply] = useState<{ reportId: string; index: number; action: ProposedAction } | null>(null);
+  const [applying, setApplying] = useState(false);
+
+  const applyAction = async () => {
+    if (!pendingApply || !user) return;
+    const plan = planActionApply(pendingApply.action);
+    if (plan.applicable !== true) {
+      toast({ title: "Uygulanamaz", description: plan.reason, variant: "destructive" });
+      setPendingApply(null);
+      return;
+    }
+    setApplying(true);
+    try {
+      // 1. Update the whitelisted column on risk_parameters (RLS scopes to user_id).
+      const { error: rpErr } = await supabase
+        .from("risk_parameters")
+        .update({ [plan.column!]: plan.value as any })
+        .eq("user_id", user.id);
+      if (rpErr) throw rpErr;
+
+      // 2. Mark this action as applied in the agent_reports row.
+      const report = reports.find((r) => r.id === pendingApply.reportId);
+      if (report) {
+        const nextActions = report.proposed_actions.map((a, i) =>
+          i === pendingApply.index
+            ? { ...a, applied: true, applied_at: new Date().toISOString(), applied_value: plan.displayValue }
+            : a,
+        );
+        const { error: updErr } = await supabase
+          .from("agent_reports")
+          .update({ proposed_actions: nextActions as any })
+          .eq("id", pendingApply.reportId);
+        if (updErr) throw updErr;
+        setReports((prev) => prev.map((r) => (r.id === pendingApply.reportId ? { ...r, proposed_actions: nextActions } : r)));
+      }
+
+      toast({
+        title: "Aksiyon uygulandı",
+        description: `${plan.column} = ${plan.displayValue}`,
+      });
+      setPendingApply(null);
+    } catch (e: any) {
+      toast({ title: "Uygulama başarısız", description: e.message ?? String(e), variant: "destructive" });
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -314,50 +367,80 @@ export default function TradingCoachAgent() {
                       </Button>
                     </div>
                   )}
-                  {(active.proposed_actions ?? []).map((a, i) => (
-                    <Card key={i}>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Wrench className="h-4 w-4" /> {a.target}
-                          <Badge variant="outline" className="ml-auto">
-                            {a.type}
-                          </Badge>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="p-2 rounded bg-muted/50">
-                            <div className="text-xs text-muted-foreground">Current</div>
-                            <code className="text-xs">{a.current}</code>
+                  {(active.proposed_actions ?? []).map((a, i) => {
+                    const plan = planActionApply(a);
+                    const isApplied = !!a.applied;
+                    return (
+                      <Card key={i} className={isApplied ? "border-emerald-500/50" : ""}>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Wrench className="h-4 w-4" /> {a.target}
+                            {isApplied && (
+                              <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                                <CheckCircle2 className="h-3 w-3 mr-1" /> Uygulandı
+                              </Badge>
+                            )}
+                            <Badge variant="outline" className="ml-auto">
+                              {a.type}
+                            </Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-sm">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-2 rounded bg-muted/50">
+                              <div className="text-xs text-muted-foreground">Current</div>
+                              <code className="text-xs">{a.current}</code>
+                            </div>
+                            <div className="p-2 rounded bg-primary/10">
+                              <div className="text-xs text-muted-foreground">Proposed</div>
+                              <code className="text-xs">{a.proposed}</code>
+                            </div>
                           </div>
-                          <div className="p-2 rounded bg-primary/10">
-                            <div className="text-xs text-muted-foreground">Proposed</div>
-                            <code className="text-xs">{a.proposed}</code>
+                          <p className="text-muted-foreground">
+                            <b>Rationale:</b> {a.rationale}
+                          </p>
+                          <p className="text-muted-foreground">
+                            <b>Expected impact:</b> {a.expected_impact}
+                          </p>
+                          {isApplied && a.applied_at && (
+                            <p className="text-xs text-emerald-500">
+                              {formatDistanceToNow(new Date(a.applied_at), { addSuffix: true })} uygulandı
+                              {a.applied_value ? ` → ${a.applied_value}` : ""}
+                            </p>
+                          )}
+                          <div className="flex justify-end gap-2 pt-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const prompt = `Coach agent şu öneriyi uygula:\n\nTip: ${a.type}\nHedef: ${a.target}\nMevcut: ${a.current}\nÖnerilen: ${a.proposed}\nGerekçe: ${a.rationale}\nBeklenen etki: ${a.expected_impact}\n\nMevcut mimariyi ve gate'leri bozmadan uygula, gerekli edge function'ları deploy et.`;
+                                navigator.clipboard.writeText(prompt);
+                                toast({ title: "Prompt kopyalandı", description: "Lovable chat'e yapıştırıp gönder." });
+                              }}
+                            >
+                              <Copy className="h-3.5 w-3.5 mr-1.5" /> Prompt olarak kopyala
+                            </Button>
+                            {plan.applicable && !isApplied && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => setPendingApply({ reportId: active.id, index: i, action: a })}
+                              >
+                                <PlayCircle className="h-3.5 w-3.5 mr-1.5" /> Uygula
+                              </Button>
+                            )}
+                            {!plan.applicable && !isApplied && (
+                              <Button variant="outline" size="sm" disabled title={plan.reason}>
+                                Otomatik uygulanamaz
+                              </Button>
+                            )}
                           </div>
-                        </div>
-                        <p className="text-muted-foreground">
-                          <b>Rationale:</b> {a.rationale}
-                        </p>
-                        <p className="text-muted-foreground">
-                          <b>Expected impact:</b> {a.expected_impact}
-                        </p>
-                        <div className="flex justify-end pt-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const prompt = `Coach agent şu öneriyi uygula:\n\nTip: ${a.type}\nHedef: ${a.target}\nMevcut: ${a.current}\nÖnerilen: ${a.proposed}\nGerekçe: ${a.rationale}\nBeklenen etki: ${a.expected_impact}\n\nMevcut mimariyi ve gate'leri bozmadan uygula, gerekli edge function'ları deploy et.`;
-                              navigator.clipboard.writeText(prompt);
-                              toast({ title: "Prompt kopyalandı", description: "Lovable chat'e yapıştırıp gönder." });
-                            }}
-                          >
-                            <Copy className="h-3.5 w-3.5 mr-1.5" /> Prompt olarak kopyala
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </TabsContent>
+
 
 
                 <TabsContent value="raw" className="mt-4">
@@ -383,6 +466,51 @@ export default function TradingCoachAgent() {
           )}
         </div>
       </div>
+
+      <AlertDialog open={!!pendingApply} onOpenChange={(o) => !o && !applying && setPendingApply(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Aksiyonu uygula?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                {pendingApply && (() => {
+                  const plan = planActionApply(pendingApply.action);
+                  return (
+                    <>
+                      <div className="p-3 rounded bg-muted/50">
+                        <div className="text-xs text-muted-foreground mb-1">Değiştirilecek alan</div>
+                        <code className="text-sm font-semibold">risk_parameters.{plan.column ?? pendingApply.action.target}</code>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 rounded bg-muted/50">
+                          <div className="text-xs text-muted-foreground">Mevcut (rapor)</div>
+                          <code className="text-xs">{pendingApply.action.current}</code>
+                        </div>
+                        <div className="p-2 rounded bg-primary/10">
+                          <div className="text-xs text-muted-foreground">Yeni değer</div>
+                          <code className="text-xs">{plan.displayValue ?? pendingApply.action.proposed}</code>
+                        </div>
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        <b>Gerekçe:</b> {pendingApply.action.rationale}
+                      </p>
+                      <p className="text-xs text-amber-500">
+                        Bu değişiklik canlı bot'un davranışını hemen etkiler. Sadece rapor yeterince veriye dayanıyorsa uygula.
+                      </p>
+                    </>
+                  );
+                })()}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={applying}>Vazgeç</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); applyAction(); }} disabled={applying}>
+              {applying ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Uygulanıyor…</> : "Evet, uygula"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
