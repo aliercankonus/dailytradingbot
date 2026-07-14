@@ -131,15 +131,14 @@ function parseBoolean(raw: string): boolean | null {
   return null;
 }
 
-export type ApplyPlan =
-  | {
-      applicable: true;
-      column: string;
-      kind: "numeric" | "boolean";
-      value: number | boolean;
-      displayValue: string;
-    }
-  | { applicable: false; reason: string };
+export type ApplyPlan = {
+  applicable: boolean;
+  reason?: string;
+  column?: string;
+  kind?: "numeric" | "boolean";
+  value?: number | boolean;
+  displayValue?: string;
+};
 
 export function planActionApply(action: ProposedAction): ApplyPlan {
   if (!APPLICABLE_TYPES.has(action.type)) {
