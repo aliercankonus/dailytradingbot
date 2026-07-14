@@ -395,6 +395,9 @@ export default function TradingCoachAgent() {
                   <TabsTrigger value="actions">
                     Actions ({active.proposed_actions?.length ?? 0})
                   </TabsTrigger>
+                  <TabsTrigger value="audit">
+                    Audit ({auditLog.filter((a) => a.report_id === active.id).length})
+                  </TabsTrigger>
                   <TabsTrigger value="raw">Raw Input</TabsTrigger>
                 </TabsList>
 
