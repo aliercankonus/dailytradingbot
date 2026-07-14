@@ -531,9 +531,94 @@ export default function TradingCoachAgent() {
                   })}
                 </TabsContent>
 
-
+                <TabsContent value="audit" className="space-y-3 mt-4">
+                  <Card>
+                    <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <History className="h-4 w-4" /> Uygulama Geçmişi
+                        </CardTitle>
+                        <CardDescription className="text-xs">
+                          Bu rapordan uygulanan aksiyonlar. Kayıtlar değiştirilemez.
+                        </CardDescription>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={loadAudit} title="Yenile">
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {(() => {
+                        const rows = auditLog.filter((a) => a.report_id === active.id);
+                        if (rows.length === 0) {
+                          return (
+                            <p className="text-sm text-muted-foreground py-8 text-center">
+                              Bu rapor için henüz uygulanan aksiyon yok.
+                            </p>
+                          );
+                        }
+                        return (
+                          <div className="divide-y">
+                            {rows.map((r) => (
+                              <div key={r.id} className="p-3 text-sm">
+                                <div className="flex items-center justify-between mb-1">
+                                  <div className="flex items-center gap-2">
+                                    {r.status === "success" ? (
+                                      <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                                        <CheckCircle2 className="h-3 w-3 mr-1" /> Başarılı
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="destructive">
+                                        <XCircle className="h-3 w-3 mr-1" /> Başarısız
+                                      </Badge>
+                                    )}
+                                    <code className="text-xs font-semibold">
+                                      {r.column_name ?? r.target}
+                                    </code>
+                                    {r.action_type && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {r.action_type}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    {format(new Date(r.created_at), "yyyy-MM-dd HH:mm:ss")}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="text-muted-foreground">Önceki:</span>
+                                  <code className="px-1.5 py-0.5 rounded bg-muted">
+                                    {r.previous_value ?? "—"}
+                                  </code>
+                                  <span className="text-muted-foreground">→</span>
+                                  <span className="text-muted-foreground">Yeni:</span>
+                                  <code className="px-1.5 py-0.5 rounded bg-primary/10">
+                                    {r.new_value ?? "—"}
+                                  </code>
+                                  <span className="text-muted-foreground ml-auto">
+                                    kaynak: {r.source}
+                                  </span>
+                                </div>
+                                {r.error_message && (
+                                  <p className="text-xs text-destructive mt-1">
+                                    Hata: {r.error_message}
+                                  </p>
+                                )}
+                                {r.rationale && (
+                                  <p className="text-xs text-muted-foreground mt-1 italic">
+                                    {r.rationale}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
 
                 <TabsContent value="raw" className="mt-4">
+
                   <Card>
                     <CardContent className="pt-6">
                       <pre className="text-xs overflow-x-auto bg-muted/50 p-3 rounded">
