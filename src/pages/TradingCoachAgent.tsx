@@ -367,50 +367,80 @@ export default function TradingCoachAgent() {
                       </Button>
                     </div>
                   )}
-                  {(active.proposed_actions ?? []).map((a, i) => (
-                    <Card key={i}>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Wrench className="h-4 w-4" /> {a.target}
-                          <Badge variant="outline" className="ml-auto">
-                            {a.type}
-                          </Badge>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm">
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="p-2 rounded bg-muted/50">
-                            <div className="text-xs text-muted-foreground">Current</div>
-                            <code className="text-xs">{a.current}</code>
+                  {(active.proposed_actions ?? []).map((a, i) => {
+                    const plan = planActionApply(a);
+                    const isApplied = !!a.applied;
+                    return (
+                      <Card key={i} className={isApplied ? "border-emerald-500/50" : ""}>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Wrench className="h-4 w-4" /> {a.target}
+                            {isApplied && (
+                              <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                                <CheckCircle2 className="h-3 w-3 mr-1" /> Uygulandı
+                              </Badge>
+                            )}
+                            <Badge variant="outline" className="ml-auto">
+                              {a.type}
+                            </Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2 text-sm">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-2 rounded bg-muted/50">
+                              <div className="text-xs text-muted-foreground">Current</div>
+                              <code className="text-xs">{a.current}</code>
+                            </div>
+                            <div className="p-2 rounded bg-primary/10">
+                              <div className="text-xs text-muted-foreground">Proposed</div>
+                              <code className="text-xs">{a.proposed}</code>
+                            </div>
                           </div>
-                          <div className="p-2 rounded bg-primary/10">
-                            <div className="text-xs text-muted-foreground">Proposed</div>
-                            <code className="text-xs">{a.proposed}</code>
+                          <p className="text-muted-foreground">
+                            <b>Rationale:</b> {a.rationale}
+                          </p>
+                          <p className="text-muted-foreground">
+                            <b>Expected impact:</b> {a.expected_impact}
+                          </p>
+                          {isApplied && a.applied_at && (
+                            <p className="text-xs text-emerald-500">
+                              {formatDistanceToNow(new Date(a.applied_at), { addSuffix: true })} uygulandı
+                              {a.applied_value ? ` → ${a.applied_value}` : ""}
+                            </p>
+                          )}
+                          <div className="flex justify-end gap-2 pt-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const prompt = `Coach agent şu öneriyi uygula:\n\nTip: ${a.type}\nHedef: ${a.target}\nMevcut: ${a.current}\nÖnerilen: ${a.proposed}\nGerekçe: ${a.rationale}\nBeklenen etki: ${a.expected_impact}\n\nMevcut mimariyi ve gate'leri bozmadan uygula, gerekli edge function'ları deploy et.`;
+                                navigator.clipboard.writeText(prompt);
+                                toast({ title: "Prompt kopyalandı", description: "Lovable chat'e yapıştırıp gönder." });
+                              }}
+                            >
+                              <Copy className="h-3.5 w-3.5 mr-1.5" /> Prompt olarak kopyala
+                            </Button>
+                            {plan.applicable && !isApplied && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => setPendingApply({ reportId: active.id, index: i, action: a })}
+                              >
+                                <PlayCircle className="h-3.5 w-3.5 mr-1.5" /> Uygula
+                              </Button>
+                            )}
+                            {!plan.applicable && !isApplied && (
+                              <Button variant="outline" size="sm" disabled title={plan.reason}>
+                                Otomatik uygulanamaz
+                              </Button>
+                            )}
                           </div>
-                        </div>
-                        <p className="text-muted-foreground">
-                          <b>Rationale:</b> {a.rationale}
-                        </p>
-                        <p className="text-muted-foreground">
-                          <b>Expected impact:</b> {a.expected_impact}
-                        </p>
-                        <div className="flex justify-end pt-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const prompt = `Coach agent şu öneriyi uygula:\n\nTip: ${a.type}\nHedef: ${a.target}\nMevcut: ${a.current}\nÖnerilen: ${a.proposed}\nGerekçe: ${a.rationale}\nBeklenen etki: ${a.expected_impact}\n\nMevcut mimariyi ve gate'leri bozmadan uygula, gerekli edge function'ları deploy et.`;
-                              navigator.clipboard.writeText(prompt);
-                              toast({ title: "Prompt kopyalandı", description: "Lovable chat'e yapıştırıp gönder." });
-                            }}
-                          >
-                            <Copy className="h-3.5 w-3.5 mr-1.5" /> Prompt olarak kopyala
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </TabsContent>
+
 
 
                 <TabsContent value="raw" className="mt-4">
