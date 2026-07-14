@@ -466,6 +466,51 @@ export default function TradingCoachAgent() {
           )}
         </div>
       </div>
+
+      <AlertDialog open={!!pendingApply} onOpenChange={(o) => !o && !applying && setPendingApply(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Aksiyonu uygula?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                {pendingApply && (() => {
+                  const plan = planActionApply(pendingApply.action);
+                  return (
+                    <>
+                      <div className="p-3 rounded bg-muted/50">
+                        <div className="text-xs text-muted-foreground mb-1">Değiştirilecek alan</div>
+                        <code className="text-sm font-semibold">risk_parameters.{plan.column ?? pendingApply.action.target}</code>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 rounded bg-muted/50">
+                          <div className="text-xs text-muted-foreground">Mevcut (rapor)</div>
+                          <code className="text-xs">{pendingApply.action.current}</code>
+                        </div>
+                        <div className="p-2 rounded bg-primary/10">
+                          <div className="text-xs text-muted-foreground">Yeni değer</div>
+                          <code className="text-xs">{plan.displayValue ?? pendingApply.action.proposed}</code>
+                        </div>
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        <b>Gerekçe:</b> {pendingApply.action.rationale}
+                      </p>
+                      <p className="text-xs text-amber-500">
+                        Bu değişiklik canlı bot'un davranışını hemen etkiler. Sadece rapor yeterince veriye dayanıyorsa uygula.
+                      </p>
+                    </>
+                  );
+                })()}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={applying}>Vazgeç</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); applyAction(); }} disabled={applying}>
+              {applying ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Uygulanıyor…</> : "Evet, uygula"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
