@@ -102,6 +102,40 @@ export default function TradingCoachAgent() {
   const [pendingApply, setPendingApply] = useState<{ reportId: string; index: number; action: ProposedAction } | null>(null);
   const [applying, setApplying] = useState(false);
 
+  // Audit log
+  interface AuditEntry {
+    id: string;
+    report_id: string | null;
+    action_index: number | null;
+    action_type: string | null;
+    target: string;
+    column_name: string | null;
+    previous_value: string | null;
+    new_value: string | null;
+    status: string;
+    error_message: string | null;
+    rationale: string | null;
+    source: string;
+    created_at: string;
+  }
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+
+  const loadAudit = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("coach_action_audit" as any)
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (!error && data) setAuditLog(data as unknown as AuditEntry[]);
+  };
+
+  useEffect(() => {
+    loadAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   const applyAction = async () => {
     if (!pendingApply || !user) return;
     const plan = planActionApply(pendingApply.action);
@@ -111,15 +145,30 @@ export default function TradingCoachAgent() {
       return;
     }
     setApplying(true);
+
+    // Snapshot the previous value BEFORE mutating so the audit row is truthful.
+    let previousValue: string | null = null;
     try {
-      // 1. Update the whitelisted column on risk_parameters (RLS scopes to user_id).
+      const { data: prev } = await supabase
+        .from("risk_parameters")
+        .select(plan.column!)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (prev && plan.column! in prev) {
+        const raw = (prev as any)[plan.column!];
+        previousValue = raw === null || raw === undefined ? null : String(raw);
+      }
+    } catch {
+      // best-effort; keep previousValue null
+    }
+
+    try {
       const { error: rpErr } = await supabase
         .from("risk_parameters")
         .update({ [plan.column!]: plan.value as any })
         .eq("user_id", user.id);
       if (rpErr) throw rpErr;
 
-      // 2. Mark this action as applied in the agent_reports row.
       const report = reports.find((r) => r.id === pendingApply.reportId);
       if (report) {
         const nextActions = report.proposed_actions.map((a, i) =>
@@ -135,13 +184,50 @@ export default function TradingCoachAgent() {
         setReports((prev) => prev.map((r) => (r.id === pendingApply.reportId ? { ...r, proposed_actions: nextActions } : r)));
       }
 
+      // Persist audit row (success).
+      await supabase.from("coach_action_audit" as any).insert({
+        user_id: user.id,
+        report_id: pendingApply.reportId,
+        action_index: pendingApply.index,
+        action_type: pendingApply.action.type,
+        target: pendingApply.action.target,
+        column_name: plan.column,
+        previous_value: previousValue,
+        new_value: plan.displayValue,
+        status: "success",
+        rationale: pendingApply.action.rationale,
+        source: "coach_ui",
+      });
+      await loadAudit();
+
       toast({
         title: "Aksiyon uygulandı",
-        description: `${plan.column} = ${plan.displayValue}`,
+        description: `${plan.column}: ${previousValue ?? "—"} → ${plan.displayValue}`,
       });
       setPendingApply(null);
     } catch (e: any) {
-      toast({ title: "Uygulama başarısız", description: e.message ?? String(e), variant: "destructive" });
+      const errMsg = e?.message ?? String(e);
+      // Persist audit row (failure) — do not swallow silently.
+      try {
+        await supabase.from("coach_action_audit" as any).insert({
+          user_id: user.id,
+          report_id: pendingApply.reportId,
+          action_index: pendingApply.index,
+          action_type: pendingApply.action.type,
+          target: pendingApply.action.target,
+          column_name: plan.column,
+          previous_value: previousValue,
+          new_value: plan.displayValue,
+          status: "failed",
+          error_message: errMsg,
+          rationale: pendingApply.action.rationale,
+          source: "coach_ui",
+        });
+        await loadAudit();
+      } catch {
+        // ignore
+      }
+      toast({ title: "Uygulama başarısız", description: errMsg, variant: "destructive" });
     } finally {
       setApplying(false);
     }
