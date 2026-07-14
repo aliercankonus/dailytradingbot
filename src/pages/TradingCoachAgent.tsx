@@ -114,7 +114,7 @@ export default function TradingCoachAgent() {
       // 1. Update the whitelisted column on risk_parameters (RLS scopes to user_id).
       const { error: rpErr } = await supabase
         .from("risk_parameters")
-        .update({ [plan.column]: plan.value as any })
+        .update({ [plan.column!]: plan.value as any })
         .eq("user_id", user.id);
       if (rpErr) throw rpErr;
 
