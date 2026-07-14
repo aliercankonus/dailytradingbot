@@ -293,6 +293,27 @@ export default function TradingCoachAgent() {
                 </TabsContent>
 
                 <TabsContent value="actions" className="space-y-3 mt-4">
+                  {(active.proposed_actions ?? []).length > 0 && (
+                    <div className="flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const all = (active.proposed_actions ?? [])
+                            .map(
+                              (a, i) =>
+                                `${i + 1}. [${a.type}] ${a.target}\n   Current: ${a.current}\n   Proposed: ${a.proposed}\n   Rationale: ${a.rationale}`,
+                            )
+                            .join("\n\n");
+                          const prompt = `Coach raporundaki şu önerileri uygula (dikkatlice, her birini ayrı ayrı değerlendirip mevcut mimariyi bozmadan):\n\n${all}`;
+                          navigator.clipboard.writeText(prompt);
+                          toast({ title: "Tüm aksiyonlar kopyalandı", description: "Lovable chat'e yapıştırıp gönder." });
+                        }}
+                      >
+                        <ClipboardList className="h-4 w-4 mr-2" /> Tümünü prompt olarak kopyala
+                      </Button>
+                    </div>
+                  )}
                   {(active.proposed_actions ?? []).map((a, i) => (
                     <Card key={i}>
                       <CardHeader className="pb-2">
@@ -320,10 +341,24 @@ export default function TradingCoachAgent() {
                         <p className="text-muted-foreground">
                           <b>Expected impact:</b> {a.expected_impact}
                         </p>
+                        <div className="flex justify-end pt-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const prompt = `Coach agent şu öneriyi uygula:\n\nTip: ${a.type}\nHedef: ${a.target}\nMevcut: ${a.current}\nÖnerilen: ${a.proposed}\nGerekçe: ${a.rationale}\nBeklenen etki: ${a.expected_impact}\n\nMevcut mimariyi ve gate'leri bozmadan uygula, gerekli edge function'ları deploy et.`;
+                              navigator.clipboard.writeText(prompt);
+                              toast({ title: "Prompt kopyalandı", description: "Lovable chat'e yapıştırıp gönder." });
+                            }}
+                          >
+                            <Copy className="h-3.5 w-3.5 mr-1.5" /> Prompt olarak kopyala
+                          </Button>
+                        </div>
                       </CardContent>
                     </Card>
                   ))}
                 </TabsContent>
+
 
                 <TabsContent value="raw" className="mt-4">
                   <Card>
