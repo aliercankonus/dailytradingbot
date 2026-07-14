@@ -32,14 +32,7 @@ interface AgentReport {
   kpis: Record<string, any>;
   systemic_errors: Array<{ title: string; evidence: string; impact: string; confidence: string }>;
   strategy_verdict: Array<{ strategy: string; trades: number; verdict: string; reason: string }>;
-  proposed_actions: Array<{
-    type: string;
-    target: string;
-    current: string;
-    proposed: string;
-    rationale: string;
-    expected_impact: string;
-  }>;
+  proposed_actions: ProposedAction[];
   raw_input_stats: Record<string, any>;
   error_message: string | null;
   tokens_used: number | null;
