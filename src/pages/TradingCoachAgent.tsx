@@ -97,6 +97,55 @@ export default function TradingCoachAgent() {
     }
   };
 
+  // Apply-action state
+  const [pendingApply, setPendingApply] = useState<{ reportId: string; index: number; action: ProposedAction } | null>(null);
+  const [applying, setApplying] = useState(false);
+
+  const applyAction = async () => {
+    if (!pendingApply || !user) return;
+    const plan = planActionApply(pendingApply.action);
+    if (!plan.applicable) {
+      toast({ title: "Uygulanamaz", description: plan.reason, variant: "destructive" });
+      setPendingApply(null);
+      return;
+    }
+    setApplying(true);
+    try {
+      // 1. Update the whitelisted column on risk_parameters (RLS scopes to user_id).
+      const { error: rpErr } = await supabase
+        .from("risk_parameters")
+        .update({ [plan.column]: plan.value as any })
+        .eq("user_id", user.id);
+      if (rpErr) throw rpErr;
+
+      // 2. Mark this action as applied in the agent_reports row.
+      const report = reports.find((r) => r.id === pendingApply.reportId);
+      if (report) {
+        const nextActions = report.proposed_actions.map((a, i) =>
+          i === pendingApply.index
+            ? { ...a, applied: true, applied_at: new Date().toISOString(), applied_value: plan.displayValue }
+            : a,
+        );
+        const { error: updErr } = await supabase
+          .from("agent_reports")
+          .update({ proposed_actions: nextActions as any })
+          .eq("id", pendingApply.reportId);
+        if (updErr) throw updErr;
+        setReports((prev) => prev.map((r) => (r.id === pendingApply.reportId ? { ...r, proposed_actions: nextActions } : r)));
+      }
+
+      toast({
+        title: "Aksiyon uygulandı",
+        description: `${plan.column} = ${plan.displayValue}`,
+      });
+      setPendingApply(null);
+    } catch (e: any) {
+      toast({ title: "Uygulama başarısız", description: e.message ?? String(e), variant: "destructive" });
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const active = reports.find((r) => r.id === activeId) ?? null;
 
   return (
