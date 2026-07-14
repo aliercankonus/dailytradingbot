@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { formatDistanceToNow } from "date-fns";
-import { Loader2, RefreshCw, Sparkles, AlertTriangle, TrendingUp, Wrench } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles, AlertTriangle, TrendingUp, Wrench, Copy, ClipboardList } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
