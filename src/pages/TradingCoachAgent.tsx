@@ -104,7 +104,7 @@ export default function TradingCoachAgent() {
   const applyAction = async () => {
     if (!pendingApply || !user) return;
     const plan = planActionApply(pendingApply.action);
-    if (!plan.applicable) {
+    if (plan.applicable !== true) {
       toast({ title: "Uygulanamaz", description: plan.reason, variant: "destructive" });
       setPendingApply(null);
       return;
