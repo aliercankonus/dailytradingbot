@@ -10,7 +10,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MODEL = "google/gemini-2.5-pro";
+// gemini-2.5-pro'yu bıraktık: reasoning token'ları output limitini tüketip boş {} döndürüyordu.
+const MODEL = "google/gemini-2.5-flash";
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
 interface RequestBody {
@@ -242,25 +243,42 @@ Produce the JSON audit report now.`;
     }
 
     const aiJson = await aiResp.json();
-    const content = aiJson?.choices?.[0]?.message?.content ?? "{}";
+    const content = aiJson?.choices?.[0]?.message?.content ?? "";
+    const finishReason = aiJson?.choices?.[0]?.finish_reason ?? null;
     const tokensUsed = aiJson?.usage?.total_tokens ?? null;
 
-    let parsed: any;
+    let parsed: any = null;
+    let parseError: string | null = null;
     try {
-      parsed = JSON.parse(content);
+      parsed = content ? JSON.parse(content) : null;
     } catch (e) {
-      console.error("[coach-agent] Failed to parse model output", e);
+      parseError = `Non-JSON output: ${(e as Error).message}`;
+    }
+
+    // Detect empty payloads (e.g. Gemini reasoning token starvation) or parse failure.
+    const isEmpty =
+      !parsed ||
+      (typeof parsed === "object" &&
+        !parsed.executive_summary &&
+        (!parsed.proposed_actions || parsed.proposed_actions.length === 0) &&
+        (!parsed.systemic_errors || parsed.systemic_errors.length === 0));
+
+    if (parseError || isEmpty) {
+      const reason =
+        parseError ??
+        `Model returned empty content (finish_reason=${finishReason}, content_length=${content.length})`;
+      console.error(`[coach-agent] ${reason}`);
       await supabase
         .from("agent_reports")
         .update({
           status: "failed",
-          error_message: "Model returned non-JSON output",
+          error_message: reason,
           completed_at: new Date().toISOString(),
           raw_input_stats: rawInputStats,
           tokens_used: tokensUsed,
         })
         .eq("id", reportId);
-      return json({ error: "Model returned invalid JSON", report_id: reportId }, 500);
+      return json({ error: reason, report_id: reportId }, 500);
     }
 
     await supabase
