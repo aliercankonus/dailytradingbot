@@ -352,6 +352,7 @@ serve(async (req) => {
     // Uses centralized STRATEGY_PARAMS from _shared/constants.ts
     // ============================================================
     let strategyPerformanceBonus = 0; // Quality score bonus for high performers
+    let strategyPerformanceMultiplier = 1.0; // Sizing penalty for underperforming strategies (soft-block)
     
     // Fetch with close_reason and peak_pnl_percent for fair win rate (aligned with strategy-analyzer)
     const BREAK_EVEN_CLOSE_REASONS = ['break_even', 'break_even_stop'];
@@ -399,9 +400,11 @@ serve(async (req) => {
       const winRate = countedTrades > 0 ? (effectiveWins / countedTrades) * 100 : 0;
       
       if (winRate < STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD) {
-        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}% (${effectiveWins.toFixed(1)}W/${countedTrades}T, ${breakEvenCount}BE, ${partialWinCount} partial)`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD, breakEvenExcluded: breakEvenCount, partialWins: partialWinCount });
-        throw new Error(`Strategy "${signal.strategy_name}" underperforming (${winRate.toFixed(0)}% win rate) - trade cancelled`);
+        // PHASE 3 SOFT-MODE: Do not kill underperforming strategies; apply a 60% sizing penalty
+        // until statistically meaningful sample (MIN_TRADES_FOR_FILTER) is reached.
+        strategyPerformanceMultiplier = 0.4;
+        logger.gate(`⚠️ STRATEGY PERFORMANCE SOFT PENALTY: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}% (${effectiveWins.toFixed(1)}W/${countedTrades}T, ${breakEvenCount}BE, ${partialWinCount} partial) → position size reduced to ${(strategyPerformanceMultiplier * 100).toFixed(0)}%`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming (soft penalty)', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD, breakEvenExcluded: breakEvenCount, partialWins: partialWinCount, positionSizeMultiplier: strategyPerformanceMultiplier });
       }
       
       if (winRate >= STRATEGY_PARAMS.WIN_RATE_HIGH_PERFORMER) {
@@ -1885,6 +1888,13 @@ serve(async (req) => {
     if (vwapBoostMultiplier !== 1.0) {
       quantity *= vwapBoostMultiplier;
       logger.info(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
+    }
+
+    // Apply strategy-performance soft sizing penalty
+    if (strategyPerformanceMultiplier !== 1.0) {
+      const prevQuantity = quantity;
+      quantity *= strategyPerformanceMultiplier;
+      logger.warn(`⚠️ Strategy performance adjustment applied: ${prevQuantity.toFixed(4)} × ${strategyPerformanceMultiplier.toFixed(2)} = ${quantity.toFixed(4)}`);
     }
 
     // ============================================================
