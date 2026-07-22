@@ -400,9 +400,11 @@ serve(async (req) => {
       const winRate = countedTrades > 0 ? (effectiveWins / countedTrades) * 100 : 0;
       
       if (winRate < STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD) {
-        logger.gate(`⛔ STRATEGY PERFORMANCE BLOCK: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}% (${effectiveWins.toFixed(1)}W/${countedTrades}T, ${breakEvenCount}BE, ${partialWinCount} partial)`, false);
-        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD, breakEvenExcluded: breakEvenCount, partialWins: partialWinCount });
-        throw new Error(`Strategy "${signal.strategy_name}" underperforming (${winRate.toFixed(0)}% win rate) - trade cancelled`);
+        // PHASE 3 SOFT-MODE: Do not kill underperforming strategies; apply a 60% sizing penalty
+        // until statistically meaningful sample (MIN_TRADES_FOR_FILTER) is reached.
+        strategyPerformanceMultiplier = 0.4;
+        logger.gate(`⚠️ STRATEGY PERFORMANCE SOFT PENALTY: "${signal.strategy_name}" win rate ${winRate.toFixed(1)}% < ${STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD}% (${effectiveWins.toFixed(1)}W/${countedTrades}T, ${breakEvenCount}BE, ${partialWinCount} partial) → position size reduced to ${(strategyPerformanceMultiplier * 100).toFixed(0)}%`, false);
+        await logExecutionRejection(supabase, user.id, signal.symbol, 'Strategy Underperforming (soft penalty)', signal, null, { strategyWinRate: winRate, threshold: STRATEGY_PARAMS.WIN_RATE_DISABLE_THRESHOLD, breakEvenExcluded: breakEvenCount, partialWins: partialWinCount, positionSizeMultiplier: strategyPerformanceMultiplier });
       }
       
       if (winRate >= STRATEGY_PARAMS.WIN_RATE_HIGH_PERFORMER) {
