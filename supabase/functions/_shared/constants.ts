@@ -2901,7 +2901,7 @@ export const STRATEGY_PARAMS = {
   // Win rate threshold for high performer status (%)
   WIN_RATE_HIGH_PERFORMER: 60,
   // Minimum trades required for strategy filtering
-  MIN_TRADES_FOR_FILTER: 8,
+  MIN_TRADES_FOR_FILTER: 20,
   // Minimum unique symbols for strategy stats validity
   MIN_UNIQUE_SYMBOLS: 3,
   // Minimum unique strategies for symbol stats validity  
