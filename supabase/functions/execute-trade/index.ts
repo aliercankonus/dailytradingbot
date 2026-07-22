@@ -1890,6 +1890,13 @@ serve(async (req) => {
       logger.info(`VWAP adjustment applied: ${vwapBoostMultiplier.toFixed(2)}x -> new quantity: ${quantity.toFixed(4)}`);
     }
 
+    // Apply strategy-performance soft sizing penalty
+    if (strategyPerformanceMultiplier !== 1.0) {
+      const prevQuantity = quantity;
+      quantity *= strategyPerformanceMultiplier;
+      logger.warn(`⚠️ Strategy performance adjustment applied: ${prevQuantity.toFixed(4)} × ${strategyPerformanceMultiplier.toFixed(2)} = ${quantity.toFixed(4)}`);
+    }
+
     // ============================================================
     // PHASE 1 FIX: APPLY VOLUME RELAXATION MULTIPLIER
     // For trend-forming entries with low volume, reduce position size
