@@ -352,6 +352,7 @@ serve(async (req) => {
     // Uses centralized STRATEGY_PARAMS from _shared/constants.ts
     // ============================================================
     let strategyPerformanceBonus = 0; // Quality score bonus for high performers
+    let strategyPerformanceMultiplier = 1.0; // Sizing penalty for underperforming strategies (soft-block)
     
     // Fetch with close_reason and peak_pnl_percent for fair win rate (aligned with strategy-analyzer)
     const BREAK_EVEN_CLOSE_REASONS = ['break_even', 'break_even_stop'];
