@@ -109,9 +109,10 @@ export async function getFutureStateMultiplier(params: {
   const signalDir = direction === 'LONG' ? +1 : -1;
   const gapDir = Math.sign(gapRel);
 
-  // Strength: |gap_rel| capped at 2% → maps to ±0.3 multiplier deltas.
+  // Strength: |gap_rel| capped at 2% → maps to ±0.15 multiplier deltas
+  // (Phase A1 conservative band: [0.85, 1.15]).
   const strength = Math.min(Math.abs(gapRel) / 0.02, 1.0);
-  const delta = 0.3 * strength * (gapDir === signalDir ? +1 : -1);
+  const delta = 0.15 * strength * (gapDir === signalDir ? +1 : -1);
   const rawMult = 1.0 + delta;
   const suggested = Math.max(FUTURE_STATE_MULT_MIN,
                              Math.min(FUTURE_STATE_MULT_MAX, rawMult));
