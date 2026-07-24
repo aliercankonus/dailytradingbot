@@ -20,11 +20,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 // ────────────────────────────────────────────────────────────────────
 // Flags
 // ────────────────────────────────────────────────────────────────────
-export const FUTURE_STATE_SHADOW_MODE = true;   // do NOT apply, only log
+// Phase A1 (live, conservative): apply multiplier to actual sizing, but
+// tightly capped to [0.85, 1.15] until 30-day accuracy report matures.
+export const FUTURE_STATE_SHADOW_MODE = false;
 export const FUTURE_STATE_HORIZON_HOURS = 48;   // best walk-forward stability
 export const FUTURE_STATE_MAX_STALE_MIN = 90;   // fresher than 1.5h
-export const FUTURE_STATE_MULT_MIN = 0.7;
-export const FUTURE_STATE_MULT_MAX = 1.3;
+export const FUTURE_STATE_MULT_MIN = 0.85;
+export const FUTURE_STATE_MULT_MAX = 1.15;
 
 // Confirmed scope from walk-forward validation.
 // (symbol, regime) -> allowed
