@@ -82,3 +82,9 @@ enabled = true
 cron = "5 * * * *"
 
 
+[functions.validate-future-state]
+verify_jwt = false
+
+[functions.validate-future-state.schedule]
+enabled = true
+cron = "15 3 * * 0"

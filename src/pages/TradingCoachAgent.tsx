@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { planActionApply, type ProposedAction } from "@/lib/coach-action-apply";
+import { PredictionAccuracyCard } from "@/components/PredictionAccuracyCard";
 
 interface AgentReport {
   id: string;
@@ -277,7 +278,10 @@ export default function TradingCoachAgent() {
         </div>
       </div>
 
+      <PredictionAccuracyCard />
+
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+
         {/* Reports list */}
         <Card>
           <CardHeader className="pb-3">
