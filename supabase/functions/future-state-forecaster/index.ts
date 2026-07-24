@@ -62,6 +62,10 @@ async function withRetry<T>(
       const msg = e instanceof Error ? e.message : String(e);
       attemptsLog?.push({ label, attempt: i, ok: false, duration_ms: Date.now() - started, error: msg.slice(0, 300) });
       console.error(`[future-state-forecaster] ${label} attempt ${i}/${attempts} failed: ${msg}`);
+      // Don't retry deterministic failures (unique constraint, bad request, auth).
+      if (/duplicate key|unique constraint|HTTP 4\d\d|non-JSON|missing 'predictions'|insufficient OI/i.test(msg)) {
+        break;
+      }
       if (i < attempts) {
         const delay = Math.min(maxMs, baseMs * 2 ** (i - 1)) + Math.floor(Math.random() * 250);
         await new Promise((r) => setTimeout(r, delay));
