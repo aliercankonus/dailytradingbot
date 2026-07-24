@@ -278,7 +278,10 @@ export default function TradingCoachAgent() {
         </div>
       </div>
 
+      <PredictionAccuracyCard />
+
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+
         {/* Reports list */}
         <Card>
           <CardHeader className="pb-3">
