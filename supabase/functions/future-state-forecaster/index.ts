@@ -28,6 +28,13 @@ const CONTEXT_LEN = 192;
 const OI_INTERVAL = "1h";
 const SOURCE_MODEL = "timesfm-2.5-external";
 
+interface FutureStateFeatureRow {
+  id: string;
+  gap_rel: number | null;
+  predicted_value: number | null;
+  created_at: string;
+}
+
 interface BybitOiRow {
   openInterest: string;
   timestamp: string; // ms as string
@@ -190,7 +197,7 @@ serve(async (req) => {
         const gapZ = (predLog - Math.log(currentOi)) / stdLog;
 
         try {
-          const { error: insErr } = await withRetry(
+          const { data: insertedRow, error: insErr } = await withRetry(
             `db-insert:${symbol}:${h}`,
             async () => {
               const res = await supabase.from("future_state_features").insert({
@@ -207,7 +214,7 @@ serve(async (req) => {
                 gap_z: gapZ,
                 source_model: SOURCE_MODEL,
                 meta: { context_len: CONTEXT_LEN, oi_interval: OI_INTERVAL, pred_log: predLog },
-              });
+              }).select("id,gap_rel,predicted_value,created_at").maybeSingle<FutureStateFeatureRow>();
               if (res.error) throw new Error(res.error.message);
               return res;
             },
@@ -215,9 +222,56 @@ serve(async (req) => {
             attemptsLog,
           );
           if (insErr) throw new Error(insErr.message);
-          results.push({ symbol, horizon: h, current: currentOi, predicted: predictedOi, gap_rel: gapRel });
+          results.push({
+            symbol,
+            horizon: h,
+            current: currentOi,
+            predicted: insertedRow?.predicted_value ?? predictedOi,
+            gap_rel: insertedRow?.gap_rel ?? gapRel,
+            inserted: true,
+          });
         } catch (e) {
-          errors.push({ symbol, horizon: h, phase: "db-insert", error: e instanceof Error ? e.message : String(e) });
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/duplicate key|unique constraint/i.test(msg)) {
+            const { data: existing, error: existingErr } = await supabase
+              .from("future_state_features")
+              .select("id,gap_rel,predicted_value,created_at")
+              .eq("user_id", userId)
+              .eq("symbol", symbol)
+              .eq("series", "log_oi")
+              .eq("horizon_hours", h)
+              .eq("anchor_ts", anchor.ts)
+              .maybeSingle<FutureStateFeatureRow>();
+
+            if (existingErr || !existing) {
+              errors.push({
+                symbol,
+                horizon: h,
+                phase: "db-duplicate-lookup",
+                error: existingErr?.message ?? "duplicate row not found",
+              });
+            } else {
+              results.push({
+                symbol,
+                horizon: h,
+                current: currentOi,
+                predicted: existing.predicted_value,
+                gap_rel: existing.gap_rel,
+                inserted: false,
+                duplicate_anchor: true,
+                existing_created_at: existing.created_at,
+              });
+              attemptsLog.push({
+                label: `db-insert:${symbol}:${h}`,
+                attempt: 1,
+                ok: true,
+                idempotent_duplicate: true,
+                existing_id: existing.id,
+              });
+            }
+          } else {
+            errors.push({ symbol, horizon: h, phase: "db-insert", error: msg });
+          }
         }
       }
     } catch (e) {
