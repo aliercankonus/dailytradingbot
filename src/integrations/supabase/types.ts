@@ -329,6 +329,119 @@ export type Database = {
         }
         Relationships: []
       }
+      future_state_features: {
+        Row: {
+          anchor_ts: number
+          created_at: string
+          current_value: number
+          gap_abs: number
+          gap_rel: number
+          gap_z: number | null
+          horizon_hours: number
+          id: string
+          meta: Json | null
+          predicted_value: number
+          regime: string | null
+          series: string
+          source_model: string
+          symbol: string
+          user_id: string
+        }
+        Insert: {
+          anchor_ts: number
+          created_at?: string
+          current_value: number
+          gap_abs: number
+          gap_rel: number
+          gap_z?: number | null
+          horizon_hours: number
+          id?: string
+          meta?: Json | null
+          predicted_value: number
+          regime?: string | null
+          series: string
+          source_model?: string
+          symbol: string
+          user_id: string
+        }
+        Update: {
+          anchor_ts?: number
+          created_at?: string
+          current_value?: number
+          gap_abs?: number
+          gap_rel?: number
+          gap_z?: number | null
+          horizon_hours?: number
+          id?: string
+          meta?: Json | null
+          predicted_value?: number
+          regime?: string | null
+          series?: string
+          source_model?: string
+          symbol?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      future_state_shadow_log: {
+        Row: {
+          applied: boolean
+          created_at: string
+          direction: string
+          feature_id: string | null
+          gap_rel: number
+          horizon_hours: number
+          id: string
+          meta: Json | null
+          reason: string | null
+          regime: string | null
+          strategy_name: string | null
+          suggested_multiplier: number
+          symbol: string
+          user_id: string
+        }
+        Insert: {
+          applied?: boolean
+          created_at?: string
+          direction: string
+          feature_id?: string | null
+          gap_rel: number
+          horizon_hours: number
+          id?: string
+          meta?: Json | null
+          reason?: string | null
+          regime?: string | null
+          strategy_name?: string | null
+          suggested_multiplier: number
+          symbol: string
+          user_id: string
+        }
+        Update: {
+          applied?: boolean
+          created_at?: string
+          direction?: string
+          feature_id?: string | null
+          gap_rel?: number
+          horizon_hours?: number
+          id?: string
+          meta?: Json | null
+          reason?: string | null
+          regime?: string | null
+          strategy_name?: string | null
+          suggested_multiplier?: number
+          symbol?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "future_state_shadow_log_feature_id_fkey"
+            columns: ["feature_id"]
+            isOneToOne: false
+            referencedRelation: "future_state_features"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       kline_cache: {
         Row: {
           candle_count: number

@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
 // RADICAL SIMPLIFICATION: Use simplified gate pipeline for signal decisions
 import { evaluateProductionGates, classifyGateFamily, type GateResult } from "../_shared/gate-pipeline.ts";
+import { getFutureStateMultiplier, FUTURE_STATE_SHADOW_MODE } from "../_shared/future-state-feature.ts";
 import {
   LOW_CONFIDENCE_STANDARD_EXIT,
   ADX_THRESHOLDS, 
@@ -3319,9 +3320,31 @@ serve(async (req) => {
         // Gate PASSED — generate signal directly, bypass all legacy gates
         const gateDirection = simplifiedGateResult.direction!;
         const gateSignalType: 'long' | 'short' = gateDirection === 'LONG' ? 'long' : 'short';
-        const gatePositionMultiplier = simplifiedGateResult.positionMultiplier;
+        let gatePositionMultiplier = simplifiedGateResult.positionMultiplier;
         const gateQuality = simplifiedGateResult.qualityScore;
         const gateStrategy = simplifiedGateResult.strategyName;
+
+        // ═══════════════════════════════════════════════════════════════
+        // FUTURE-STATE FEATURE — TimesFM OI Gap (walk-forward validated)
+        // Scope: ETHUSDT × RANGE × h=48. Shadow-only for 30 days.
+        // ═══════════════════════════════════════════════════════════════
+        try {
+          const fs = await getFutureStateMultiplier({
+            supabaseUrl,
+            supabaseServiceKey,
+            userId,
+            symbol,
+            direction: gateDirection,
+            regime: mfs.regime || 'UNKNOWN',
+            strategyName: gateStrategy,
+            logger: logger.forSymbol(symbol),
+          });
+          if (fs.applied && !FUTURE_STATE_SHADOW_MODE) {
+            gatePositionMultiplier *= fs.multiplier;
+          }
+        } catch (e) {
+          logger.forSymbol(symbol).warn(`future-state feature error: ${(e as Error).message}`);
+        }
         
         // Get market data for signal
         const marketDataForSignal = marketDataMap.get(symbol);
