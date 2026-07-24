@@ -33,6 +33,44 @@ interface BybitOiRow {
   timestamp: string; // ms as string
 }
 
+// Retry any async op with exponential backoff + jitter. Records each attempt.
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  opts: { attempts?: number; baseMs?: number; maxMs?: number; timeoutMs?: number } = {},
+  attemptsLog?: Array<Record<string, unknown>>,
+): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const baseMs = opts.baseMs ?? 800;
+  const maxMs = opts.maxMs ?? 8000;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    const started = Date.now();
+    try {
+      const result = await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs),
+        ),
+      ]);
+      attemptsLog?.push({ label, attempt: i, ok: true, duration_ms: Date.now() - started });
+      return result;
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      attemptsLog?.push({ label, attempt: i, ok: false, duration_ms: Date.now() - started, error: msg.slice(0, 300) });
+      console.error(`[future-state-forecaster] ${label} attempt ${i}/${attempts} failed: ${msg}`);
+      if (i < attempts) {
+        const delay = Math.min(maxMs, baseMs * 2 ** (i - 1)) + Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 async function fetchBybitOi(symbol: string, limit = 200): Promise<{ ts: number; oi: number }[]> {
   const url = `https://api.bybit.com/v5/market/open-interest?category=linear&symbol=${symbol}&intervalTime=1h&limit=${limit}`;
   const r = await fetch(url);
