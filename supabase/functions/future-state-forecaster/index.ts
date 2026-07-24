@@ -33,6 +33,48 @@ interface BybitOiRow {
   timestamp: string; // ms as string
 }
 
+// Retry any async op with exponential backoff + jitter. Records each attempt.
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  opts: { attempts?: number; baseMs?: number; maxMs?: number; timeoutMs?: number } = {},
+  attemptsLog?: Array<Record<string, unknown>>,
+): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  const baseMs = opts.baseMs ?? 800;
+  const maxMs = opts.maxMs ?? 8000;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    const started = Date.now();
+    try {
+      const result = await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`timeout after ${timeoutMs}ms`)), timeoutMs),
+        ),
+      ]);
+      attemptsLog?.push({ label, attempt: i, ok: true, duration_ms: Date.now() - started });
+      return result;
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      attemptsLog?.push({ label, attempt: i, ok: false, duration_ms: Date.now() - started, error: msg.slice(0, 300) });
+      console.error(`[future-state-forecaster] ${label} attempt ${i}/${attempts} failed: ${msg}`);
+      // Don't retry deterministic failures (unique constraint, bad request, auth).
+      if (/duplicate key|unique constraint|HTTP 4\d\d|non-JSON|missing 'predictions'|insufficient OI/i.test(msg)) {
+        break;
+      }
+      if (i < attempts) {
+        const delay = Math.min(maxMs, baseMs * 2 ** (i - 1)) + Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 async function fetchBybitOi(symbol: string, limit = 200): Promise<{ ts: number; oi: number }[]> {
   const url = `https://api.bybit.com/v5/market/open-interest?category=linear&symbol=${symbol}&intervalTime=1h&limit=${limit}`;
   const r = await fetch(url);
@@ -105,10 +147,16 @@ serve(async (req) => {
 
   const results: Array<Record<string, unknown>> = [];
   const errors: Array<Record<string, unknown>> = [];
+  const attemptsLog: Array<Record<string, unknown>> = [];
 
   for (const symbol of SYMBOLS) {
     try {
-      const rows = await fetchBybitOi(symbol, CONTEXT_LEN + 8);
+      const rows = await withRetry(
+        `bybit-oi:${symbol}`,
+        () => fetchBybitOi(symbol, CONTEXT_LEN + 8),
+        { attempts: 3, baseMs: 500, maxMs: 4000, timeoutMs: 15_000 },
+        attemptsLog,
+      );
       if (rows.length < CONTEXT_LEN) throw new Error(`insufficient OI rows: ${rows.length}`);
       const window = rows.slice(-CONTEXT_LEN);
       const context = window.map((r) => Math.log(r.oi));
@@ -121,7 +169,14 @@ serve(async (req) => {
       const variance = tail.reduce((s, v) => s + (v - mean) ** 2, 0) / tail.length;
       const stdLog = Math.sqrt(variance) || 1e-9;
 
-      const predictions = await callTimesFm({ endpoint, token, symbol, context, horizons: HORIZONS });
+      // TimesFM: cold-start on Modal can take 15-30s, so allow a longer timeout
+      // and more attempts (first request warms the container for subsequent ones).
+      const predictions = await withRetry(
+        `timesfm:${symbol}`,
+        () => callTimesFm({ endpoint, token, symbol, context, horizons: HORIZONS }),
+        { attempts: 4, baseMs: 1500, maxMs: 12_000, timeoutMs: 90_000 },
+        attemptsLog,
+      );
 
       for (const h of HORIZONS) {
         const predLog = Number(predictions[String(h)]);
@@ -134,42 +189,70 @@ serve(async (req) => {
         const gapRel = gapAbs / currentOi;
         const gapZ = (predLog - Math.log(currentOi)) / stdLog;
 
-        const { error: insErr } = await supabase.from("future_state_features").insert({
-          user_id: userId,
-          symbol,
-          series: "log_oi",
-          horizon_hours: h,
-          regime: null, // regime tagging happens at consume-time via MFS
-          anchor_ts: anchor.ts,
-          current_value: currentOi,
-          predicted_value: predictedOi,
-          gap_abs: gapAbs,
-          gap_rel: gapRel,
-          gap_z: gapZ,
-          source_model: SOURCE_MODEL,
-          meta: { context_len: CONTEXT_LEN, oi_interval: OI_INTERVAL, pred_log: predLog },
-        });
-        if (insErr) errors.push({ symbol, horizon: h, error: insErr.message });
-        else results.push({ symbol, horizon: h, current: currentOi, predicted: predictedOi, gap_rel: gapRel });
+        try {
+          const { error: insErr } = await withRetry(
+            `db-insert:${symbol}:${h}`,
+            async () => {
+              const res = await supabase.from("future_state_features").insert({
+                user_id: userId,
+                symbol,
+                series: "log_oi",
+                horizon_hours: h,
+                regime: null,
+                anchor_ts: anchor.ts,
+                current_value: currentOi,
+                predicted_value: predictedOi,
+                gap_abs: gapAbs,
+                gap_rel: gapRel,
+                gap_z: gapZ,
+                source_model: SOURCE_MODEL,
+                meta: { context_len: CONTEXT_LEN, oi_interval: OI_INTERVAL, pred_log: predLog },
+              });
+              if (res.error) throw new Error(res.error.message);
+              return res;
+            },
+            { attempts: 2, baseMs: 400, maxMs: 2000, timeoutMs: 10_000 },
+            attemptsLog,
+          );
+          if (insErr) throw new Error(insErr.message);
+          results.push({ symbol, horizon: h, current: currentOi, predicted: predictedOi, gap_rel: gapRel });
+        } catch (e) {
+          errors.push({ symbol, horizon: h, phase: "db-insert", error: e instanceof Error ? e.message : String(e) });
+        }
       }
     } catch (e) {
-      errors.push({ symbol, error: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push({ symbol, error: msg });
+      console.error(`[future-state-forecaster] ${symbol} pipeline failed after retries: ${msg}`);
     }
   }
 
   const elapsed = Math.round(performance.now() - t0);
+  const success = errors.length === 0;
+  const errorMessage = success ? null : errors.map((e) => `${e.symbol ?? "?"}: ${e.error ?? "?"}`).join(" | ").slice(0, 500);
+
   await supabase.from("function_metrics").insert({
     function_name: "future-state-forecaster",
     duration_ms: elapsed,
-    success: errors.length === 0,
+    success,
     symbols_count: SYMBOLS.length,
-    phase_timings: { horizons: HORIZONS, inserted: results.length, errors: errors.length },
-  }).then(() => {}, () => {});
+    error_message: errorMessage,
+    phase_timings: {
+      horizons: HORIZONS,
+      inserted: results.length,
+      errors: errors.length,
+      error_details: errors.slice(0, 10),
+      attempts: attemptsLog.slice(-20),
+      retried: attemptsLog.filter((a) => Number(a.attempt) > 1).length,
+    },
+  }).then(() => {}, (e) => console.error("[future-state-forecaster] metrics insert failed:", e));
 
-  console.log(`[future-state-forecaster] done in ${elapsed}ms — inserted=${results.length} errors=${errors.length}`);
+  console.log(
+    `[future-state-forecaster] done in ${elapsed}ms — inserted=${results.length} errors=${errors.length} retried=${attemptsLog.filter((a) => Number(a.attempt) > 1).length}`,
+  );
 
   return new Response(
-    JSON.stringify({ success: errors.length === 0, elapsed_ms: elapsed, results, errors }),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    JSON.stringify({ success, elapsed_ms: elapsed, results, errors, attempts: attemptsLog }),
+    { status: success ? 200 : 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 });
