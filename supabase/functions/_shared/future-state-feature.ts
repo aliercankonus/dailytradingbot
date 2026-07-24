@@ -20,11 +20,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 // ────────────────────────────────────────────────────────────────────
 // Flags
 // ────────────────────────────────────────────────────────────────────
-export const FUTURE_STATE_SHADOW_MODE = true;   // do NOT apply, only log
+// Phase A1 (live, conservative): apply multiplier to actual sizing, but
+// tightly capped to [0.85, 1.15] until 30-day accuracy report matures.
+export const FUTURE_STATE_SHADOW_MODE = false;
 export const FUTURE_STATE_HORIZON_HOURS = 48;   // best walk-forward stability
 export const FUTURE_STATE_MAX_STALE_MIN = 90;   // fresher than 1.5h
-export const FUTURE_STATE_MULT_MIN = 0.7;
-export const FUTURE_STATE_MULT_MAX = 1.3;
+export const FUTURE_STATE_MULT_MIN = 0.85;
+export const FUTURE_STATE_MULT_MAX = 1.15;
 
 // Confirmed scope from walk-forward validation.
 // (symbol, regime) -> allowed
@@ -107,9 +109,10 @@ export async function getFutureStateMultiplier(params: {
   const signalDir = direction === 'LONG' ? +1 : -1;
   const gapDir = Math.sign(gapRel);
 
-  // Strength: |gap_rel| capped at 2% → maps to ±0.3 multiplier deltas.
+  // Strength: |gap_rel| capped at 2% → maps to ±0.15 multiplier deltas
+  // (Phase A1 conservative band: [0.85, 1.15]).
   const strength = Math.min(Math.abs(gapRel) / 0.02, 1.0);
-  const delta = 0.3 * strength * (gapDir === signalDir ? +1 : -1);
+  const delta = 0.15 * strength * (gapDir === signalDir ? +1 : -1);
   const rawMult = 1.0 + delta;
   const suggested = Math.max(FUTURE_STATE_MULT_MIN,
                              Math.min(FUTURE_STATE_MULT_MAX, rawMult));
