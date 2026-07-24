@@ -21,8 +21,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Scope locked to walk-forward-validated anomaly.
-const SYMBOLS = ["ETHUSDT"];
+// ETHUSDT: validated live scope (RANGE, h=48).
+// BTCUSDT: Phase B data-collection only — NOT yet in VALIDATED_SCOPES,
+//   so sizing stays no-op until we have an accuracy report.
+const SYMBOLS = ["ETHUSDT", "BTCUSDT"];
 const HORIZONS = [48];
 const CONTEXT_LEN = 192;
 const OI_INTERVAL = "1h";
