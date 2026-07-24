@@ -74,3 +74,11 @@ cron = "0 * * * *"
 [functions.backtest-runner]
 verify_jwt = false
 
+[functions.future-state-forecaster]
+verify_jwt = false
+
+[functions.future-state-forecaster.schedule]
+enabled = true
+cron = "5 * * * *"
+
+
