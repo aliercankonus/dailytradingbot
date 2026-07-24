@@ -329,6 +329,60 @@ export type Database = {
         }
         Relationships: []
       }
+      future_state_accuracy: {
+        Row: {
+          computed_at: string
+          dir_hit_rate: number | null
+          horizon_hours: number
+          id: string
+          mape: number | null
+          mean_predicted_gap_rel: number | null
+          mean_realized_gap_rel: number | null
+          meta: Json
+          n_samples: number
+          period_end: string
+          period_start: string
+          rank_ic: number | null
+          series: string
+          symbol: string
+          user_id: string
+        }
+        Insert: {
+          computed_at?: string
+          dir_hit_rate?: number | null
+          horizon_hours: number
+          id?: string
+          mape?: number | null
+          mean_predicted_gap_rel?: number | null
+          mean_realized_gap_rel?: number | null
+          meta?: Json
+          n_samples: number
+          period_end: string
+          period_start: string
+          rank_ic?: number | null
+          series: string
+          symbol: string
+          user_id: string
+        }
+        Update: {
+          computed_at?: string
+          dir_hit_rate?: number | null
+          horizon_hours?: number
+          id?: string
+          mape?: number | null
+          mean_predicted_gap_rel?: number | null
+          mean_realized_gap_rel?: number | null
+          meta?: Json
+          n_samples?: number
+          period_end?: string
+          period_start?: string
+          rank_ic?: number | null
+          series?: string
+          symbol?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       future_state_features: {
         Row: {
           anchor_ts: number
