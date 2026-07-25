@@ -88,3 +88,11 @@ verify_jwt = false
 [functions.validate-future-state.schedule]
 enabled = true
 cron = "15 3 * * 0"
+
+[functions.cron-watchdog]
+verify_jwt = false
+
+[functions.cron-watchdog.schedule]
+enabled = true
+cron = "*/15 * * * *"
+
