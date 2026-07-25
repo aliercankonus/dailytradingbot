@@ -1,7 +1,8 @@
 // Cron Watchdog — monitors scheduled edge functions and alerts when a job
-// misses its expected interval. Optionally auto-triggers the stale function.
+// misses its expected interval. Retries auto-triggers with backoff and
+// escalates severity after repeated consecutive misses.
 //
-// Alert cooldown is enforced by inspecting this function's own rows in
+// Consecutive-miss tracking uses this function's own rows in
 // `function_metrics` (error_message contains `stale:<fn>`), so no extra
 // table is needed.
 
@@ -13,9 +14,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Each entry describes a scheduled function we expect to run.
-// `intervalMin` = declared cron cadence. `staleMin` = when we consider it broken.
-// `autoTrigger` = call the function ourselves as a self-heal attempt.
 interface CronJob {
   name: string;
   intervalMin: number;
@@ -33,7 +31,43 @@ const CRON_JOBS: CronJob[] = [
   { name: "capture-portfolio-snapshot", intervalMin: 60 * 24, staleMin: 60 * 27, autoTrigger: false },
 ];
 
-const COOLDOWN_MIN = 120; // don't re-alert the same function within this window
+const COOLDOWN_MIN = 120;              // standard cooldown per function
+const ESCALATION_COOLDOWN_MIN = 30;    // shorter cooldown once escalated
+const ESCALATION_THRESHOLD = 3;        // consecutive misses that escalate severity
+const AUTO_TRIGGER_ATTEMPTS = 3;       // retries per cycle with backoff
+const MISS_LOOKBACK_MIN = 24 * 60;     // window for counting consecutive misses
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function triggerWithRetry(
+  url: string,
+  anonKey: string,
+): Promise<{ ok: boolean; attempts: number; error?: string; status?: number }> {
+  let lastError: string | undefined;
+  let lastStatus: number | undefined;
+  for (let attempt = 1; attempt <= AUTO_TRIGGER_ATTEMPTS; attempt++) {
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${anonKey}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({ source: "cron-watchdog", attempt }),
+      });
+      lastStatus = r.status;
+      if (r.ok) return { ok: true, attempts: attempt, status: r.status };
+      lastError = `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message.slice(0, 200) : String(e);
+    }
+    if (attempt < AUTO_TRIGGER_ATTEMPTS) {
+      await sleep(500 * Math.pow(2, attempt - 1)); // 500ms, 1s
+    }
+  }
+  return { ok: false, attempts: AUTO_TRIGGER_ATTEMPTS, error: lastError, status: lastStatus };
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -47,20 +81,25 @@ serve(async (req) => {
   const results: Array<Record<string, unknown>> = [];
   const alerted: string[] = [];
 
-  // Last watchdog alerts (for cooldown) — self-inspect our own metrics rows.
+  // Pull recent watchdog rows for both cooldown and consecutive-miss counting.
   const { data: recentWatchdog } = await supabase
     .from("function_metrics")
     .select("error_message, created_at")
     .eq("function_name", "cron-watchdog")
-    .gte("created_at", new Date(Date.now() - COOLDOWN_MIN * 60_000).toISOString())
-    .not("error_message", "is", null);
+    .gte("created_at", new Date(Date.now() - MISS_LOOKBACK_MIN * 60_000).toISOString())
+    .not("error_message", "is", null)
+    .order("created_at", { ascending: false });
 
-  const onCooldown = new Set<string>();
+  // Build per-function history of miss events (most recent first).
+  const missHistory = new Map<string, Date[]>();
   for (const row of recentWatchdog ?? []) {
+    const createdAt = new Date(row.created_at as string);
     const m = /stale:([^\s|]+)/g;
     let match: RegExpExecArray | null;
     while ((match = m.exec(String(row.error_message ?? ""))) !== null) {
-      onCooldown.add(match[1]);
+      const arr = missHistory.get(match[1]) ?? [];
+      arr.push(createdAt);
+      missHistory.set(match[1], arr);
     }
   }
 
@@ -77,11 +116,18 @@ serve(async (req) => {
     const minsSince = lastRunAt == null ? null : Math.round((Date.now() - lastRunAt) / 60_000);
     const isStale = minsSince == null || minsSince > job.staleMin;
 
+    // Prior consecutive misses (this cycle will add +1 if stale).
+    const priorMisses = missHistory.get(job.name) ?? [];
+    const consecutiveMisses = (isStale ? 1 : 0) + priorMisses.length;
+    const escalated = consecutiveMisses >= ESCALATION_THRESHOLD;
+
     const entry: Record<string, unknown> = {
       function: job.name,
       minutes_since_last_run: minsSince,
       threshold: job.staleMin,
       stale: isStale,
+      consecutive_misses: consecutiveMisses,
+      escalated,
     };
 
     if (!isStale) {
@@ -89,38 +135,34 @@ serve(async (req) => {
       continue;
     }
 
-    if (onCooldown.has(job.name)) {
+    // Cooldown: shorter window once escalated so severity alerts land faster.
+    const cooldownMin = escalated ? ESCALATION_COOLDOWN_MIN : COOLDOWN_MIN;
+    const lastAlertAt = priorMisses[0];
+    const onCooldown =
+      lastAlertAt != null && (Date.now() - lastAlertAt.getTime()) < cooldownMin * 60_000;
+    if (onCooldown) {
       entry.skipped = "cooldown";
+      entry.cooldown_min = cooldownMin;
       results.push(entry);
       continue;
     }
 
-    // Self-heal attempt.
+    // Self-heal with retry+backoff.
     let autoOk: boolean | undefined;
     let autoErr: string | undefined;
+    let autoAttempts: number | undefined;
     if (job.autoTrigger) {
-      try {
-        const r = await fetch(`${supabaseUrl}/functions/v1/${job.name}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${anonKey}`,
-            apikey: anonKey,
-          },
-          body: JSON.stringify({ source: "cron-watchdog" }),
-        });
-        autoOk = r.ok;
-        if (!r.ok) autoErr = `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`;
-      } catch (e) {
-        autoOk = false;
-        autoErr = e instanceof Error ? e.message.slice(0, 200) : String(e);
-      }
+      const res = await triggerWithRetry(`${supabaseUrl}/functions/v1/${job.name}`, anonKey);
+      autoOk = res.ok;
+      autoAttempts = res.attempts;
+      autoErr = res.error;
       entry.auto_triggered = true;
       entry.auto_trigger_ok = autoOk;
+      entry.auto_trigger_attempts = autoAttempts;
       if (autoErr) entry.auto_trigger_error = autoErr;
     }
 
-    // Send alert email via send-notification.
+    // Send alert email via send-notification, with escalation severity.
     try {
       const r = await fetch(`${supabaseUrl}/functions/v1/send-notification`, {
         method: "POST",
@@ -138,6 +180,10 @@ serve(async (req) => {
           autoTriggered: job.autoTrigger,
           autoTriggerOk: autoOk,
           autoTriggerError: autoErr,
+          autoTriggerAttempts: autoAttempts,
+          consecutiveMisses: consecutiveMisses,
+          escalated,
+          severity: escalated ? "critical" : "warning",
         }),
       });
       entry.alert_sent = r.ok;
