@@ -548,20 +548,35 @@ const handler = async (req: Request): Promise<Response> => {
         const fnName = payload.cronFunction || payload.function || 'unknown';
         const mins = payload.minutesSinceLastRun;
         const minsStr = mins == null ? 'never' : `${mins} min ago`;
-        subject = `⏰ CRON WATCHDOG: ${fnName} missed schedule (${minsStr})`;
+        const p = payload as any;
+        const escalated = p.escalated === true;
+        const consecutive = p.consecutiveMisses ?? 1;
+        const attempts = p.autoTriggerAttempts;
+        const severityBadge = escalated ? '🚨 CRITICAL' : '⏰ WARNING';
+        const bannerColor = escalated ? '#dc2626' : '#f59e0b';
+        const bannerBg = escalated ? '#fee2e2' : '#fef3c7';
+        subject = `${severityBadge}: ${fnName} missed schedule (${minsStr})${escalated ? ` — ${consecutive} consecutive misses` : ''}`;
         const autoLine = payload.autoTriggered
           ? (payload.autoTriggerOk
-              ? `<p style="color:#059669;"><strong>Auto-recovery:</strong> Manually re-triggered successfully. Next scheduled run should resume.</p>`
-              : `<p style="color:#dc2626;"><strong>Auto-recovery failed:</strong> ${payload.autoTriggerError || 'unknown error'}</p>`)
+              ? `<p style="color:#059669;"><strong>Auto-recovery:</strong> Re-triggered successfully after ${attempts ?? 1} attempt(s). Next scheduled run should resume.</p>`
+              : `<p style="color:#dc2626;"><strong>Auto-recovery failed after ${attempts ?? 1} attempts:</strong> ${payload.autoTriggerError || 'unknown error'}</p>`)
           : `<p><strong>Auto-recovery:</strong> not attempted for this job.</p>`;
+        const escalationBlock = escalated
+          ? `<div style="background:#fee2e2;padding:15px;border-radius:8px;border-left:4px solid #dc2626;margin:20px 0;">
+              <h3 style="margin-top:0;color:#991b1b;">🚨 Escalation: ${consecutive} consecutive misses</h3>
+              <p style="margin:0;">Auto-recovery has repeatedly failed for this function. Manual intervention is required.</p>
+            </div>`
+          : '';
         message = `
-          <h2>⏰ Scheduled Function Not Running</h2>
+          <h2>${severityBadge} — Scheduled Function Not Running</h2>
           <p style="font-size:1.1em;">The scheduled edge function <strong>${fnName}</strong> has not executed within its expected interval.</p>
-          <div style="background:#fef3c7;padding:15px;border-radius:8px;border-left:4px solid #f59e0b;margin:20px 0;">
+          ${escalationBlock}
+          <div style="background:${bannerBg};padding:15px;border-radius:8px;border-left:4px solid ${bannerColor};margin:20px 0;">
             <p><strong>Function:</strong> ${fnName}</p>
             <p><strong>Last successful run:</strong> ${minsStr}</p>
             <p><strong>Expected interval:</strong> every ${payload.expectedIntervalMinutes ?? '?'} min</p>
             <p><strong>Stale threshold:</strong> ${payload.thresholdMinutes ?? '?'} min</p>
+            <p><strong>Consecutive misses:</strong> ${consecutive}</p>
           </div>
           ${autoLine}
           <div style="background:#f3f4f6;padding:15px;border-radius:8px;margin-top:15px;">
@@ -572,9 +587,9 @@ const handler = async (req: Request): Promise<Response> => {
               <li>If the function depends on an external endpoint (e.g. TimesFM), confirm that endpoint is reachable.</li>
             </ol>
           </div>
-          <p style="margin-top:20px;color:#6b7280;font-size:0.9em;">Sent by cron-watchdog. Cooldown prevents repeat alerts for the same function within 2 hours.</p>
+          <p style="margin-top:20px;color:#6b7280;font-size:0.9em;">Sent by cron-watchdog. Cooldown: ${escalated ? '30 min (escalated)' : '2 hours (standard)'}.</p>
         `;
-        smsMessage = `⏰ CRON: ${fnName} missed schedule (${minsStr}). Threshold ${payload.thresholdMinutes ?? '?'}m.`;
+        smsMessage = `${severityBadge}: ${fnName} missed (${minsStr}). Consecutive=${consecutive}. Auto=${payload.autoTriggerOk ? 'ok' : 'FAIL'} (${attempts ?? 1}x).`;
         break;
       }
 
