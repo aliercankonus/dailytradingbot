@@ -544,6 +544,42 @@ const handler = async (req: Request): Promise<Response> => {
         smsMessage = `✅ PARTIAL TP${(payload as any).tpLevel ?? ''}: ${payload.symbol} closed ${(payload as any).closedQuantity} @ $${((payload as any).exitPrice ?? 0).toFixed(4)}. Profit: $${((payload as any).partialPnl ?? 0).toFixed(2)}`;
         break;
 
+      case 'cron_missed': {
+        const fnName = payload.cronFunction || payload.function || 'unknown';
+        const mins = payload.minutesSinceLastRun;
+        const minsStr = mins == null ? 'never' : `${mins} min ago`;
+        subject = `⏰ CRON WATCHDOG: ${fnName} missed schedule (${minsStr})`;
+        const autoLine = payload.autoTriggered
+          ? (payload.autoTriggerOk
+              ? `<p style="color:#059669;"><strong>Auto-recovery:</strong> Manually re-triggered successfully. Next scheduled run should resume.</p>`
+              : `<p style="color:#dc2626;"><strong>Auto-recovery failed:</strong> ${payload.autoTriggerError || 'unknown error'}</p>`)
+          : `<p><strong>Auto-recovery:</strong> not attempted for this job.</p>`;
+        message = `
+          <h2>⏰ Scheduled Function Not Running</h2>
+          <p style="font-size:1.1em;">The scheduled edge function <strong>${fnName}</strong> has not executed within its expected interval.</p>
+          <div style="background:#fef3c7;padding:15px;border-radius:8px;border-left:4px solid #f59e0b;margin:20px 0;">
+            <p><strong>Function:</strong> ${fnName}</p>
+            <p><strong>Last successful run:</strong> ${minsStr}</p>
+            <p><strong>Expected interval:</strong> every ${payload.expectedIntervalMinutes ?? '?'} min</p>
+            <p><strong>Stale threshold:</strong> ${payload.thresholdMinutes ?? '?'} min</p>
+          </div>
+          ${autoLine}
+          <div style="background:#f3f4f6;padding:15px;border-radius:8px;margin-top:15px;">
+            <h3 style="margin-top:0;">What to check</h3>
+            <ol>
+              <li>Open the backend and inspect the function's recent logs for boot errors.</li>
+              <li>Verify the cron schedule in <code>supabase/config.toml</code> is still enabled.</li>
+              <li>If the function depends on an external endpoint (e.g. TimesFM), confirm that endpoint is reachable.</li>
+            </ol>
+          </div>
+          <p style="margin-top:20px;color:#6b7280;font-size:0.9em;">Sent by cron-watchdog. Cooldown prevents repeat alerts for the same function within 2 hours.</p>
+        `;
+        smsMessage = `⏰ CRON: ${fnName} missed schedule (${minsStr}). Threshold ${payload.thresholdMinutes ?? '?'}m.`;
+        break;
+      }
+
+
+
       default:
         console.warn(`Unknown notification type: ${payload.type} — skipping email`);
         return new Response(
