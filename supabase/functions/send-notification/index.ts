@@ -18,7 +18,15 @@ const corsHeaders = {
 };
 
 interface NotificationRequest {
-  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error' | 'circuit_breaker_triggered' | 'break_even_activated' | 'partial_loss_taken' | 'partial_take_profit' | 'micro_exhaustion_exit';
+  type: 'trade_executed' | 'stop_loss_hit' | 'take_profit_hit' | 'strategy_rotation' | 'trailing_stop_activated' | 'bot_health_critical' | 'bot_health_warning' | 'websocket_failure' | 'binance_api_error' | 'circuit_breaker_triggered' | 'break_even_activated' | 'partial_loss_taken' | 'partial_take_profit' | 'micro_exhaustion_exit' | 'cron_missed';
+  // Cron watchdog fields
+  cronFunction?: string;
+  minutesSinceLastRun?: number | null;
+  thresholdMinutes?: number;
+  expectedIntervalMinutes?: number;
+  autoTriggered?: boolean;
+  autoTriggerOk?: boolean;
+  autoTriggerError?: string;
   // Micro exhaustion fields
   exhaustionScore?: number;
   exhaustionSignals?: string[];
