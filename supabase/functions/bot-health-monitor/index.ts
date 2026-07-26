@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+import { recordFunctionMetric } from "../_shared/function-metrics.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -308,6 +309,11 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   console.log('[HEALTH_MONITOR] Starting 3-tier health check...');
+
+  // Watchdog liveness: always write a function_metrics row for this run
+  const __metricStart = Date.now();
+  let __metricOk = true;
+  let __metricError: string | null = null;
 
   try {
     // Get all users with trading enabled
@@ -721,6 +727,8 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : 'Unknown error';
     console.error('[HEALTH_MONITOR] Health check failed:', error);
     return new Response(
       JSON.stringify({ 
@@ -733,5 +741,12 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: 'bot-health-monitor',
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });

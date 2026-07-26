@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { recordFunctionMetric } from '../_shared/function-metrics.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -36,6 +37,11 @@ Deno.serve(async (req) => {
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
+
+  // Watchdog liveness: always write a function_metrics row for this run
+  const __metricStart = Date.now();
+  let __metricOk = true;
+  let __metricError: string | null = null;
 
   try {
     const supabase = createClient(
@@ -243,6 +249,8 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error in cleanup-expired-signals:', error);
     return new Response(
       JSON.stringify({ 
@@ -254,5 +262,12 @@ Deno.serve(async (req) => {
         status: 500
       }
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: 'cleanup-expired-signals',
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });

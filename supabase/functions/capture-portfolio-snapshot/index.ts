@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
+import { recordFunctionMetric } from "../_shared/function-metrics.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -37,6 +38,11 @@ serve(async (req) => {
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
+
+  // Watchdog liveness: always write a function_metrics row for this run
+  const __metricStart = Date.now();
+  let __metricOk = true;
+  let __metricError: string | null = null;
 
   try {
     console.log("Starting portfolio snapshot capture...");
@@ -247,6 +253,8 @@ serve(async (req) => {
       }
     );
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : "Unknown error";
     console.error("Error capturing portfolio snapshots:", error);
     return new Response(
       JSON.stringify({
@@ -258,5 +266,12 @@ serve(async (req) => {
         status: 500,
       }
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: "capture-portfolio-snapshot",
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });

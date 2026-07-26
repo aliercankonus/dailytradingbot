@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.81.1";
+import { recordFunctionMetric } from "../_shared/function-metrics.ts";
 import { ADX_THRESHOLDS, STOCHRSI_THRESHOLDS, RSI_THRESHOLDS, SLIPPAGE_PARAMS, RISK_PARAMS, EMERGENCY_EXIT_PARAMS, EXIT_THRESHOLDS, EXIT_PRIORITY, PARTIAL_TP_PARAMS, R_MULTIPLE_TRAILING_PARAMS, PROGRESSIVE_PROFIT_LOCK_PARAMS, MICRO_PROFIT_LOCK_PARAMS, VOLUME_RELAXATION_EXIT_PARAMS, R_MULTIPLE_LOCK_PARAMS, DYNAMIC_TRAILING_PARAMS, CONTINUATION_MODE_PARAMS, DECAY_VELOCITY_TIERS, MEAN_REVERSION_CONFIG, TRADING_FEE_PARAMS, DYNAMIC_REVERSAL_EXIT, COMPRESSION_TRADE_EXIT, STRATEGY_EXIT_ADJUSTMENTS, HTF_ALIGNMENT_EXIT, TRAILING_STOP_INLINE, MICRO_TREND_EXIT, MOMENTUM_CONTINUATION_EXIT, LOW_CONFIDENCE_STANDARD_EXIT, HEDGE_EXIT_PARAMS, REVERSAL_RISK_EXIT_SCORES, TIME_STOP_MULTIPLIER as TIME_STOP_MULT, PARTIAL_TP_LADDER, TRAILING_MIN_PROFIT_FLOOR, PEAK_ADAPTIVE_TRAILING, VOLATILITY_ADAPTIVE_TRAILING, detectStrategyType, isMomentumStrategy, isMeanReversionStrategy } from "../_shared/constants.ts";
 import {
   evaluateDecayVelocity,
@@ -172,6 +173,11 @@ serve(async (req) => {
     );
   }
   
+  // Watchdog liveness: always write a function_metrics row for this run
+  const __metricStart = Date.now();
+  let __metricOk = true;
+  let __metricError: string | null = null;
+
   try {
     logger.boot();
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -3913,6 +3919,8 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : "Unknown error";
     logError(logger, error, "monitoring positions");
     return new Response(
       JSON.stringify({
@@ -3924,5 +3932,12 @@ serve(async (req) => {
         status: 500,
       },
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: "monitor-positions",
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });
