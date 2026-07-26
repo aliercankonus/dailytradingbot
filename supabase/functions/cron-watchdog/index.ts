@@ -122,6 +122,9 @@ serve(async (req) => {
 
   const results: Array<Record<string, unknown>> = [];
   const alerted: string[] = [];
+  // Every job considered stale this cycle (alerted or not) — drives consecutive counting.
+  const staleMarked: string[] = [];
+
 
   // Pull recent watchdog rows for both cooldown and consecutive-miss counting.
   const { data: recentWatchdog } = await supabase
