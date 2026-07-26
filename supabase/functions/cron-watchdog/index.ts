@@ -275,20 +275,23 @@ serve(async (req) => {
   }
 
   const elapsed = Math.round(performance.now() - t0);
-  const errorMessage = alerted.length
-    ? alerted.map((n) => `stale:${n}`).join(" | ")
+  const errorMessage = staleMarked.length
+    ? staleMarked.map((n) => `stale:${n}`).join(" | ")
     : null;
 
   await supabase.from("function_metrics").insert({
     function_name: "cron-watchdog",
     duration_ms: elapsed,
-    success: alerted.length === 0,
+    success: staleMarked.length === 0,
     symbols_count: CRON_JOBS.length,
     error_message: errorMessage,
-    phase_timings: { results, alerted },
+    phase_timings: { results, alerted, stale_marked: staleMarked },
   }).then(() => {}, (e) => console.error("[cron-watchdog] metrics insert failed:", e));
 
-  console.log(`[cron-watchdog] done in ${elapsed}ms checked=${CRON_JOBS.length} alerted=${alerted.length}`);
+  console.log(
+    `[cron-watchdog] done in ${elapsed}ms checked=${CRON_JOBS.length} stale=${staleMarked.length} alerted=${alerted.length}`,
+  );
+
 
   return new Response(
     JSON.stringify({ success: true, elapsed_ms: elapsed, checked: CRON_JOBS.length, alerted, results }),
