@@ -344,7 +344,7 @@ serve(async (req) => {
                 symbol,
                 series: "log_oi",
                 horizon_hours: h,
-                regime: null,
+                regime,
                 anchor_ts: anchor.ts,
                 current_value: currentOi,
                 predicted_value: predictedOi,
@@ -352,7 +352,13 @@ serve(async (req) => {
                 gap_rel: gapRel,
                 gap_z: gapZ,
                 source_model: SOURCE_MODEL,
-                meta: { context_len: CONTEXT_LEN, oi_interval: OI_INTERVAL, pred_log: predLog },
+                meta: {
+                  context_len: CONTEXT_LEN,
+                  oi_interval: OI_INTERVAL,
+                  pred_log: predLog,
+                  regime_inputs: regimeInputs,
+                },
+
               }).select("id,gap_rel,predicted_value,created_at").maybeSingle<FutureStateFeatureRow>();
               if (res.error) throw new Error(res.error.message);
               return res;
