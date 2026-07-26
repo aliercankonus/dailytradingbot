@@ -727,6 +727,8 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : 'Unknown error';
     console.error('[HEALTH_MONITOR] Health check failed:', error);
     return new Response(
       JSON.stringify({ 
@@ -739,5 +741,12 @@ serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: 'bot-health-monitor',
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });
