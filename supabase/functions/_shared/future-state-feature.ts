@@ -20,18 +20,23 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 // ────────────────────────────────────────────────────────────────────
 // Flags
 // ────────────────────────────────────────────────────────────────────
-// Phase A1 (live, conservative): apply multiplier to actual sizing, but
-// tightly capped to [0.85, 1.15] until 30-day accuracy report matures.
+// Phase A2 (live, conservative) — re-scoped after the 180-day OI backfill:
+//   - ETH h=24 is the most stable horizon (Rank IC ≈ +0.40 forecast quality,
+//     +0.11…+0.15 alpha; positive in every 45-day fold).
+//   - ETH h=48 collapsed in the most recent fold → dropped.
+//   - Best regime cut: TREND_EXPANSION (IC ≈ +0.32). RANGE_COMPRESSION was
+//     negative (IC ≈ -0.07) → removed from live sizing.
+//   - BTC is near-noise (+0.03…+0.05) → shadow only, never sizes positions.
 export const FUTURE_STATE_SHADOW_MODE = false;
-export const FUTURE_STATE_HORIZON_HOURS = 48;   // best walk-forward stability
+export const FUTURE_STATE_HORIZON_HOURS = 24;   // best walk-forward stability
 export const FUTURE_STATE_MAX_STALE_MIN = 90;   // fresher than 1.5h
 export const FUTURE_STATE_MULT_MIN = 0.85;
 export const FUTURE_STATE_MULT_MAX = 1.15;
 
-// Confirmed scope from walk-forward validation.
-// (symbol, regime) -> allowed
+// Confirmed scope from walk-forward validation + 180d backfill.
+// (symbol, regime) -> allowed for LIVE sizing
 const VALIDATED_SCOPES: Record<string, Record<string, boolean>> = {
-  ETHUSDT: { RANGE_COMPRESSION: true, RANGE: true },
+  ETHUSDT: { TREND_EXPANSION: true },
 };
 
 export interface FutureStateSignal {
