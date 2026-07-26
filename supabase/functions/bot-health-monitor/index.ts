@@ -309,6 +309,11 @@ serve(async (req) => {
 
   console.log('[HEALTH_MONITOR] Starting 3-tier health check...');
 
+  // Watchdog liveness: always write a function_metrics row for this run
+  const __metricStart = Date.now();
+  let __metricOk = true;
+  let __metricError: string | null = null;
+
   try {
     // Get all users with trading enabled
     const { data: riskParams, error: riskError } = await supabase
