@@ -39,6 +39,11 @@ serve(async (req) => {
     );
   }
 
+  // Watchdog liveness: always write a function_metrics row for this run
+  const __metricStart = Date.now();
+  let __metricOk = true;
+  let __metricError: string | null = null;
+
   try {
     console.log("Starting portfolio snapshot capture...");
 
