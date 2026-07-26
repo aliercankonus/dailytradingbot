@@ -3919,6 +3919,8 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : "Unknown error";
     logError(logger, error, "monitoring positions");
     return new Response(
       JSON.stringify({
@@ -3930,5 +3932,12 @@ serve(async (req) => {
         status: 500,
       },
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: "monitor-positions",
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });
