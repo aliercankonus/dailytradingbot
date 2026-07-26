@@ -97,7 +97,123 @@ async function fetchBybitOi(symbol: string, limit = 200): Promise<{ ts: number; 
     .sort((a, b) => a.ts - b.ts);
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Regime classification (self-contained, FourStateRegime compatible)
+//
+// `market_regime_history` is only written when the trading bot loop runs,
+// so the forecaster must NOT depend on it. We derive the regime directly
+// from Bybit 1h klines: ADX(14) + ADX slope + Bollinger bandwidth ratio.
+// ────────────────────────────────────────────────────────────────────
+type ForecastRegime =
+  | "TREND_EXPANSION"
+  | "TREND_EXHAUSTION"
+  | "RANGE_COMPRESSION"
+  | "BREAKOUT_SETUP"
+  | "UNKNOWN";
+
+interface Candle { high: number; low: number; close: number }
+
+async function fetchBybitKlines(symbol: string, limit = 200): Promise<Candle[]> {
+  const url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=60&limit=${limit}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Bybit kline ${symbol} HTTP ${r.status}`);
+  const j = await r.json();
+  const list: string[][] = j?.result?.list ?? [];
+  // Bybit returns newest-first: [start, open, high, low, close, volume, turnover]
+  return list
+    .map((k) => ({ high: Number(k[2]), low: Number(k[3]), close: Number(k[4]) }))
+    .filter((c) => Number.isFinite(c.high) && Number.isFinite(c.low) && Number.isFinite(c.close))
+    .reverse();
+}
+
+/** Wilder ADX series (returns one value per bar after warmup). */
+function adxSeries(candles: Candle[], period = 14): number[] {
+  if (candles.length < period * 2 + 2) return [];
+  const tr: number[] = [], plusDM: number[] = [], minusDM: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i], p = candles[i - 1];
+    tr.push(Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close)));
+    const up = c.high - p.high;
+    const down = p.low - c.low;
+    plusDM.push(up > down && up > 0 ? up : 0);
+    minusDM.push(down > up && down > 0 ? down : 0);
+  }
+  const wilder = (arr: number[]): number[] => {
+    const out: number[] = [];
+    let sum = arr.slice(0, period).reduce((s, v) => s + v, 0);
+    out.push(sum);
+    for (let i = period; i < arr.length; i++) {
+      sum = sum - sum / period + arr[i];
+      out.push(sum);
+    }
+    return out;
+  };
+  const trS = wilder(tr), pS = wilder(plusDM), mS = wilder(minusDM);
+  const dx: number[] = [];
+  for (let i = 0; i < trS.length; i++) {
+    if (trS[i] === 0) { dx.push(0); continue; }
+    const pdi = (pS[i] / trS[i]) * 100;
+    const mdi = (mS[i] / trS[i]) * 100;
+    const denom = pdi + mdi;
+    dx.push(denom === 0 ? 0 : (Math.abs(pdi - mdi) / denom) * 100);
+  }
+  if (dx.length < period) return [];
+  const adx: number[] = [];
+  let prev = dx.slice(0, period).reduce((s, v) => s + v, 0) / period;
+  adx.push(prev);
+  for (let i = period; i < dx.length; i++) {
+    prev = (prev * (period - 1) + dx[i]) / period;
+    adx.push(prev);
+  }
+  return adx;
+}
+
+function bbWidthSeries(candles: Candle[], period = 20): number[] {
+  const out: number[] = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    const win = candles.slice(i - period + 1, i + 1).map((c) => c.close);
+    const mean = win.reduce((s, v) => s + v, 0) / period;
+    const sd = Math.sqrt(win.reduce((s, v) => s + (v - mean) ** 2, 0) / period);
+    out.push(mean > 0 ? (4 * sd) / mean : 0);
+  }
+  return out;
+}
+
+function classifyRegime(candles: Candle[]): { regime: ForecastRegime; inputs: Record<string, unknown> } {
+  const adx = adxSeries(candles);
+  const bbw = bbWidthSeries(candles);
+  if (adx.length < 6 || bbw.length < 20) {
+    return { regime: "UNKNOWN", inputs: { reason: "insufficient_bars", bars: candles.length } };
+  }
+  const adxNow = adx[adx.length - 1];
+  const adxSlope = adxNow - adx[adx.length - 5]; // 4-bar slope
+  const bbwNow = bbw[bbw.length - 1];
+  const recent = bbw.slice(-96);
+  const sorted = [...recent].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] || 1e-9;
+  const bbwRatio = bbwNow / median;
+
+  let regime: ForecastRegime;
+  if (adxNow < 18 && bbwRatio <= 0.85) regime = "RANGE_COMPRESSION";
+  else if (adxNow < 22 && adxSlope > 0.5 && bbwRatio > 0.85) regime = "BREAKOUT_SETUP";
+  else if (adxNow >= 22 && adxSlope >= 0) regime = "TREND_EXPANSION";
+  else if (adxNow >= 22 && adxSlope < 0) regime = "TREND_EXHAUSTION";
+  else regime = "RANGE_COMPRESSION";
+
+  return {
+    regime,
+    inputs: {
+      adx: Number(adxNow.toFixed(2)),
+      adx_slope_4b: Number(adxSlope.toFixed(3)),
+      bb_width: Number(bbwNow.toFixed(6)),
+      bb_width_ratio: Number(bbwRatio.toFixed(3)),
+      bars: candles.length,
+    },
+  };
+}
+
 async function callTimesFm(params: {
+
   endpoint: string;
   token: string | null;
   symbol: string;
