@@ -14,21 +14,36 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+interface EvidenceSource {
+  table: string;
+  tsColumn: string;
+  // How fresh the side-effect row must be to count as "function is alive".
+  freshMin: number;
+}
+
 interface CronJob {
   name: string;
   intervalMin: number;
   staleMin: number;
   autoTrigger: boolean;
+  // Secondary liveness proof used when the function writes no function_metrics row.
+  evidence?: EvidenceSource;
 }
 
 const CRON_JOBS: CronJob[] = [
-  { name: "kline-collector",          intervalMin: 1,  staleMin: 8,   autoTrigger: true },
-  { name: "monitor-positions",        intervalMin: 1,  staleMin: 8,   autoTrigger: true },
-  { name: "auto-trader",              intervalMin: 5,  staleMin: 20,  autoTrigger: true },
-  { name: "bot-health-monitor",       intervalMin: 5,  staleMin: 20,  autoTrigger: true },
+  { name: "kline-collector",          intervalMin: 1,  staleMin: 8,   autoTrigger: true,
+    evidence: { table: "kline_cache", tsColumn: "updated_at", freshMin: 8 } },
+  { name: "monitor-positions",        intervalMin: 1,  staleMin: 8,   autoTrigger: true,
+    evidence: { table: "positions", tsColumn: "updated_at", freshMin: 15 } },
+  { name: "auto-trader",              intervalMin: 5,  staleMin: 20,  autoTrigger: true,
+    evidence: { table: "bot_heartbeat", tsColumn: "recorded_at", freshMin: 20 } },
+  { name: "bot-health-monitor",       intervalMin: 5,  staleMin: 20,  autoTrigger: true,
+    evidence: { table: "bot_health_state", tsColumn: "last_seen_at", freshMin: 20 } },
   { name: "cleanup-expired-signals",  intervalMin: 60, staleMin: 120, autoTrigger: true },
-  { name: "future-state-forecaster",  intervalMin: 60, staleMin: 90,  autoTrigger: true },
-  { name: "capture-portfolio-snapshot", intervalMin: 60 * 24, staleMin: 60 * 27, autoTrigger: false },
+  { name: "future-state-forecaster",  intervalMin: 60, staleMin: 90,  autoTrigger: true,
+    evidence: { table: "future_state_features", tsColumn: "created_at", freshMin: 90 } },
+  { name: "capture-portfolio-snapshot", intervalMin: 60 * 24, staleMin: 60 * 27, autoTrigger: false,
+    evidence: { table: "portfolio_performance_history", tsColumn: "created_at", freshMin: 60 * 27 } },
 ];
 
 const COOLDOWN_MIN = 120;              // standard cooldown per function
@@ -36,8 +51,35 @@ const ESCALATION_COOLDOWN_MIN = 30;    // shorter cooldown once escalated
 const ESCALATION_THRESHOLD = 3;        // consecutive misses that escalate severity
 const AUTO_TRIGGER_ATTEMPTS = 3;       // retries per cycle with backoff
 const MISS_LOOKBACK_MIN = 24 * 60;     // window for counting consecutive misses
+// A single stale cycle is never enough to alert: functions that don't write
+// function_metrics would otherwise produce false alarms every cycle.
+const MIN_MISSES_BEFORE_ALERT = 2;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Checks a side-effect table for a recent write. Returns null when the table
+// or column is unavailable (never treat that as proof of failure).
+async function checkEvidence(
+  supabase: ReturnType<typeof createClient>,
+  ev: EvidenceSource,
+): Promise<{ fresh: boolean; ageMin: number | null } | null> {
+  try {
+    const { data, error } = await supabase
+      .from(ev.table)
+      .select(ev.tsColumn)
+      .order(ev.tsColumn, { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return null;
+    const ts = data?.[ev.tsColumn as keyof typeof data];
+    if (!ts) return { fresh: false, ageMin: null };
+    const ageMin = Math.round((Date.now() - new Date(ts as string).getTime()) / 60_000);
+    return { fresh: ageMin <= ev.freshMin, ageMin };
+  } catch {
+    return null;
+  }
+}
+
 
 async function triggerWithRetry(
   url: string,
