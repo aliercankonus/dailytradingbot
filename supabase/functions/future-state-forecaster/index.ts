@@ -294,6 +294,27 @@ serve(async (req) => {
       const variance = tail.reduce((s, v) => s + (v - mean) ** 2, 0) / tail.length;
       const stdLog = Math.sqrt(variance) || 1e-9;
 
+      // Regime tag (forensics + regime-conditioned accuracy analysis).
+      // Never null: falls back to "UNKNOWN" if klines are unavailable.
+      let regime: ForecastRegime = "UNKNOWN";
+      let regimeInputs: Record<string, unknown> = { reason: "not_computed" };
+      try {
+        const candles = await withRetry(
+          `bybit-kline:${symbol}`,
+          () => fetchBybitKlines(symbol, 200),
+          { attempts: 2, baseMs: 500, maxMs: 2000, timeoutMs: 12_000 },
+          attemptsLog,
+        );
+        const classified = classifyRegime(candles);
+        regime = classified.regime;
+        regimeInputs = classified.inputs;
+      } catch (e) {
+        regimeInputs = { reason: "kline_fetch_failed", error: (e as Error).message.slice(0, 200) };
+      }
+      console.log(`[future-state-forecaster] ${symbol} regime=${regime} ${JSON.stringify(regimeInputs)}`);
+
+
+
       // TimesFM: cold-start on Modal can take 15-30s, so allow a longer timeout
       // and more attempts (first request warms the container for subsequent ones).
       const predictions = await withRetry(
