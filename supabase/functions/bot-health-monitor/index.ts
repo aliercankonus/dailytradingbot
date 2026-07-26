@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.84.0";
+import { recordFunctionMetric } from "../_shared/function-metrics.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
