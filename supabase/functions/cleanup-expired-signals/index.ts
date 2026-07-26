@@ -249,6 +249,8 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
+    __metricOk = false;
+    __metricError = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error in cleanup-expired-signals:', error);
     return new Response(
       JSON.stringify({ 
@@ -260,5 +262,12 @@ Deno.serve(async (req) => {
         status: 500
       }
     );
+  } finally {
+    await recordFunctionMetric({
+      functionName: 'cleanup-expired-signals',
+      startedAt: __metricStart,
+      success: __metricOk,
+      errorMessage: __metricError,
+    });
   }
 });
