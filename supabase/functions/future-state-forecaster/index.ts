@@ -396,6 +396,15 @@ serve(async (req) => {
                 error: existingErr?.message ?? "duplicate row not found",
               });
             } else {
+              // Backfill regime if the existing row predates regime tagging.
+              if (regime !== "UNKNOWN") {
+                await supabase
+                  .from("future_state_features")
+                  .update({ regime })
+                  .eq("id", existing.id)
+                  .is("regime", null);
+              }
+
               results.push({
                 symbol,
                 horizon: h,
